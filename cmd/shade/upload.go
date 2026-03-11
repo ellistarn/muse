@@ -11,7 +11,7 @@ import (
 func newUploadCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upload",
-		Short: "Sync local conversations to S3",
+		Short: "Sync memories to storage",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
 				return err

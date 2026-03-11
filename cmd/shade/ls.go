@@ -12,7 +12,7 @@ import (
 func newLsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ls",
-		Short: "List backed-up sessions",
+		Short: "List uploaded memories",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
 				return err

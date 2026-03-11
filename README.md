@@ -63,4 +63,5 @@ Sessions run on opencode backed by S3-compatible storage
 skills/{name}/SKILL.md      # distilled skills (https://agentskills.io)
 memories/{source}/{id}.json # human session history
 sessions/{id}.jsonl          # shade session history (append-per-turn)
+dream/state.json            # tracks which memories have been dreamed about
 ```

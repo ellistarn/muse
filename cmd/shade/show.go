@@ -14,7 +14,7 @@ func newShowCmd() *cobra.Command {
 	var src string
 	cmd := &cobra.Command{
 		Use:   "show <session-id>",
-		Short: "Display a backed-up session",
+		Short: "Display a memory",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {

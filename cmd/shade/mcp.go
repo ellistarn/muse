@@ -8,9 +8,9 @@ import (
 	"github.com/ellistarn/shade/internal/shade"
 )
 
-func newMCPCmd() *cobra.Command {
+func newListenCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "mcp",
+		Use:   "listen",
 		Short: "Start the shade MCP server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {

@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
-const defaultModel = "us.anthropic.claude-opus-4-6-v1:0"
+const defaultModel = "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
 // Client wraps Bedrock's Converse API with extended thinking enabled.
 type Client struct {
