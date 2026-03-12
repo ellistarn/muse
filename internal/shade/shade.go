@@ -2,6 +2,7 @@ package shade
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,7 @@ type UploadResult struct {
 	Total    int
 	Uploaded int
 	Skipped  int
+	Bytes    int
 	Warnings []string
 }
 
@@ -74,7 +76,8 @@ func (s *Shade) Ask(ctx context.Context, question string) (string, error) {
 		return "", fmt.Errorf("failed to load skills: %w", err)
 	}
 	system := fmt.Sprintf(systemPrompt, formatSkills(skills))
-	return s.bedrock.Converse(ctx, system, question)
+	answer, _, err := s.bedrock.Converse(ctx, system, question)
+	return answer, err
 }
 
 func formatSkills(skills []skill.Skill) string {
@@ -90,34 +93,48 @@ func formatSkills(skills []skill.Skill) string {
 
 // Upload scans local sources, diffs against S3, and uploads changed sessions.
 func (s *Shade) Upload(ctx context.Context) (*UploadResult, error) {
+	fmt.Println("Listing remote sessions...")
 	existing, err := s.storage.ListSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list remote sessions: %w", err)
 	}
+	fmt.Printf("Found %d remote sessions\n", len(existing))
 	remote := map[string]storage.SessionEntry{}
 	for _, e := range existing {
 		remote[e.Key] = e
 	}
 
+	fmt.Println("Scanning local sessions...")
 	var local []source.Session
 	var warnings []string
 	if sessions, err := source.OpenCodeSessions(); err != nil {
 		warnings = append(warnings, fmt.Sprintf("failed to read OpenCode sessions: %v", err))
 	} else {
+		fmt.Printf("Found %d OpenCode sessions\n", len(sessions))
 		local = append(local, sessions...)
 	}
 	if sessions, err := source.ClaudeCodeSessions(); err != nil {
 		warnings = append(warnings, fmt.Sprintf("failed to read Claude Code sessions: %v", err))
 	} else {
+		fmt.Printf("Found %d Claude Code sessions\n", len(sessions))
 		local = append(local, sessions...)
 	}
 
+	fmt.Printf("Diffing %d local sessions against remote...\n", len(local))
 	var uploaded, skipped int
+	var totalBytes int
 	for i := range local {
 		sess := &local[i]
 		key := fmt.Sprintf("memories/%s/%s.json", sess.Source, sess.SessionID)
+		data, err := json.Marshal(sess)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("failed to marshal %s: %v", sess.SessionID, err))
+			continue
+		}
+		size := len(data)
 		if entry, exists := remote[key]; exists {
 			if !sess.UpdatedAt.After(entry.LastModified) {
+				fmt.Printf("  skip %s (%s, unchanged)\n", key, FormatBytes(size))
 				skipped++
 				continue
 			}
@@ -126,38 +143,26 @@ func (s *Shade) Upload(ctx context.Context) (*UploadResult, error) {
 			warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", sess.SessionID, err))
 			continue
 		}
+		fmt.Printf("  upload %s (%s)\n", key, FormatBytes(size))
 		uploaded++
+		totalBytes += size
 	}
 	return &UploadResult{
 		Total:    len(local),
 		Uploaded: uploaded,
 		Skipped:  skipped,
+		Bytes:    totalBytes,
 		Warnings: warnings,
 	}, nil
 }
 
-// Ls returns all session entries from S3.
-func (s *Shade) Ls(ctx context.Context) ([]storage.SessionEntry, error) {
-	entries, err := s.storage.ListSessions(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list sessions: %w", err)
+func FormatBytes(b int) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1fMB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1fKB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%dB", b)
 	}
-	return entries, nil
-}
-
-// Show retrieves a specific session from S3. If source is empty, both sources
-// are tried.
-func (s *Shade) Show(ctx context.Context, sessionID string, src string) (*source.Session, error) {
-	sources := []string{src}
-	if src == "" {
-		sources = []string{"opencode", "claude-code"}
-	}
-	for _, source := range sources {
-		session, err := s.storage.GetSession(ctx, source, sessionID)
-		if err != nil {
-			continue
-		}
-		return session, nil
-	}
-	return nil, fmt.Errorf("session %s not found", sessionID)
 }

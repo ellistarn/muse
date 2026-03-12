@@ -3,7 +3,7 @@ package dream
 // These prompts implement the skills defined in skills/reflect/ and skills/learn/.
 // The skills are the source of truth; these prompts are the operational form.
 
-const extractPrompt = `You are analyzing a conversation between a human and an AI coding assistant.
+const reflectPrompt = `You are analyzing a conversation between a human and an AI coding assistant.
 Extract observations about the human's preferences, patterns, and expertise.
 
 Focus on signal:
@@ -20,12 +20,12 @@ Ignore noise:
 Output a concise list of observations. Each should be a self-contained statement about how this
 person works. If the conversation has no meaningful signal, output "NO_OBSERVATIONS".`
 
-const reducePrompt = `You are compressing observations about a person's working style into skills.
+const learnPrompt = `You are compressing observations about a person's working style into skills.
 Each skill covers one topic area and teaches an AI assistant how this person wants things done.
 
-Input: Observations extracted from multiple conversations, separated by "---".
+Input: Observations from multiple conversations, separated by "---".
 
-Output: A set of skills in this exact format:
+Output: A set of skills in this exact format (do not wrap in code fences):
 
 === SKILL: skill-name ===
 ---
