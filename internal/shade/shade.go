@@ -74,7 +74,7 @@ func NewForTest(s3Client skill.S3API, bedrockClient *bedrock.Client, bucket stri
 	}
 }
 
-var systemPrompt = prompts.System
+var systemPrompt = prompts.Shade
 
 // readSkillToolSpec defines the read_skill tool for Bedrock tool use.
 func readSkillToolSpec() *types.ToolConfiguration {

@@ -113,9 +113,13 @@ func Run(ctx context.Context, store Store, reflectLLM, learnLLM LLM, opts Option
 			if err != nil {
 				continue
 			}
-			for _, chunk := range formatSession(session) {
-				totalEstimate += estimateTokens(reflectPrompt) + estimateTokens(chunk)
+			turns := extractTurns(session)
+			for _, t := range turns {
+				totalEstimate += estimateTokens(reflectSummarizePrompt) + estimateTokens(t.assistantContent)
+				totalEstimate += estimateTokens(t.humanContent)
 			}
+			// Add estimate for extract + refine passes
+			totalEstimate += estimateTokens(reflectExtractPrompt) + estimateTokens(reflectRefinePrompt)
 		}
 		log.Printf("Estimated ~%dk input tokens for reflect phase\n", totalEstimate/1000)
 
@@ -287,24 +291,98 @@ func loadAllReflections(ctx context.Context, store Store) ([]string, error) {
 	return reflections, nil
 }
 
+// turn represents a human message paired with the assistant message that preceded it.
+type turn struct {
+	assistantContent string // raw assistant content (may be long)
+	humanContent     string // human's message
+}
+
 func reflectOnSession(ctx context.Context, client LLM, session *source.Session) (string, llm.Usage, error) {
-	chunks := formatSession(session)
-	if len(chunks) == 0 {
+	turns := extractTurns(session)
+	if len(turns) == 0 {
 		return "", llm.Usage{}, nil
 	}
-	var allObs []string
+
 	var totalUsage llm.Usage
+
+	// Step 1: Summarize assistant context for each turn, then build human-focused view
+	chunks, usage, err := buildHumanFocusedView(ctx, client, turns)
+	totalUsage = totalUsage.Add(usage)
+	if err != nil {
+		return "", totalUsage, err
+	}
+	if len(chunks) == 0 {
+		return "", totalUsage, nil
+	}
+
+	// Step 2: Extract candidate observations (Pass 1)
+	var allCandidates []string
 	for _, chunk := range chunks {
-		obs, usage, err := client.Converse(ctx, reflectPrompt, chunk, llm.WithMaxTokens(4096))
+		obs, usage, err := client.Converse(ctx, reflectExtractPrompt, chunk, llm.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
-		if obs != "" {
-			allObs = append(allObs, obs)
-		}
 		if err != nil && obs == "" {
 			return "", totalUsage, err
 		}
+		if obs != "" && !isEmpty(obs) {
+			allCandidates = append(allCandidates, obs)
+		}
 	}
-	return strings.Join(allObs, "\n\n"), totalUsage, nil
+	if len(allCandidates) == 0 {
+		return "", totalUsage, nil
+	}
+
+	// Step 3: Refine observations (Pass 2)
+	candidates := strings.Join(allCandidates, "\n\n")
+	refined, usage, err := client.Converse(ctx, reflectRefinePrompt, candidates, llm.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if err != nil {
+		return "", totalUsage, err
+	}
+	if isEmpty(refined) {
+		return "", totalUsage, nil
+	}
+	return refined, totalUsage, nil
+}
+
+// isEmpty checks if the LLM output has no substantive content.
+func isEmpty(s string) bool {
+	return len(strings.TrimSpace(s)) == 0
+}
+
+// buildHumanFocusedView summarizes assistant messages and formats the conversation
+// as [context]/[human] pairs, chunked to fit within the token budget.
+func buildHumanFocusedView(ctx context.Context, client LLM, turns []turn) ([]string, llm.Usage, error) {
+	var totalUsage llm.Usage
+	var chunks []string
+	var b strings.Builder
+
+	for _, t := range turns {
+		// Summarize the assistant's message into 1-2 structural sentences
+		var contextLine string
+		if t.assistantContent != "" {
+			summary, usage, err := client.Converse(ctx, reflectSummarizePrompt, t.assistantContent, llm.WithMaxTokens(256))
+			totalUsage = totalUsage.Add(usage)
+			if err != nil {
+				// On error, fall back to a generic context marker
+				contextLine = "[context]: (assistant message)\n"
+			} else {
+				contextLine = fmt.Sprintf("[context]: %s\n", strings.TrimSpace(summary))
+			}
+		}
+
+		humanLine := fmt.Sprintf("[human]: %s\n\n", t.humanContent)
+		entry := contextLine + humanLine
+
+		if b.Len()+len(entry) > maxChunkChars && b.Len() > 0 {
+			chunks = append(chunks, b.String())
+			b.Reset()
+		}
+		b.WriteString(entry)
+	}
+	if b.Len() > 0 {
+		chunks = append(chunks, b.String())
+	}
+	return chunks, totalUsage, nil
 }
 
 func learn(ctx context.Context, client LLM, observations []string) (map[string]string, llm.Usage, error) {
@@ -324,12 +402,11 @@ func learn(ctx context.Context, client LLM, observations []string) (map[string]s
 // leaving headroom for the system prompt and output.
 const maxChunkChars = 200_000
 
-// formatSession splits a session into chunks that fit within the token budget.
-// Each chunk breaks at message boundaries. Sessions with only a single user
-// message are skipped since no corrections or preferences were expressed.
-func formatSession(session *source.Session) []string {
-	// Require multiple user turns - a single prompt with no follow-up
-	// means no corrections or preferences were expressed.
+// extractTurns extracts human/assistant pairs from a session. Each turn pairs
+// the assistant message that preceded a human response with that human message.
+// Sessions with fewer than 2 human turns are skipped (no corrections or
+// preferences were expressed).
+func extractTurns(session *source.Session) []turn {
 	var userTurns int
 	for _, msg := range session.Messages {
 		if msg.Role == "user" && len(msg.Content) > 0 {
@@ -340,36 +417,34 @@ func formatSession(session *source.Session) []string {
 		return nil
 	}
 
-	var chunks []string
-	var b strings.Builder
+	var turns []turn
+	var lastAssistant string
 	for _, msg := range session.Messages {
-		// Build tool call summary if present
-		var tools []string
-		for _, tc := range msg.ToolCalls {
-			tools = append(tools, tc.Name)
+		switch msg.Role {
+		case "assistant":
+			// Accumulate assistant content (may include tool call names)
+			var parts []string
+			if msg.Content != "" {
+				parts = append(parts, msg.Content)
+			}
+			for _, tc := range msg.ToolCalls {
+				parts = append(parts, fmt.Sprintf("[tool: %s]", tc.Name))
+			}
+			if len(parts) > 0 {
+				lastAssistant = strings.Join(parts, "\n")
+			}
+		case "user":
+			if msg.Content == "" {
+				continue
+			}
+			turns = append(turns, turn{
+				assistantContent: lastAssistant,
+				humanContent:     msg.Content,
+			})
+			lastAssistant = ""
 		}
-		hasContent := msg.Content != "" || len(tools) > 0
-		if !hasContent {
-			continue
-		}
-		var line string
-		if len(tools) > 0 && msg.Content != "" {
-			line = fmt.Sprintf("[%s]: %s\n[tools: %s]\n\n", msg.Role, msg.Content, strings.Join(tools, ", "))
-		} else if len(tools) > 0 {
-			line = fmt.Sprintf("[%s]: [tools: %s]\n\n", msg.Role, strings.Join(tools, ", "))
-		} else {
-			line = fmt.Sprintf("[%s]: %s\n\n", msg.Role, msg.Content)
-		}
-		if b.Len()+len(line) > maxChunkChars && b.Len() > 0 {
-			chunks = append(chunks, b.String())
-			b.Reset()
-		}
-		b.WriteString(line)
 	}
-	if b.Len() > 0 {
-		chunks = append(chunks, b.String())
-	}
-	return chunks
+	return turns
 }
 
 // ParseSkillsResponse splits the LLM's reduce output into individual skill files.
