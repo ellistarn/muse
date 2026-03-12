@@ -169,6 +169,12 @@ func (s *Shade) Upload(ctx context.Context) (*UploadResult, error) {
 		log.Printf("Found %d Claude Code sessions\n", len(sessions))
 		local = append(local, sessions...)
 	}
+	if sessions, err := source.KiroSessions(); err != nil {
+		warnings = append(warnings, fmt.Sprintf("failed to read Kiro sessions: %v", err))
+	} else {
+		log.Printf("Found %d Kiro sessions\n", len(sessions))
+		local = append(local, sessions...)
+	}
 
 	log.Printf("Diffing %d local sessions against remote...\n", len(local))
 	var uploaded, skipped int
