@@ -1,7 +1,7 @@
 # Shade
 
 A shade is a projection of how you think. It absorbs your memories from agent interactions, distills
-them into skills, and serves those skills to any agent that asks.
+them into skills, and uses those skills to advise any agent that asks.
 
 ## How it works
 
