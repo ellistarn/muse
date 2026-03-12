@@ -15,7 +15,7 @@ information: they teach models how you want things done without leaking underlyi
 lossy by design, keeping what matters and forgetting what doesn't.
 
 Reflections are persisted so you can re-synthesize skills later with better models or prompts
-(`dream --relearn`) without re-processing all your memories.
+(`dream --learn`) without re-processing all your memories.
 
 **Listen** starts an MCP server that exposes a single tool: **ask**. An agent sends a question and
 gets back guidance shaped by your skills. Each call is stateless, a one-shot interaction with no
@@ -40,7 +40,7 @@ export SHADE_MODEL=claude-sonnet-4-20250514
 
 shade push              # push memories to storage
 shade dream             # distill skills from memories
-shade dream --relearn   # re-synthesize skills from existing reflections
+shade dream --learn     # re-synthesize skills from existing reflections
 shade listen            # start the MCP server
 ```
 

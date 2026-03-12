@@ -2,14 +2,15 @@ package log
 
 import (
 	"fmt"
+	"os"
 	"time"
 )
 
 func Printf(format string, args ...any) {
-	fmt.Printf("["+time.Now().Format("15:04:05")+"] "+format, args...)
+	fmt.Fprintf(os.Stderr, "["+time.Now().Format("15:04:05")+"] "+format, args...)
 }
 
 func Println(args ...any) {
-	fmt.Print("[" + time.Now().Format("15:04:05") + "] ")
-	fmt.Println(args...)
+	fmt.Fprint(os.Stderr, "["+time.Now().Format("15:04:05")+"] ")
+	fmt.Fprintln(os.Stderr, args...)
 }

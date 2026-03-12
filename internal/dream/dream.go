@@ -70,7 +70,7 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 
 	// If reprocessing, clear all existing reflections
 	if opts.Reflect {
-		log.Println("Reprocessing all memories (clearing existing reflections)")
+		log.Println("Re-reflecting all memories (clearing existing reflections)")
 		if err := store.DeletePrefix(ctx, "dream/reflections/"); err != nil {
 			return nil, fmt.Errorf("failed to clear reflections: %w", err)
 		}
