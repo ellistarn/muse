@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ellistarn/shade/internal/bedrock"
 	"github.com/ellistarn/shade/internal/dream"
+	"github.com/ellistarn/shade/internal/llm"
 	"github.com/ellistarn/shade/internal/source"
 	"github.com/ellistarn/shade/internal/storage"
 )
@@ -87,9 +87,9 @@ type llmCall struct {
 	user   string
 }
 
-func (m *mockLLM) Converse(_ context.Context, system, user string) (string, bedrock.Usage, error) {
+func (m *mockLLM) Converse(_ context.Context, system, user string) (string, llm.Usage, error) {
 	m.calls = append(m.calls, llmCall{system: system, user: user})
-	usage := bedrock.Usage{InputTokens: 100, OutputTokens: 50}
+	usage := llm.Usage{InputTokens: 100, OutputTokens: 50}
 	if strings.Contains(system, "compressing observations") {
 		return m.learnResponse, usage, nil
 	}

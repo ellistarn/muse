@@ -7,49 +7,29 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 
+	"github.com/ellistarn/shade/internal/awsconfig"
+	"github.com/ellistarn/shade/internal/llm"
 	"github.com/ellistarn/shade/internal/log"
 )
 
-const defaultModel = "us.anthropic.claude-opus-4-6-v1"
+const (
+	ModelOpus   = "claude-opus"
+	ModelSonnet = "claude-sonnet"
+)
 
-// Usage tracks token consumption from a Converse call.
-type Usage struct {
-	InputTokens         int
-	OutputTokens        int
-	inputPricePerToken  float64
-	outputPricePerToken float64
-}
-
-// Cost returns the estimated dollar cost for this usage.
-func (u Usage) Cost() float64 {
-	return float64(u.InputTokens)*u.inputPricePerToken + float64(u.OutputTokens)*u.outputPricePerToken
-}
-
-// Add combines two Usage values, preserving pricing from whichever has it.
-func (u Usage) Add(other Usage) Usage {
-	result := Usage{
-		InputTokens:  u.InputTokens + other.InputTokens,
-		OutputTokens: u.OutputTokens + other.OutputTokens,
-	}
-	if u.inputPricePerToken != 0 {
-		result.inputPricePerToken = u.inputPricePerToken
-		result.outputPricePerToken = u.outputPricePerToken
-	} else {
-		result.inputPricePerToken = other.inputPricePerToken
-		result.outputPricePerToken = other.outputPricePerToken
-	}
-	return result
-}
+// Usage is an alias for llm.Usage so callers don't need to import both packages.
+type Usage = llm.Usage
 
 type modelPricing struct {
 	inputPerToken  float64
@@ -60,7 +40,7 @@ type modelPricing struct {
 // https://aws.amazon.com/bedrock/pricing/
 var pricingTable = map[string]modelPricing{
 	"claude-sonnet-4": {3.0 / 1_000_000, 15.0 / 1_000_000},
-	"claude-opus-4-6": {6.0 / 1_000_000, 30.0 / 1_000_000},
+	"claude-opus-4":   {6.0 / 1_000_000, 30.0 / 1_000_000},
 }
 
 // lookupPricing finds pricing by matching a model family key against the full
@@ -98,14 +78,19 @@ const (
 	requestsPerSec = 4 // target steady-state request rate
 )
 
-func NewClient(ctx context.Context) (*Client, error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
+func NewClient(ctx context.Context, model string) (*Client, error) {
+	cfg, err := awsconfig.Load(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		return nil, err
 	}
-	model := os.Getenv("SHADE_MODEL")
-	if model == "" {
-		model = defaultModel
+	if override := os.Getenv("SHADE_MODEL"); override != "" {
+		model = override
+	} else {
+		resolved, err := resolveModel(ctx, cfg, model)
+		if err != nil {
+			return nil, err
+		}
+		model = resolved
 	}
 	c := &Client{
 		runtime:  bedrockruntime.NewFromConfig(cfg),
@@ -116,6 +101,28 @@ func NewClient(ctx context.Context) (*Client, error) {
 	// Start the token refiller: adds one request token per 1/requestsPerSec interval.
 	go c.refillTokens(ctx)
 	return c, nil
+}
+
+// resolveModel finds the latest US cross-region inference profile matching the
+// given model family (e.g. "claude-opus" or "claude-sonnet").
+func resolveModel(ctx context.Context, cfg aws.Config, family string) (string, error) {
+	out, err := bedrock.NewFromConfig(cfg).ListInferenceProfiles(ctx, &bedrock.ListInferenceProfilesInput{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list inference profiles: %w", err)
+	}
+	var candidates []string
+	for _, p := range out.InferenceProfileSummaries {
+		id := aws.ToString(p.InferenceProfileId)
+		if strings.HasPrefix(id, "us.anthropic.") && strings.Contains(id, family) {
+			candidates = append(candidates, id)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no US inference profile found for %q", family)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
+	log.Printf("discovered model %s -> %s\n", family, candidates[0])
+	return candidates[0], nil
 }
 
 // NewClientWithRuntime creates a Client with a caller-provided Runtime.
@@ -325,8 +332,8 @@ func (c *Client) extractUsage(out *bedrockruntime.ConverseOutput) Usage {
 			usage.OutputTokens = int(*out.Usage.OutputTokens)
 		}
 	}
-	usage.inputPricePerToken = c.pricing.inputPerToken
-	usage.outputPricePerToken = c.pricing.outputPerToken
+	usage.InputPricePerToken = c.pricing.inputPerToken
+	usage.OutputPricePerToken = c.pricing.outputPerToken
 	return usage
 }
 

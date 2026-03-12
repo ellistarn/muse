@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/ellistarn/shade/internal/awsconfig"
 	"github.com/ellistarn/shade/internal/source"
 )
 
@@ -22,9 +22,9 @@ type Client struct {
 }
 
 func NewClient(ctx context.Context, bucket string) (*Client, error) {
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
+	cfg, err := awsconfig.Load(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		return nil, err
 	}
 	return &Client{
 		s3:     s3.NewFromConfig(cfg),

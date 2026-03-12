@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/ellistarn/shade/internal/awsconfig"
 	"github.com/ellistarn/shade/internal/bedrock"
 	"github.com/ellistarn/shade/internal/log"
 	"github.com/ellistarn/shade/internal/skill"
@@ -37,15 +37,15 @@ type Shade struct {
 }
 
 func New(ctx context.Context, bucket string) (*Shade, error) {
+	cfg, err := awsconfig.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
 	storageClient, err := storage.NewClient(ctx, bucket)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage client: %w", err)
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-west-2"))
-	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
-	}
-	bedrockClient, err := bedrock.NewClient(ctx)
+	bedrockClient, err := bedrock.NewClient(ctx, bedrock.ModelOpus)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bedrock client: %w", err)
 	}

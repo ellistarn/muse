@@ -25,7 +25,7 @@ func newDreamCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			llm, err := bedrock.NewClient(ctx)
+			llm, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 			if err != nil {
 				return err
 			}

@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ellistarn/shade/internal/bedrock"
+	"github.com/ellistarn/shade/internal/llm"
 	"github.com/ellistarn/shade/internal/log"
 	"github.com/ellistarn/shade/internal/source"
 	"github.com/ellistarn/shade/internal/storage"
@@ -24,9 +24,9 @@ type Store interface {
 	PutSkill(ctx context.Context, name, content string) error
 }
 
-// LLM is the subset of bedrock.Client used by the dream pipeline.
+// LLM is the subset of an LLM client used by the dream pipeline.
 type LLM interface {
-	Converse(ctx context.Context, system, user string) (string, bedrock.Usage, error)
+	Converse(ctx context.Context, system, user string) (string, llm.Usage, error)
 }
 
 // State tracks which memories have been processed so we can prune on subsequent runs.
@@ -44,7 +44,7 @@ type Result struct {
 	Processed int
 	Pruned    int
 	Skills    int
-	Usage     bedrock.Usage
+	Usage     llm.Usage
 	Warnings  []string
 }
 
@@ -63,7 +63,7 @@ func estimateTokens(s string) int {
 
 // Run executes the dream pipeline: load state, map new memories to observations,
 // reduce observations into skills, and persist the results.
-func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, error) {
+func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, error) {
 	// Load prior dream state (missing state means first run)
 	var state State
 	if opts.Reprocess {
@@ -119,7 +119,7 @@ func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, erro
 	type mapResult struct {
 		key          string
 		observations string
-		usage        bedrock.Usage
+		usage        llm.Usage
 		err          error
 	}
 	results := make([]mapResult, len(pending))
@@ -141,7 +141,7 @@ func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, erro
 				return
 			}
 			msgs := len(session.Messages)
-			obs, usage, err := reflect(ctx, llm, session)
+			obs, usage, err := reflect(ctx, client, session)
 			results[i] = mapResult{key: entry.Key, observations: obs, usage: usage, err: err}
 			n := completed.Add(1)
 			if err != nil {
@@ -157,7 +157,7 @@ func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, erro
 	// Collect observations, record warnings for failures
 	var allObservations []string
 	var warnings []string
-	var reflectUsage bedrock.Usage
+	var reflectUsage llm.Usage
 	processedKeys := map[string]time.Time{}
 	for _, r := range results {
 		if r.err != nil {
@@ -174,7 +174,7 @@ func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, erro
 
 	// Learn: compress observations into skills
 	log.Printf("Learning skills from %d reflections...\n", len(allObservations))
-	skills, learnUsage, err := learn(ctx, llm, allObservations)
+	skills, learnUsage, err := learn(ctx, client, allObservations)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
@@ -210,20 +210,20 @@ func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, erro
 	}, nil
 }
 
-func reflect(ctx context.Context, llm LLM, session *source.Session) (string, bedrock.Usage, error) {
+func reflect(ctx context.Context, client LLM, session *source.Session) (string, llm.Usage, error) {
 	conversation := formatSession(session)
 	if conversation == "" {
-		return "", bedrock.Usage{}, nil
+		return "", llm.Usage{}, nil
 	}
-	return llm.Converse(ctx, reflectPrompt, conversation)
+	return client.Converse(ctx, reflectPrompt, conversation)
 }
 
-func learn(ctx context.Context, llm LLM, observations []string) (map[string]string, bedrock.Usage, error) {
+func learn(ctx context.Context, client LLM, observations []string) (map[string]string, llm.Usage, error) {
 	if len(observations) == 0 {
-		return nil, bedrock.Usage{}, nil
+		return nil, llm.Usage{}, nil
 	}
 	input := strings.Join(observations, "\n\n---\n\n")
-	raw, usage, err := llm.Converse(ctx, learnPrompt, input)
+	raw, usage, err := client.Converse(ctx, learnPrompt, input)
 	if err != nil {
 		return nil, usage, err
 	}
