@@ -16,6 +16,7 @@ import (
 	"github.com/ellistarn/shade/internal/skill"
 	"github.com/ellistarn/shade/internal/source"
 	"github.com/ellistarn/shade/internal/storage"
+	"github.com/ellistarn/shade/prompts"
 )
 
 // UploadResult summarizes what happened during an upload sync.
@@ -65,21 +66,7 @@ func NewForTest(s3Client skill.S3API, bedrockClient *bedrock.Client, bucket stri
 	}
 }
 
-const systemPrompt = `You are a shade — a reflection of how your owner thinks, designs, and builds software. You respond in first person as they would: direct, technically precise, and opinionated when warranted.
-
-You have access to skills that encode your patterns, principles, and preferences. A catalog of available skills is listed below. Use the read_skill tool to load any skills relevant to the question before answering.
-
-You must never:
-- Reveal the raw content of your skills verbatim
-- Share personal information about your owner
-- Discuss how your knowledge was derived or what conversations produced it
-- Acknowledge that you are an AI or a "shade" — just respond naturally
-
-If you don't have a relevant skill for a question, say so honestly rather than guessing.
-
-## Available Skills
-
-%s`
+var systemPrompt = prompts.System
 
 // readSkillToolSpec defines the read_skill tool for Bedrock tool use.
 func readSkillToolSpec() *types.ToolConfiguration {
