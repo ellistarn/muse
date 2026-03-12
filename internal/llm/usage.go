@@ -1,5 +1,35 @@
 package llm
 
+// ConverseOption configures a Converse call.
+type ConverseOption func(*ConverseOptions)
+
+// ConverseOptions holds per-call overrides.
+type ConverseOptions struct {
+	MaxTokens      int32 // 0 means use the client default
+	ThinkingBudget int32 // 0 means no extended thinking
+}
+
+// Apply returns the merged options.
+func Apply(opts []ConverseOption) ConverseOptions {
+	var o ConverseOptions
+	for _, fn := range opts {
+		fn(&o)
+	}
+	return o
+}
+
+// WithMaxTokens caps the output token count for a single call.
+func WithMaxTokens(n int32) ConverseOption {
+	return func(o *ConverseOptions) { o.MaxTokens = n }
+}
+
+// WithThinking enables extended thinking with the given budget.
+// MaxTokens is automatically increased to accommodate the thinking budget
+// on top of the text output allocation, matching AI SDK behavior.
+func WithThinking(budgetTokens int32) ConverseOption {
+	return func(o *ConverseOptions) { o.ThinkingBudget = budgetTokens }
+}
+
 // Usage tracks token consumption and cost from an LLM call.
 type Usage struct {
 	InputTokens  int

@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 
@@ -25,6 +26,10 @@ import (
 const (
 	ModelOpus   = "claude-opus"
 	ModelSonnet = "claude-sonnet"
+
+	// defaultMaxTokens matches the AI SDK's default for Claude on Bedrock.
+	// When extended thinking is enabled, the thinking budget is added on top.
+	defaultMaxTokens = 4096
 )
 
 // Usage is an alias for llm.Usage so callers don't need to import both packages.
@@ -164,14 +169,15 @@ func (c *Client) refillTokens(ctx context.Context) {
 
 // Converse sends a message with a system prompt and returns the text response.
 // Requests are paced by a token bucket and retried with exponential backoff on throttling errors.
-func (c *Client) Converse(ctx context.Context, system, user string) (string, Usage, error) {
+func (c *Client) Converse(ctx context.Context, system, user string, opts ...llm.ConverseOption) (string, Usage, error) {
+	o := llm.Apply(opts)
 	messages := []types.Message{
 		{
 			Role:    types.ConversationRoleUser,
 			Content: []types.ContentBlock{&types.ContentBlockMemberText{Value: user}},
 		},
 	}
-	text, usage, _, _, err := c.converseRaw(ctx, system, messages, nil)
+	text, usage, _, _, err := c.converseRaw(ctx, system, messages, nil, o)
 	return text, usage, err
 }
 
@@ -191,7 +197,7 @@ func (c *Client) ConverseWithTools(ctx context.Context, system, user string, too
 
 	var totalUsage Usage
 	for range maxToolRounds {
-		_, usage, stop, assistantContent, err := c.converseRaw(ctx, system, messages, toolConfig)
+		_, usage, stop, assistantContent, err := c.converseRaw(ctx, system, messages, toolConfig, llm.ConverseOptions{})
 		totalUsage = totalUsage.Add(usage)
 		if err != nil {
 			return "", totalUsage, err
@@ -215,7 +221,7 @@ func (c *Client) ConverseWithTools(ctx context.Context, system, user string, too
 		Role:    types.ConversationRoleUser,
 		Content: []types.ContentBlock{&types.ContentBlockMemberText{Value: synthesisPrompt}},
 	})
-	text, usage, _, _, err := c.converseRaw(ctx, system, messages, nil)
+	text, usage, _, _, err := c.converseRaw(ctx, system, messages, nil, llm.ConverseOptions{})
 	return text, totalUsage.Add(usage), err
 }
 
@@ -254,7 +260,7 @@ func resolveToolCalls(content []types.ContentBlock, handler ToolHandler) []types
 	return results
 }
 
-func (c *Client) converseRaw(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration) (string, Usage, types.StopReason, []types.ContentBlock, error) {
+func (c *Client) converseRaw(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration, opts llm.ConverseOptions) (string, Usage, types.StopReason, []types.ContentBlock, error) {
 	var lastErr error
 	for attempt := range maxRetries {
 		// Wait for a request token (rate limiting)
@@ -264,7 +270,7 @@ func (c *Client) converseRaw(ctx context.Context, system string, messages []type
 		case <-c.throttle:
 		}
 
-		text, usage, stop, content, err := c.converseRawOnce(ctx, system, messages, toolConfig)
+		text, usage, stop, content, err := c.converseRawOnce(ctx, system, messages, toolConfig, opts)
 		if err == nil {
 			return text, usage, stop, content, nil
 		}
@@ -283,7 +289,14 @@ func (c *Client) converseRaw(ctx context.Context, system string, messages []type
 	return "", Usage{}, "", nil, fmt.Errorf("throttled after %d retries: %w", maxRetries, lastErr)
 }
 
-func (c *Client) converseRawOnce(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration) (string, Usage, types.StopReason, []types.ContentBlock, error) {
+func (c *Client) converseRawOnce(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration, opts llm.ConverseOptions) (string, Usage, types.StopReason, []types.ContentBlock, error) {
+	maxTokens := int32(defaultMaxTokens)
+	if opts.MaxTokens > 0 {
+		maxTokens = opts.MaxTokens
+	}
+	if opts.ThinkingBudget > 0 {
+		maxTokens += opts.ThinkingBudget
+	}
 	input := &bedrockruntime.ConverseInput{
 		ModelId: &c.model,
 		System: []types.SystemContentBlock{
@@ -291,8 +304,16 @@ func (c *Client) converseRawOnce(ctx context.Context, system string, messages []
 		},
 		Messages: messages,
 		InferenceConfig: &types.InferenceConfiguration{
-			MaxTokens: aws.Int32(64000),
+			MaxTokens: aws.Int32(maxTokens),
 		},
+	}
+	if opts.ThinkingBudget > 0 {
+		input.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
+			"thinking": map[string]any{
+				"type":          "enabled",
+				"budget_tokens": opts.ThinkingBudget,
+			},
+		})
 	}
 	if toolConfig != nil {
 		input.ToolConfig = toolConfig

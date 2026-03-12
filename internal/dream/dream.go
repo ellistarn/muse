@@ -29,7 +29,7 @@ type Store interface {
 
 // LLM is the subset of an LLM client used by the dream pipeline.
 type LLM interface {
-	Converse(ctx context.Context, system, user string) (string, llm.Usage, error)
+	Converse(ctx context.Context, system, user string, opts ...llm.ConverseOption) (string, llm.Usage, error)
 }
 
 // Result summarizes a dream run.
@@ -287,7 +287,7 @@ func reflectOnSession(ctx context.Context, client LLM, session *source.Session) 
 	var allObs []string
 	var totalUsage llm.Usage
 	for _, chunk := range chunks {
-		obs, usage, err := client.Converse(ctx, reflectPrompt, chunk)
+		obs, usage, err := client.Converse(ctx, reflectPrompt, chunk, llm.WithMaxTokens(4096))
 		if err != nil {
 			return "", totalUsage, err
 		}
@@ -304,7 +304,7 @@ func learn(ctx context.Context, client LLM, observations []string) (map[string]s
 		return nil, llm.Usage{}, nil
 	}
 	input := strings.Join(observations, "\n\n---\n\n")
-	raw, usage, err := client.Converse(ctx, learnPrompt, input)
+	raw, usage, err := client.Converse(ctx, learnPrompt, input, llm.WithThinking(16000))
 	if err != nil {
 		return nil, usage, err
 	}
