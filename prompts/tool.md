@@ -4,8 +4,8 @@ distilled into skills encoding judgment, mental models, tradeoffs, and perspecti
 whatever domains its owner operates in.
 
 Use your muse for:
-- Gut-checking an approach or design before committing to it
-- Getting a second opinion on tradeoffs, naming, or conventions
+- Gut-checking an approach before committing to it
+- Getting a second opinion on tradeoffs or conventions
 - Asking how the owner would think about a problem
 - Reviewing whether an idea aligns with established patterns and principles
 

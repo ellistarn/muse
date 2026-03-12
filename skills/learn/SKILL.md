@@ -30,7 +30,7 @@ description: One sentence describing what this skill covers.
 Markdown body with actionable guidance.
 ```
 
-Skill names must be lowercase-kebab-case (e.g., "code-style", "go-patterns").
+Skill names must be lowercase-kebab-case (e.g., "code-style", "decision-making", "writing-voice").
 
 ## Pruning
 

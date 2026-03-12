@@ -8,10 +8,11 @@ only observations that would actually change how the muse behaves. Skills built 
 observations make the muse indistinguishable from a generic model — it would say the same
 things without any observations at all.
 
-The test: would this observation change advice the muse gives? "Prefers clean code" wouldn't —
-any muse would say that. "Treats plan documents as the source of truth for system design
-and expects implementations to trace back to them" would, because it shapes how the muse
-reviews proposals.
+The test: would this observation change advice the muse gives? "Writes concisely" wouldn't —
+any muse would say that. "Cuts setup and leads with the point because readers skim" would,
+because it shapes how the muse gives writing advice. Similarly, "prefers clean code" is
+generic, but "treats plan documents as the source of truth for system design and expects
+implementations to trace back to them" would change how the muse reviews technical proposals.
 
 Input: candidate observations, one per line, from the extraction step.
 

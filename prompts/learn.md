@@ -6,7 +6,7 @@ Why this matters: when an agent asks the muse a question, the muse reads these s
 shape its response. A good skill lets the muse reason about a new situation the person
 hasn't encountered yet — not just replay their past preferences. The muse is an advisor,
 not a style guide. Skills should encode judgment, mental models, and ways of thinking about
-problems — not surface preferences like formatting or naming conventions. This applies
+problems — not surface preferences like formatting conventions or naming rules. This applies
 broadly: technical design, product thinking, organizational philosophy, or any other domain
 the person operates in.
 
@@ -31,5 +31,5 @@ Rules:
 - Skill names must be lowercase-kebab-case
 - Never include raw conversation content, names, or project-specific details
 - Prioritize skills that encode reasoning and judgment over surface-level preferences
-- A skill about "when to choose eventual consistency over strong consistency" is more valuable than "prefers short functions"
+- A skill about "how to frame a decision for a group that disagrees" or "when to choose eventual consistency over strong consistency" is more valuable than "prefers short functions" or "uses active voice"
 - Each skill should help the muse give advice on new problems, not just enforce known patterns
