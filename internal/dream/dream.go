@@ -3,6 +3,7 @@ package dream
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,6 +88,10 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 		}
 		pending = append(pending, e)
 	}
+	// Sort newest first so the limit keeps the most recent memories.
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].LastModified.After(pending[j].LastModified)
+	})
 	if opts.Limit > 0 && len(pending) > opts.Limit {
 		log.Printf("Found %d new memories, limiting to %d\n", len(pending), opts.Limit)
 		pending = pending[:opts.Limit]
@@ -105,8 +110,9 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 			if err != nil {
 				continue
 			}
-			conversation := formatSession(session)
-			totalEstimate += estimateTokens(reflectPrompt) + estimateTokens(conversation)
+			for _, chunk := range formatSession(session) {
+				totalEstimate += estimateTokens(reflectPrompt) + estimateTokens(chunk)
+			}
 		}
 		log.Printf("Estimated ~%dk input tokens for reflect phase\n", totalEstimate/1000)
 
@@ -261,11 +267,23 @@ func loadAllReflections(ctx context.Context, store Store) ([]string, error) {
 }
 
 func reflectOnSession(ctx context.Context, client LLM, session *source.Session) (string, llm.Usage, error) {
-	conversation := formatSession(session)
-	if conversation == "" {
+	chunks := formatSession(session)
+	if len(chunks) == 0 {
 		return "", llm.Usage{}, nil
 	}
-	return client.Converse(ctx, reflectPrompt, conversation)
+	var allObs []string
+	var totalUsage llm.Usage
+	for _, chunk := range chunks {
+		obs, usage, err := client.Converse(ctx, reflectPrompt, chunk)
+		if err != nil {
+			return "", totalUsage, err
+		}
+		totalUsage = totalUsage.Add(usage)
+		if obs != "" {
+			allObs = append(allObs, obs)
+		}
+	}
+	return strings.Join(allObs, "\n\n"), totalUsage, nil
 }
 
 func learn(ctx context.Context, client LLM, observations []string) (map[string]string, llm.Usage, error) {
@@ -281,15 +299,30 @@ func learn(ctx context.Context, client LLM, observations []string) (map[string]s
 	return skills, usage, err
 }
 
-func formatSession(session *source.Session) string {
+// maxChunkChars caps each conversation chunk to ~50k tokens of input,
+// leaving headroom for the system prompt and output.
+const maxChunkChars = 200_000
+
+// formatSession splits a session into chunks that fit within the token budget.
+// Each chunk breaks at message boundaries.
+func formatSession(session *source.Session) []string {
+	var chunks []string
 	var b strings.Builder
 	for _, msg := range session.Messages {
 		if msg.Content == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "[%s]: %s\n\n", msg.Role, msg.Content)
+		line := fmt.Sprintf("[%s]: %s\n\n", msg.Role, msg.Content)
+		if b.Len()+len(line) > maxChunkChars && b.Len() > 0 {
+			chunks = append(chunks, b.String())
+			b.Reset()
+		}
+		b.WriteString(line)
 	}
-	return b.String()
+	if b.Len() > 0 {
+		chunks = append(chunks, b.String())
+	}
+	return chunks
 }
 
 // ParseSkillsResponse splits the LLM's reduce output into individual skill files.
