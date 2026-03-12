@@ -34,6 +34,7 @@ type Shade struct {
 	s3      skill.S3API
 	bedrock *bedrock.Client
 	bucket  string
+	catalog []skill.Skill
 }
 
 func New(ctx context.Context, bucket string) (*Shade, error) {
@@ -49,11 +50,18 @@ func New(ctx context.Context, bucket string) (*Shade, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bedrock client: %w", err)
 	}
+	s3Client := s3.NewFromConfig(cfg)
+	catalog, err := skill.LoadCatalog(ctx, s3Client, bucket)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load skill catalog: %w", err)
+	}
+	log.Printf("Loaded %d skills\n", len(catalog))
 	return &Shade{
 		storage: storageClient,
-		s3:      s3.NewFromConfig(cfg),
+		s3:      s3Client,
 		bedrock: bedrockClient,
 		bucket:  bucket,
+		catalog: catalog,
 	}, nil
 }
 
@@ -94,16 +102,12 @@ func readSkillToolSpec() *types.ToolConfiguration {
 	}
 }
 
-// Ask answers a question using the shade's distilled skills.
+// Advise answers a question using the shade's distilled skills.
 // The LLM sees a catalog of skill names and descriptions, then uses tool
 // calling to fetch the full content of any skills it deems relevant.
 // This is a stateless one-shot: no session history, no persistence.
-func (s *Shade) Ask(ctx context.Context, question string) (string, error) {
-	catalog, err := skill.LoadCatalog(ctx, s.s3, s.bucket)
-	if err != nil {
-		return "", fmt.Errorf("failed to load skill catalog: %w", err)
-	}
-	system := fmt.Sprintf(systemPrompt, formatCatalog(catalog))
+func (s *Shade) Advise(ctx context.Context, question string) (string, error) {
+	system := fmt.Sprintf(systemPrompt, formatCatalog(s.catalog))
 	toolConfig := readSkillToolSpec()
 
 	handler := func(name string, input map[string]any) (string, error) {

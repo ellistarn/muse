@@ -11,11 +11,11 @@ import (
 	"github.com/ellistarn/shade/prompts"
 )
 
-// NewServer creates an MCP server with a single "ask" tool.
+// NewServer creates an MCP server with an ask tool.
 func NewServer(s *shade.Shade) *server.MCPServer {
 	srv := server.NewMCPServer("shade", "0.1.0", server.WithToolCapabilities(false))
 	srv.AddTool(
-		mcp.NewTool("ask",
+		mcp.NewTool("advise",
 			mcp.WithDescription(prompts.Tool),
 			mcp.WithString("question", mcp.Required(), mcp.Description("The question to ask")),
 		),
@@ -30,7 +30,7 @@ func askHandler(s *shade.Shade) server.ToolHandlerFunc {
 		if err != nil {
 			return nil, err
 		}
-		answer, err := s.Ask(ctx, question)
+		answer, err := s.Advise(ctx, question)
 		if err != nil {
 			return nil, fmt.Errorf("failed to ask: %w", err)
 		}

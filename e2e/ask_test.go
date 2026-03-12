@@ -151,7 +151,7 @@ description: %s
 
 %s`
 
-func TestAskWithSkillLookup(t *testing.T) {
+func TestAdviseWithSkillLookup(t *testing.T) {
 	s3Client := &mockS3{skills: map[string]string{
 		"skills/naming-conventions/SKILL.md": fmt.Sprintf(skillFileTemplate,
 			"Naming Conventions", "File and commit naming preferences.", "Use kebab-case for file names."),
@@ -169,9 +169,9 @@ func TestAskWithSkillLookup(t *testing.T) {
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
 	s := shade.NewForTest(s3Client, bedrockClient, "test-bucket")
 
-	answer, err := s.Ask(ctx, "how should I name files?")
+	answer, err := s.Advise(ctx, "how should I name files?")
 	if err != nil {
-		t.Fatalf("Ask() error: %v", err)
+		t.Fatalf("Advise() error: %v", err)
 	}
 	if answer != "Use kebab-case for your file names." {
 		t.Errorf("answer = %q, want %q", answer, "Use kebab-case for your file names.")
@@ -201,7 +201,7 @@ func TestAskWithSkillLookup(t *testing.T) {
 	}
 }
 
-func TestAskNoSkillsNeeded(t *testing.T) {
+func TestAdviseNoSkillsNeeded(t *testing.T) {
 	s3Client := &mockS3{skills: map[string]string{
 		"skills/naming-conventions/SKILL.md": fmt.Sprintf(skillFileTemplate,
 			"Naming Conventions", "File and commit naming preferences.", "Use kebab-case."),
@@ -217,9 +217,9 @@ func TestAskNoSkillsNeeded(t *testing.T) {
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
 	s := shade.NewForTest(s3Client, bedrockClient, "test-bucket")
 
-	answer, err := s.Ask(ctx, "hello")
+	answer, err := s.Advise(ctx, "hello")
 	if err != nil {
-		t.Fatalf("Ask() error: %v", err)
+		t.Fatalf("Advise() error: %v", err)
 	}
 	if answer != "Hello! How can I help?" {
 		t.Errorf("answer = %q, want %q", answer, "Hello! How can I help?")
@@ -235,7 +235,7 @@ func TestAskNoSkillsNeeded(t *testing.T) {
 	}
 }
 
-func TestAskEmptyCatalog(t *testing.T) {
+func TestAdviseEmptyCatalog(t *testing.T) {
 	s3Client := &mockS3{skills: map[string]string{}}
 
 	runtime := &mockRuntime{responses: []bedrockruntime.ConverseOutput{
@@ -247,9 +247,9 @@ func TestAskEmptyCatalog(t *testing.T) {
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
 	s := shade.NewForTest(s3Client, bedrockClient, "test-bucket")
 
-	answer, err := s.Ask(ctx, "how do you handle errors?")
+	answer, err := s.Advise(ctx, "how do you handle errors?")
 	if err != nil {
-		t.Fatalf("Ask() error: %v", err)
+		t.Fatalf("Advise() error: %v", err)
 	}
 	if answer != "I don't have any relevant skills for that." {
 		t.Errorf("answer = %q", answer)
@@ -263,7 +263,7 @@ func TestAskEmptyCatalog(t *testing.T) {
 	}
 }
 
-func TestAskMultipleSkills(t *testing.T) {
+func TestAdviseMultipleSkills(t *testing.T) {
 	s3Client := &mockS3{skills: map[string]string{
 		"skills/naming-conventions/SKILL.md": fmt.Sprintf(skillFileTemplate,
 			"Naming Conventions", "File naming preferences.", "Use kebab-case."),
@@ -284,9 +284,9 @@ func TestAskMultipleSkills(t *testing.T) {
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
 	s := shade.NewForTest(s3Client, bedrockClient, "test-bucket")
 
-	answer, err := s.Ask(ctx, "what are your coding conventions?")
+	answer, err := s.Advise(ctx, "what are your coding conventions?")
 	if err != nil {
-		t.Fatalf("Ask() error: %v", err)
+		t.Fatalf("Advise() error: %v", err)
 	}
 	if answer != "Use kebab-case and wrap errors with context." {
 		t.Errorf("answer = %q", answer)
@@ -301,7 +301,7 @@ func TestAskMultipleSkills(t *testing.T) {
 	}
 }
 
-func TestAskMultiRoundToolUse(t *testing.T) {
+func TestAdviseMultiRoundToolUse(t *testing.T) {
 	s3Client := &mockS3{skills: map[string]string{
 		"skills/error-handling/SKILL.md": fmt.Sprintf(skillFileTemplate,
 			"Error Handling", "Error return patterns.", "Wrap errors with context. See also: logging."),
@@ -323,9 +323,9 @@ func TestAskMultiRoundToolUse(t *testing.T) {
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
 	s := shade.NewForTest(s3Client, bedrockClient, "test-bucket")
 
-	answer, err := s.Ask(ctx, "how should I handle errors?")
+	answer, err := s.Advise(ctx, "how should I handle errors?")
 	if err != nil {
-		t.Fatalf("Ask() error: %v", err)
+		t.Fatalf("Advise() error: %v", err)
 	}
 	if answer != "Wrap errors with context and use structured logging." {
 		t.Errorf("answer = %q", answer)

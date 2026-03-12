@@ -9,10 +9,10 @@ import (
 	"github.com/ellistarn/shade/internal/shade"
 )
 
-func newAskCmd() *cobra.Command {
+func newAdviseCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ask [question]",
-		Short: "Ask the shade a question",
+		Use:   "advise [question]",
+		Short: "Ask the shade for advice",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
@@ -24,7 +24,7 @@ func newAskCmd() *cobra.Command {
 				return err
 			}
 			question := strings.Join(args, " ")
-			answer, err := s.Ask(ctx, question)
+			answer, err := s.Advise(ctx, question)
 			if err != nil {
 				return err
 			}
