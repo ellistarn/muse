@@ -330,8 +330,7 @@ func (c *Client) extractUsage(out *bedrockruntime.ConverseOutput) Usage {
 			usage.OutputTokens = int(*out.Usage.OutputTokens)
 		}
 	}
-	usage.InputPricePerToken = c.pricing.inputPerToken
-	usage.OutputPricePerToken = c.pricing.outputPerToken
+	usage.Cost_ = float64(usage.InputTokens)*c.pricing.inputPerToken + float64(usage.OutputTokens)*c.pricing.outputPerToken
 	return usage
 }
 
