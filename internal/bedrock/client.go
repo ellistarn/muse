@@ -172,13 +172,11 @@ func (c *Client) converse(ctx context.Context, system, user string) (string, Usa
 		InferenceConfig: &types.InferenceConfiguration{
 			MaxTokens: aws.Int32(16000),
 		},
+		// Adaptive thinking for Opus 4.6: lets Claude decide when and how much to think.
+		// https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html
 		AdditionalModelRequestFields: document.NewLazyDocument(map[string]any{
 			"thinking": map[string]any{
-				"type":          "enabled",
-				"budget_tokens": 10000,
-			},
-			// Anthropic recommends medium effort for Claude Opus 4.6
-			"reasoning": map[string]any{
+				"type":   "adaptive",
 				"effort": "medium",
 			},
 		}),
