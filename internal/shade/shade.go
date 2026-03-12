@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -87,8 +88,8 @@ func readSkillToolSpec() *types.ToolConfiguration {
 		Tools: []types.Tool{
 			&types.ToolMemberToolSpec{
 				Value: types.ToolSpecification{
-					Name:        strPtr("read_skill"),
-					Description: strPtr("Load a skill's full content by name. Call this for any skills relevant to the question."),
+					Name:        aws.String("read_skill"),
+					Description: aws.String("Load a skill's full content by name. Call this for any skills relevant to the question."),
 					InputSchema: &types.ToolInputSchemaMemberJson{
 						Value: document.NewLazyDocument(map[string]any{
 							"type": "object",
@@ -134,7 +135,8 @@ func (s *Shade) Ask(ctx context.Context, question string) (string, error) {
 		return sk.Content, nil
 	}
 
-	answer, _, err := s.bedrock.ConverseWithTools(ctx, system, question, toolConfig, handler)
+	answer, _, err := s.bedrock.ConverseWithTools(ctx, system, question, toolConfig, handler,
+		"Now produce your final answer to the original question. Be direct and concise.")
 	return answer, err
 }
 
@@ -148,8 +150,6 @@ func formatCatalog(skills []skill.Skill) string {
 	}
 	return b.String()
 }
-
-func strPtr(s string) *string { return &s }
 
 // Upload scans local sources, diffs against S3, and uploads changed sessions.
 func (s *Shade) Upload(ctx context.Context) (*UploadResult, error) {

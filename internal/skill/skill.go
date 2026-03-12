@@ -49,13 +49,18 @@ func LoadAll(ctx context.Context, client S3API, bucket string) ([]Skill, error) 
 // LoadCatalog returns all skills with only Name, Description, and Slug populated.
 // Content is left empty. This is the "menu" for progressive disclosure.
 func LoadCatalog(ctx context.Context, client S3API, bucket string) ([]Skill, error) {
-	all, err := LoadAll(ctx, client, bucket)
+	paths, err := listSkillPaths(ctx, client, bucket)
 	if err != nil {
 		return nil, err
 	}
-	catalog := make([]Skill, len(all))
-	for i, sk := range all {
-		catalog[i] = Skill{Name: sk.Name, Description: sk.Description, Slug: sk.Slug}
+	var catalog []Skill
+	for _, path := range paths {
+		sk, err := loadSkillMeta(ctx, client, bucket, path)
+		if err != nil {
+			continue // skip unparseable skills
+		}
+		sk.Slug = slugFromKey(path)
+		catalog = append(catalog, *sk)
 	}
 	return catalog, nil
 }
@@ -94,6 +99,24 @@ func listSkillPaths(ctx context.Context, client S3API, bucket string) ([]string,
 	return paths, nil
 }
 
+// loadSkillMeta fetches a skill file and parses only the YAML frontmatter.
+// The markdown body is read but discarded.
+func loadSkillMeta(ctx context.Context, client S3API, bucket, key string) (*Skill, error) {
+	out, err := client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get %s: %w", key, err)
+	}
+	defer out.Body.Close()
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", key, err)
+	}
+	return parseMeta(string(data))
+}
+
 func loadSkill(ctx context.Context, client S3API, bucket, key string) (*Skill, error) {
 	out, err := client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &bucket,
@@ -108,6 +131,19 @@ func loadSkill(ctx context.Context, client S3API, bucket, key string) (*Skill, e
 		return nil, fmt.Errorf("failed to read %s: %w", key, err)
 	}
 	return parse(string(data))
+}
+
+// parseMeta extracts only the YAML frontmatter from a SKILL.md, ignoring the body.
+func parseMeta(raw string) (*Skill, error) {
+	frontmatter, _, err := splitFrontmatter(raw)
+	if err != nil {
+		return nil, err
+	}
+	var sk Skill
+	if err := yaml.Unmarshal([]byte(frontmatter), &sk); err != nil {
+		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+	}
+	return &sk, nil
 }
 
 // parse splits a SKILL.md into YAML frontmatter and markdown body.
