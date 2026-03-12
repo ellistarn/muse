@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/ellistarn/shade/internal/shade"
+	"github.com/ellistarn/shade/prompts"
 )
 
 // NewServer creates an MCP server with a single "ask" tool.
@@ -15,7 +16,7 @@ func NewServer(s *shade.Shade) *server.MCPServer {
 	srv := server.NewMCPServer("shade", "0.1.0", server.WithToolCapabilities(false))
 	srv.AddTool(
 		mcp.NewTool("ask",
-			mcp.WithDescription("Ask the shade a question. The shade responds using its distilled skills and knowledge."),
+			mcp.WithDescription(prompts.Tool),
 			mcp.WithString("question", mcp.Required(), mcp.Description("The question to ask")),
 		),
 		askHandler(s),
