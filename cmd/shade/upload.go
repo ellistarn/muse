@@ -21,6 +21,7 @@ func newUploadCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer s.Close()
 			result, err := s.Upload(ctx)
 			if err != nil {
 				return err

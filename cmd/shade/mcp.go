@@ -21,6 +21,7 @@ func newMCPCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer s.Close()
 			srv := mcpserver.NewServer(s)
 			return server.ServeStdio(srv)
 		},

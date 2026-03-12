@@ -23,6 +23,7 @@ func newAskCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			defer s.Close()
 			question := strings.Join(args, " ")
 			answer, err := s.Ask(ctx, question)
 			if err != nil {

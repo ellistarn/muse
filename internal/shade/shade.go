@@ -26,7 +26,11 @@ type UploadResult struct {
 type Shade struct {
 	storage *storage.Client
 	bedrock *bedrock.Client
-	bucket  string
+}
+
+// Close releases resources held by the Shade, including background goroutines.
+func (s *Shade) Close() {
+	s.bedrock.Close()
 }
 
 func New(ctx context.Context, bucket string) (*Shade, error) {
@@ -41,7 +45,6 @@ func New(ctx context.Context, bucket string) (*Shade, error) {
 	return &Shade{
 		storage: storageClient,
 		bedrock: bedrockClient,
-		bucket:  bucket,
 	}, nil
 }
 

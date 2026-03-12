@@ -255,6 +255,58 @@ func TestDreamPipelineEmptyConversation(t *testing.T) {
 	if result.Processed != 0 {
 		t.Errorf("Processed = %d, want 0", result.Processed)
 	}
+	if len(llm.calls) != 0 {
+		t.Errorf("LLM calls = %d, want 0 (empty conversation should skip reflect)", len(llm.calls))
+	}
+}
+
+func TestDreamPipelineNoObservations(t *testing.T) {
+	store := newMockStore()
+	store.addSession("test", "sess-1", time.Now(), []source.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	})
+
+	llm := &mockLLM{
+		reflectResponse: "NO_OBSERVATIONS",
+		learnResponse:   "", // should never be called
+		totalExpected:   0,  // only reflect, no learn expected
+	}
+
+	result, err := dream.Run(context.Background(), store, llm, dream.Options{})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.Processed != 0 {
+		t.Errorf("Processed = %d, want 0 (NO_OBSERVATIONS should be filtered)", result.Processed)
+	}
+	if len(llm.calls) != 1 {
+		t.Errorf("LLM calls = %d, want 1 (reflect only, no learn)", len(llm.calls))
+	}
+}
+
+func TestDreamPipelineSessionLoadFailure(t *testing.T) {
+	store := newMockStore()
+	// Add a session entry without corresponding data, so GetSession fails
+	store.sessions = append(store.sessions, storage.SessionEntry{
+		Source:       "test",
+		SessionID:    "missing",
+		Key:          "memories/test/missing.json",
+		LastModified: time.Now(),
+	})
+
+	llm := &mockLLM{}
+
+	result, err := dream.Run(context.Background(), store, llm, dream.Options{})
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.Processed != 0 {
+		t.Errorf("Processed = %d, want 0", result.Processed)
+	}
+	if len(llm.calls) != 0 {
+		t.Errorf("LLM calls = %d, want 0 (failed session should be skipped)", len(llm.calls))
+	}
 }
 
 func TestDreamPipelinePruning(t *testing.T) {

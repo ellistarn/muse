@@ -107,6 +107,7 @@ func Run(ctx context.Context, store Store, llm LLM, opts Options) (*Result, erro
 	for i, entry := range pending {
 		session, err := store.GetSession(ctx, entry.Source, entry.SessionID)
 		if err != nil {
+			log.Printf("  warning: failed to load session %s: %v\n", entry.Key, err)
 			continue
 		}
 		sessions[i] = session
