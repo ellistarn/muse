@@ -216,12 +216,13 @@ func (c *Client) ConverseWithTools(ctx context.Context, system, user string, too
 			Content: toolResults,
 		})
 	}
-	// Synthesize: one final call without tools to produce the user-facing answer.
+	// Synthesize: one final call to produce the user-facing answer. We pass
+	// toolConfig so Bedrock accepts the toolUse/toolResult blocks in history.
 	messages = append(messages, types.Message{
 		Role:    types.ConversationRoleUser,
 		Content: []types.ContentBlock{&types.ContentBlockMemberText{Value: synthesisPrompt}},
 	})
-	text, usage, _, _, err := c.converseRaw(ctx, system, messages, nil, llm.ConverseOptions{})
+	text, usage, _, _, err := c.converseRaw(ctx, system, messages, toolConfig, llm.ConverseOptions{})
 	return text, totalUsage.Add(usage), err
 }
 
