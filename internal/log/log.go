@@ -11,6 +11,5 @@ func Printf(format string, args ...any) {
 }
 
 func Println(args ...any) {
-	fmt.Fprint(os.Stderr, "["+time.Now().Format("15:04:05")+"] ")
-	fmt.Fprintln(os.Stderr, args...)
+	fmt.Fprintln(os.Stderr, append([]any{"[" + time.Now().Format("15:04:05") + "]"}, args...)...)
 }

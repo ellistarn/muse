@@ -27,16 +27,25 @@ func newDreamCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			llm, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
-			if err != nil {
-				return err
-			}
-			log.Printf("Using model %s\n", llm.Model())
 			var result *dream.Result
 			if learn {
-				result, err = dream.LearnOnly(ctx, store, llm)
+				learnLLM, err := bedrock.NewClient(ctx, bedrock.ModelOpus)
+				if err != nil {
+					return err
+				}
+				log.Printf("Learning with %s\n", learnLLM.Model())
+				result, err = dream.LearnOnly(ctx, store, learnLLM)
 			} else {
-				result, err = dream.Run(ctx, store, llm, dream.Options{Reflect: reflect, Limit: limit})
+				reflectLLM, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
+				if err != nil {
+					return err
+				}
+				learnLLM, err := bedrock.NewClient(ctx, bedrock.ModelOpus)
+				if err != nil {
+					return err
+				}
+				log.Printf("Reflecting with %s, learning with %s\n", reflectLLM.Model(), learnLLM.Model())
+				result, err = dream.Run(ctx, store, reflectLLM, learnLLM, dream.Options{Reflect: reflect, Limit: limit})
 			}
 			if err != nil {
 				return err
@@ -46,6 +55,9 @@ func newDreamCmd() *cobra.Command {
 			}
 			if !learn {
 				fmt.Fprintf(cmd.OutOrStdout(), "Processed %d memories (%d pruned)\n", result.Processed, result.Pruned)
+				if result.Remaining > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "%d memories still pending reflection (run dream again)\n", result.Remaining)
+				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Produced %d skills (%dk input, %dk output tokens, $%.2f)\n",
 				result.Skills, result.Usage.InputTokens/1000, result.Usage.OutputTokens/1000, result.Usage.Cost())

@@ -107,10 +107,10 @@ type llmCall struct {
 	user   string
 }
 
-func (m *mockLLM) Converse(_ context.Context, system, user string) (string, llm.Usage, error) {
+func (m *mockLLM) Converse(_ context.Context, system, user string, _ ...llm.ConverseOption) (string, llm.Usage, error) {
 	m.calls = append(m.calls, llmCall{system: system, user: user})
 	usage := llm.Usage{InputTokens: 100, OutputTokens: 50}
-	if strings.Contains(system, "compressing observations") {
+	if strings.Contains(system, "distilling observations") {
 		return m.learnResponse, usage, nil
 	}
 	return m.reflectResponse, usage, nil
@@ -121,10 +121,14 @@ func TestDreamPipeline(t *testing.T) {
 	store.addSession("claude-code", "sess-1", time.Now(), []source.Message{
 		{Role: "user", Content: "use kebab-case for file names"},
 		{Role: "assistant", Content: "OK, I'll rename them."},
+		{Role: "user", Content: "also use lowercase"},
+		{Role: "assistant", Content: "Done."},
 	})
 	store.addSession("claude-code", "sess-2", time.Now(), []source.Message{
 		{Role: "user", Content: "never use emojis in commit messages"},
 		{Role: "assistant", Content: "Understood."},
+		{Role: "user", Content: "and keep them short"},
+		{Role: "assistant", Content: "Will do."},
 	})
 
 	llm := &mockLLM{
@@ -146,7 +150,7 @@ description: How to write commits.
 Keep commit messages plain text, no emojis.`,
 	}
 
-	result, err := dream.Run(context.Background(), store, llm, dream.Options{})
+	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -187,7 +191,7 @@ func TestDreamPipelineNoMemories(t *testing.T) {
 	store := newMockStore()
 	llm := &mockLLM{}
 
-	result, err := dream.Run(context.Background(), store, llm, dream.Options{})
+	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -208,6 +212,8 @@ func TestDreamPipelineLimit(t *testing.T) {
 		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []source.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
+			{Role: "user", Content: "follow up"},
+			{Role: "assistant", Content: "ok again"},
 		})
 	}
 
@@ -222,7 +228,7 @@ description: Test skill.
 Content here.`,
 	}
 
-	result, err := dream.Run(context.Background(), store, llm, dream.Options{Limit: 2})
+	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -230,8 +236,77 @@ Content here.`,
 	if result.Processed != 2 {
 		t.Errorf("Processed = %d, want 2", result.Processed)
 	}
+	if result.Remaining != 3 {
+		t.Errorf("Remaining = %d, want 3", result.Remaining)
+	}
 	if len(llm.calls) != 3 {
 		t.Errorf("LLM calls = %d, want 3 (2 reflect + 1 learn)", len(llm.calls))
+	}
+}
+
+func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
+	store := newMockStore()
+	for i := 0; i < 4; i++ {
+		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []source.Message{
+			{Role: "user", Content: fmt.Sprintf("message %d", i)},
+			{Role: "assistant", Content: "ok"},
+			{Role: "user", Content: "follow up"},
+			{Role: "assistant", Content: "ok again"},
+		})
+	}
+
+	llm := &mockLLM{
+		reflectResponse: "- observation",
+		learnResponse: `=== SKILL: test-skill ===
+---
+name: Test
+description: Test skill.
+---
+
+Content here.`,
+	}
+
+	// First run: limit to 2, should reflect 2 and learn from 2
+	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
+	if err != nil {
+		t.Fatalf("first Run() error: %v", err)
+	}
+	if result.Processed != 2 {
+		t.Errorf("first run Processed = %d, want 2", result.Processed)
+	}
+	if result.Remaining != 2 {
+		t.Errorf("first run Remaining = %d, want 2", result.Remaining)
+	}
+	firstRunReflections := len(store.reflections)
+	if firstRunReflections != 2 {
+		t.Errorf("reflections after first run = %d, want 2", firstRunReflections)
+	}
+
+	// Second run: limit to 2 again, should reflect 2 more and learn from all 4
+	llm.calls = nil
+	result, err = dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
+	if err != nil {
+		t.Fatalf("second Run() error: %v", err)
+	}
+	if result.Processed != 2 {
+		t.Errorf("second run Processed = %d, want 2", result.Processed)
+	}
+	if result.Remaining != 0 {
+		t.Errorf("second run Remaining = %d, want 0", result.Remaining)
+	}
+	if len(store.reflections) != 4 {
+		t.Errorf("reflections after second run = %d, want 4", len(store.reflections))
+	}
+	// 2 reflect + 1 learn, and learn should have received all 4 reflections
+	if len(llm.calls) != 3 {
+		t.Errorf("second run LLM calls = %d, want 3", len(llm.calls))
+	}
+	// The learn call (last one) should contain all 4 observations joined by ---
+	learnInput := llm.calls[len(llm.calls)-1].user
+	separators := strings.Count(learnInput, "---")
+	// 4 observations joined by "---" = 3 separators (in the join delimiters)
+	if separators < 3 {
+		t.Errorf("learn input has %d separators, want at least 3 (all 4 reflections)", separators)
 	}
 }
 
@@ -245,7 +320,7 @@ func TestDreamPipelineEmptyConversation(t *testing.T) {
 
 	llm := &mockLLM{}
 
-	result, err := dream.Run(context.Background(), store, llm, dream.Options{})
+	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -260,6 +335,8 @@ func TestDreamPipelineReflect(t *testing.T) {
 	store.addSession("test", "sess-1", time.Now(), []source.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
+		{Role: "user", Content: "one more thing"},
+		{Role: "assistant", Content: "sure"},
 	})
 
 	llm := &mockLLM{
@@ -274,14 +351,14 @@ Content.`,
 	}
 
 	// First run
-	_, err := dream.Run(context.Background(), store, llm, dream.Options{})
+	_, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
 	}
 
 	// With Reprocess, it should process again even though state would normally prune it
 	llm.calls = nil
-	result, err := dream.Run(context.Background(), store, llm, dream.Options{Reflect: true})
+	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Reflect: true})
 	if err != nil {
 		t.Fatalf("reprocess Run() error: %v", err)
 	}

@@ -36,6 +36,7 @@ type LLM interface {
 type Result struct {
 	Processed int
 	Pruned    int
+	Remaining int // memories still pending reflection
 	Skills    int
 	Usage     llm.Usage
 	Warnings  []string
@@ -57,7 +58,7 @@ func estimateTokens(s string) int {
 // Run executes the dream pipeline: reflect on new memories, then learn skills
 // from all reflections. Reflections are the source of truth for what has been
 // processed; there is no separate state file.
-func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, error) {
+func Run(ctx context.Context, store Store, reflectLLM, learnLLM LLM, opts Options) (*Result, error) {
 	// List all memories and existing reflections
 	log.Println("Listing memories...")
 	entries, err := store.ListSessions(ctx)
@@ -93,11 +94,12 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 	sort.Slice(pending, func(i, j int) bool {
 		return pending[i].LastModified.After(pending[j].LastModified)
 	})
+	totalPending := len(pending)
 	if opts.Limit > 0 && len(pending) > opts.Limit {
 		log.Printf("Found %d new memories, limiting to %d\n", len(pending), opts.Limit)
 		pending = pending[:opts.Limit]
 	}
-	log.Printf("Found %d memories (%d new, %d already reflected)\n", len(entries), len(pending), pruned)
+	log.Printf("Found %d memories (%d new, %d already reflected)\n", len(entries), totalPending, pruned)
 
 	var warnings []string
 	var reflectUsage llm.Usage
@@ -143,7 +145,7 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 					return
 				}
 				msgs := len(session.Messages)
-				obs, usage, err := reflectOnSession(ctx, client, session)
+				obs, usage, err := reflectOnSession(ctx, reflectLLM, session)
 				results[i] = mapResult{key: entry.Key, observations: obs, usage: usage, err: err}
 				n := completed.Add(1)
 				if err != nil {
@@ -172,17 +174,22 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 		log.Printf("Reflected on %d memories ($%.4f)\n", len(pending)-len(warnings), reflectUsage.Cost())
 	}
 
+	remaining := totalPending - len(pending)
+	if remaining > 0 {
+		log.Printf("%d memories still pending reflection (run dream again to continue)\n", remaining)
+	}
+
 	// Learn from ALL reflections (not just new ones)
 	allReflections, err := loadAllReflections(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load reflections: %w", err)
 	}
 	if len(allReflections) == 0 {
-		return &Result{Pruned: pruned, Skills: 0, Warnings: warnings}, nil
+		return &Result{Pruned: pruned, Remaining: remaining, Skills: 0, Warnings: warnings}, nil
 	}
 
 	log.Printf("Learning skills from %d reflections...\n", len(allReflections))
-	skills, learnUsage, err := learn(ctx, client, allReflections)
+	skills, learnUsage, err := learn(ctx, learnLLM, allReflections)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
@@ -202,6 +209,7 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 	return &Result{
 		Processed: processed,
 		Pruned:    pruned,
+		Remaining: remaining,
 		Skills:    len(skills),
 		Usage:     reflectUsage.Add(learnUsage),
 		Warnings:  warnings,
@@ -210,7 +218,7 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 
 // LearnOnly re-runs only the learn phase using persisted reflections.
 // Use this to re-synthesize skills with improved techniques without re-reflecting.
-func LearnOnly(ctx context.Context, store Store, client LLM) (*Result, error) {
+func LearnOnly(ctx context.Context, store Store, learnLLM LLM) (*Result, error) {
 	allReflections, err := loadAllReflections(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load reflections: %w", err)
@@ -220,7 +228,7 @@ func LearnOnly(ctx context.Context, store Store, client LLM) (*Result, error) {
 	}
 
 	log.Printf("Re-learning skills from %d reflections...\n", len(allReflections))
-	skills, usage, err := learn(ctx, client, allReflections)
+	skills, usage, err := learn(ctx, learnLLM, allReflections)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
