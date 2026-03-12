@@ -30,7 +30,7 @@ func newPushCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Found %d local sessions\n", result.Total)
 			if result.Uploaded > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "Uploaded %d sessions (%s transferred, %d unchanged)\n", result.Uploaded, shade.FormatBytes(result.Bytes), result.Skipped)
+				fmt.Fprintf(cmd.OutOrStdout(), "Uploaded %d sessions (%s), %d unchanged\n", result.Uploaded, shade.FormatBytes(result.Bytes), result.Skipped)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "All %d sessions unchanged\n", result.Skipped)
 			}
