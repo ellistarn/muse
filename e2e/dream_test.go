@@ -80,7 +80,7 @@ func (m *mockStore) PutReflection(_ context.Context, key, content string) error 
 
 func (m *mockStore) DeletePrefix(_ context.Context, prefix string) error {
 	m.deleted = append(m.deleted, prefix)
-	if prefix == "dream/reflections/" {
+	if prefix == "dreams/reflections/" {
 		m.reflections = map[string]string{}
 	}
 	return nil
@@ -88,6 +88,10 @@ func (m *mockStore) DeletePrefix(_ context.Context, prefix string) error {
 
 func (m *mockStore) PutSkill(_ context.Context, name, content string) error {
 	m.skills[name] = content
+	return nil
+}
+
+func (m *mockStore) SnapshotSkills(_ context.Context, _ string) error {
 	return nil
 }
 

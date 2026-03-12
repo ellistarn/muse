@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/ellistarn/shade/internal/awsconfig"
+	"github.com/ellistarn/shade/internal/skill"
 	"github.com/ellistarn/shade/internal/source"
 )
 
@@ -20,6 +22,12 @@ type Client struct {
 	s3     *s3.Client
 	bucket string
 }
+
+// S3 returns the underlying S3 client for direct use by skill loading.
+func (c *Client) S3() *s3.Client { return c.s3 }
+
+// Bucket returns the configured bucket name.
+func (c *Client) Bucket() string { return c.bucket }
 
 func NewClient(ctx context.Context, bucket string) (*Client, error) {
 	cfg, err := awsconfig.Load(ctx)
@@ -163,10 +171,10 @@ func (c *Client) PutSkill(ctx context.Context, name, content string) error {
 	return nil
 }
 
-// PutReflection writes a reflection to S3 under dream/reflections/{key}.md.
+// PutReflection writes a reflection to S3 under dreams/reflections/{key}.md.
 func (c *Client) PutReflection(ctx context.Context, key, content string) error {
 	// Replace the memories/ prefix so reflections mirror the memory layout
-	path := fmt.Sprintf("dream/reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(key, ".json"), "memories/"))
+	path := fmt.Sprintf("dreams/reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(key, ".json"), "memories/"))
 	contentType := "text/markdown"
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &c.bucket,
@@ -180,12 +188,12 @@ func (c *Client) PutReflection(ctx context.Context, key, content string) error {
 	return nil
 }
 
-// ListReflections returns the keys of all persisted reflections under dream/reflections/.
+// ListReflections returns the keys of all persisted reflections under dreams/reflections/.
 func (c *Client) ListReflections(ctx context.Context) (map[string]time.Time, error) {
 	reflections := map[string]time.Time{}
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
 		Bucket: &c.bucket,
-		Prefix: aws.String("dream/reflections/"),
+		Prefix: aws.String("dreams/reflections/"),
 	})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -193,9 +201,9 @@ func (c *Client) ListReflections(ctx context.Context) (map[string]time.Time, err
 			return nil, fmt.Errorf("failed to list reflections: %w", err)
 		}
 		for _, obj := range page.Contents {
-			// Convert dream/reflections/opencode/ses_abc.md back to memories/opencode/ses_abc.json
+			// Convert dreams/reflections/opencode/ses_abc.md back to memories/opencode/ses_abc.json
 			key := aws.ToString(obj.Key)
-			memoryKey := strings.TrimPrefix(key, "dream/reflections/")
+			memoryKey := strings.TrimPrefix(key, "dreams/reflections/")
 			memoryKey = "memories/" + strings.TrimSuffix(memoryKey, ".md") + ".json"
 			reflections[memoryKey] = aws.ToTime(obj.LastModified)
 		}
@@ -205,7 +213,7 @@ func (c *Client) ListReflections(ctx context.Context) (map[string]time.Time, err
 
 // GetReflection downloads a reflection's content from S3.
 func (c *Client) GetReflection(ctx context.Context, memoryKey string) (string, error) {
-	path := fmt.Sprintf("dream/reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(memoryKey, ".json"), "memories/"))
+	path := fmt.Sprintf("dreams/reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(memoryKey, ".json"), "memories/"))
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &path,
@@ -243,6 +251,103 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) error {
 		}
 	}
 	return nil
+}
+
+// SnapshotSkills copies all current skills to dreams/{timestamp}/skills/.
+// This preserves the skill set before a dream overwrites it.
+func (c *Client) SnapshotSkills(ctx context.Context, timestamp string) error {
+	prefix := "skills/"
+	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
+		Bucket: &c.bucket,
+		Prefix: aws.String(prefix),
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list skills for snapshot: %w", err)
+		}
+		for _, obj := range page.Contents {
+			srcKey := aws.ToString(obj.Key)
+			dstKey := fmt.Sprintf("dreams/history/%s/%s", timestamp, srcKey)
+			copySource := fmt.Sprintf("%s/%s", c.bucket, srcKey)
+			if _, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
+				Bucket:     &c.bucket,
+				CopySource: &copySource,
+				Key:        &dstKey,
+			}); err != nil {
+				return fmt.Errorf("failed to copy %s to %s: %w", srcKey, dstKey, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ListDreams returns timestamps of all dream snapshots, sorted ascending.
+func (c *Client) ListDreams(ctx context.Context) ([]string, error) {
+	prefix := "dreams/history/"
+	out, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:    &c.bucket,
+		Prefix:    aws.String(prefix),
+		Delimiter: aws.String("/"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list dreams: %w", err)
+	}
+	var timestamps []string
+	for _, cp := range out.CommonPrefixes {
+		p := aws.ToString(cp.Prefix)
+		// "dreams/history/2026-03-11T16:30:00Z/" -> "2026-03-11T16:30:00Z"
+		p = strings.TrimPrefix(p, prefix)
+		p = strings.TrimSuffix(p, "/")
+		if p != "" {
+			timestamps = append(timestamps, p)
+		}
+	}
+	sort.Strings(timestamps)
+	return timestamps, nil
+}
+
+// GetDreamSkills loads all skills from a specific dream snapshot.
+func (c *Client) GetDreamSkills(ctx context.Context, timestamp string) ([]skill.Skill, error) {
+	prefix := fmt.Sprintf("dreams/history/%s/skills/", timestamp)
+	var skills []skill.Skill
+	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
+		Bucket: &c.bucket,
+		Prefix: aws.String(prefix),
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list dream skills: %w", err)
+		}
+		for _, obj := range page.Contents {
+			key := aws.ToString(obj.Key)
+			if !strings.HasSuffix(key, "/SKILL.md") {
+				continue
+			}
+			out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+				Bucket: &c.bucket,
+				Key:    &key,
+			})
+			if err != nil {
+				continue
+			}
+			data, err := io.ReadAll(out.Body)
+			out.Body.Close()
+			if err != nil {
+				continue
+			}
+			sk, err := skill.Parse(string(data))
+			if err != nil {
+				continue
+			}
+			// Extract slug from key like "dreams/ts/skills/foo/SKILL.md"
+			rel := strings.TrimPrefix(key, prefix)
+			sk.Slug = strings.TrimSuffix(rel, "/SKILL.md")
+			skills = append(skills, *sk)
+		}
+	}
+	return skills, nil
 }
 
 func sessionKey(src, sessionID string) string {

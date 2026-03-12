@@ -130,7 +130,7 @@ func loadSkill(ctx context.Context, client S3API, bucket, key string) (*Skill, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", key, err)
 	}
-	return parse(string(data))
+	return Parse(string(data))
 }
 
 // parseMeta extracts only the YAML frontmatter from a SKILL.md, ignoring the body.
@@ -146,8 +146,8 @@ func parseMeta(raw string) (*Skill, error) {
 	return &sk, nil
 }
 
-// parse splits a SKILL.md into YAML frontmatter and markdown body.
-func parse(raw string) (*Skill, error) {
+// Parse splits a SKILL.md into YAML frontmatter and markdown body.
+func Parse(raw string) (*Skill, error) {
 	frontmatter, body, err := splitFrontmatter(raw)
 	if err != nil {
 		return nil, err

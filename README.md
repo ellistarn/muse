@@ -14,8 +14,12 @@ compresses the reflections into skills that capture your expertise. Skills are g
 information: they teach models how you want things done without leaking underlying data. Dreaming is
 lossy by design, keeping what matters and forgetting what doesn't.
 
-Reflections are persisted so you can re-synthesize skills later with better models or prompts
-(`dream --learn`) without re-processing all your memories.
+Each dream snapshots your previous skills before overwriting them, so you have a full history of how
+your shade has evolved. Reflections are persisted so you can re-synthesize skills later with better
+models or prompts (`dream --learn`) without re-processing all your memories.
+
+**Inspect** prints your current skills so you can see what your shade has learned. Use
+`inspect --diff` to get an LLM-generated summary of what changed since the last dream.
 
 **Listen** starts an MCP server that exposes a single tool: **ask**. An agent sends a question and
 gets back guidance shaped by your skills. Each call is stateless, a one-shot interaction with no
@@ -41,6 +45,8 @@ export SHADE_MODEL=claude-sonnet-4-20250514
 shade push              # push memories to storage
 shade dream             # distill skills from memories
 shade dream --learn     # re-synthesize skills from existing reflections
+shade inspect           # print all skills
+shade inspect --diff    # summarize what changed since the last dream
 shade listen            # start the MCP server
 ```
 
@@ -74,7 +80,8 @@ running anywhere.
 S3-compatible storage with the following layout:
 
 ```
-skills/{name}/SKILL.md               # distilled skills (https://agentskills.io)
-memories/{source}/{id}.json          # human session history
-dream/reflections/{source}/{id}.md   # per-memory reflections
+skills/{name}/SKILL.md                          # distilled skills (https://agentskills.io)
+memories/{source}/{id}.json                     # human session history
+dreams/reflections/{source}/{id}.md             # per-memory reflections
+dreams/history/{timestamp}/skills/{name}/SKILL.md  # skill snapshots from previous dreams
 ```

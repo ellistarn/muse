@@ -24,6 +24,7 @@ type Store interface {
 	PutReflection(ctx context.Context, key, content string) error
 	DeletePrefix(ctx context.Context, prefix string) error
 	PutSkill(ctx context.Context, name, content string) error
+	SnapshotSkills(ctx context.Context, timestamp string) error
 }
 
 // LLM is the subset of an LLM client used by the dream pipeline.
@@ -72,7 +73,7 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 	// If reprocessing, clear all existing reflections
 	if opts.Reflect {
 		log.Println("Re-reflecting all memories (clearing existing reflections)")
-		if err := store.DeletePrefix(ctx, "dream/reflections/"); err != nil {
+		if err := store.DeletePrefix(ctx, "dreams/reflections/"); err != nil {
 			return nil, fmt.Errorf("failed to clear reflections: %w", err)
 		}
 		reflections = map[string]time.Time{}
@@ -187,16 +188,12 @@ func Run(ctx context.Context, store Store, client LLM, opts Options) (*Result, e
 	}
 	log.Printf("Produced %d skills ($%.4f)\n", len(skills), learnUsage.Cost())
 
-	// Write skills (clear old skills first, dream produces a complete set)
-	log.Println("Writing skills to storage...")
-	if err := store.DeletePrefix(ctx, "skills/"); err != nil {
-		return nil, fmt.Errorf("failed to clear old skills: %w", err)
+	// Write skills (snapshot old skills first, then clear and replace)
+	writeWarnings, err := writeSkills(ctx, store, skills)
+	if err != nil {
+		return nil, err
 	}
-	for name, content := range skills {
-		if err := store.PutSkill(ctx, name, content); err != nil {
-			warnings = append(warnings, fmt.Sprintf("failed to write skill %s: %v", name, err))
-		}
-	}
+	warnings = append(warnings, writeWarnings...)
 
 	processed := len(pending) - len(warnings)
 	if processed < 0 {
@@ -230,7 +227,28 @@ func LearnOnly(ctx context.Context, store Store, client LLM) (*Result, error) {
 	log.Printf("Produced %d skills ($%.4f)\n", len(skills), usage.Cost())
 
 	log.Println("Writing skills to storage...")
-	var warnings []string
+	writeWarnings, err := writeSkills(ctx, store, skills)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Result{
+		Skills:   len(skills),
+		Usage:    usage,
+		Warnings: writeWarnings,
+	}, nil
+}
+
+// writeSkills snapshots existing skills, clears them, and writes the new set.
+func writeSkills(ctx context.Context, store Store, skills map[string]string) (warnings []string, err error) {
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	log.Printf("Snapshotting previous skills to dreams/history/%s/...\n", timestamp)
+	if err := store.SnapshotSkills(ctx, timestamp); err != nil {
+		log.Printf("Snapshot skipped (expected on first dream): %v\n", err)
+	} else {
+		log.Printf("Snapshot saved\n")
+	}
+	log.Printf("Writing %d skills to storage...\n", len(skills))
 	if err := store.DeletePrefix(ctx, "skills/"); err != nil {
 		return nil, fmt.Errorf("failed to clear old skills: %w", err)
 	}
@@ -239,12 +257,7 @@ func LearnOnly(ctx context.Context, store Store, client LLM) (*Result, error) {
 			warnings = append(warnings, fmt.Sprintf("failed to write skill %s: %v", name, err))
 		}
 	}
-
-	return &Result{
-		Skills:   len(skills),
-		Usage:    usage,
-		Warnings: warnings,
-	}, nil
+	return warnings, nil
 }
 
 // loadAllReflections fetches every persisted reflection from storage.
