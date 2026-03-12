@@ -14,12 +14,8 @@ compresses the reflections into skills that capture your expertise. Skills are g
 information: they teach models how you want things done without leaking underlying data. Dreaming is
 lossy by design, keeping what matters and forgetting what doesn't.
 
-Reflections are persisted so you can re-synthesize skills later with better models or prompts without
-re-processing all your memories.
-
-**Relearn** re-runs the skill synthesis step using your persisted reflections. Use this when you want
-to take advantage of a smarter model or improved learning prompts without the cost of re-reflecting
-on every memory.
+Reflections are persisted so you can re-synthesize skills later with better models or prompts
+(`dream --relearn`) without re-processing all your memories.
 
 **Listen** starts an MCP server that exposes a single tool: **ask**. An agent sends a question and
 gets back guidance shaped by your skills. Each call is stateless, a one-shot interaction with no
@@ -42,10 +38,10 @@ says so.
 export SHADE_BUCKET=$USER-shade
 export SHADE_MODEL=claude-sonnet-4-20250514
 
-shade push      # push memories to storage
-shade dream     # distill skills from memories
-shade relearn   # re-synthesize skills from existing reflections
-shade listen    # start the MCP server
+shade push              # push memories to storage
+shade dream             # distill skills from memories
+shade dream --relearn   # re-synthesize skills from existing reflections
+shade listen            # start the MCP server
 ```
 
 ## Install
