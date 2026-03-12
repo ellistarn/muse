@@ -288,12 +288,12 @@ func reflectOnSession(ctx context.Context, client LLM, session *source.Session) 
 	var totalUsage llm.Usage
 	for _, chunk := range chunks {
 		obs, usage, err := client.Converse(ctx, reflectPrompt, chunk, llm.WithMaxTokens(4096))
-		if err != nil {
-			return "", totalUsage, err
-		}
 		totalUsage = totalUsage.Add(usage)
 		if obs != "" {
 			allObs = append(allObs, obs)
+		}
+		if err != nil && obs == "" {
+			return "", totalUsage, err
 		}
 	}
 	return strings.Join(allObs, "\n\n"), totalUsage, nil
@@ -317,15 +317,41 @@ func learn(ctx context.Context, client LLM, observations []string) (map[string]s
 const maxChunkChars = 200_000
 
 // formatSession splits a session into chunks that fit within the token budget.
-// Each chunk breaks at message boundaries.
+// Each chunk breaks at message boundaries. Sessions with only a single user
+// message are skipped since no corrections or preferences were expressed.
 func formatSession(session *source.Session) []string {
+	// Require multiple user turns - a single prompt with no follow-up
+	// means no corrections or preferences were expressed.
+	var userTurns int
+	for _, msg := range session.Messages {
+		if msg.Role == "user" && len(msg.Content) > 0 {
+			userTurns++
+		}
+	}
+	if userTurns < 2 {
+		return nil
+	}
+
 	var chunks []string
 	var b strings.Builder
 	for _, msg := range session.Messages {
-		if msg.Content == "" {
+		// Build tool call summary if present
+		var tools []string
+		for _, tc := range msg.ToolCalls {
+			tools = append(tools, tc.Name)
+		}
+		hasContent := msg.Content != "" || len(tools) > 0
+		if !hasContent {
 			continue
 		}
-		line := fmt.Sprintf("[%s]: %s\n\n", msg.Role, msg.Content)
+		var line string
+		if len(tools) > 0 && msg.Content != "" {
+			line = fmt.Sprintf("[%s]: %s\n[tools: %s]\n\n", msg.Role, msg.Content, strings.Join(tools, ", "))
+		} else if len(tools) > 0 {
+			line = fmt.Sprintf("[%s]: [tools: %s]\n\n", msg.Role, strings.Join(tools, ", "))
+		} else {
+			line = fmt.Sprintf("[%s]: %s\n\n", msg.Role, msg.Content)
+		}
 		if b.Len()+len(line) > maxChunkChars && b.Len() > 0 {
 			chunks = append(chunks, b.String())
 			b.Reset()
