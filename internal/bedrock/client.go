@@ -33,6 +33,22 @@ func (u Usage) Cost() float64 {
 	return float64(u.InputTokens)*u.inputPricePerToken + float64(u.OutputTokens)*u.outputPricePerToken
 }
 
+// Add combines two Usage values, preserving pricing from whichever has it.
+func (u Usage) Add(other Usage) Usage {
+	result := Usage{
+		InputTokens:  u.InputTokens + other.InputTokens,
+		OutputTokens: u.OutputTokens + other.OutputTokens,
+	}
+	if u.inputPricePerToken != 0 {
+		result.inputPricePerToken = u.inputPricePerToken
+		result.outputPricePerToken = u.outputPricePerToken
+	} else {
+		result.inputPricePerToken = other.inputPricePerToken
+		result.outputPricePerToken = other.outputPricePerToken
+	}
+	return result
+}
+
 type modelPricing struct {
 	inputPerToken  float64
 	outputPerToken float64
@@ -160,6 +176,10 @@ func (c *Client) converse(ctx context.Context, system, user string) (string, Usa
 			"thinking": map[string]any{
 				"type":          "enabled",
 				"budget_tokens": 10000,
+			},
+			// Anthropic recommends medium effort for Claude Opus 4.6
+			"reasoning": map[string]any{
+				"effort": "medium",
 			},
 		}),
 	})

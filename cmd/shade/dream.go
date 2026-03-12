@@ -36,10 +36,9 @@ func newDreamCmd() *cobra.Command {
 			for _, w := range result.Warnings {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}
-			totalUsage := bedrock.Usage{InputTokens: result.InputTokens, OutputTokens: result.OutputTokens}
 			fmt.Fprintf(cmd.OutOrStdout(), "Processed %d memories (%d pruned)\n", result.Processed, result.Pruned)
 			fmt.Fprintf(cmd.OutOrStdout(), "Produced %d skills (%dk input, %dk output tokens, $%.2f)\n",
-				result.Skills, result.InputTokens/1000, result.OutputTokens/1000, totalUsage.Cost())
+				result.Skills, result.Usage.InputTokens/1000, result.Usage.OutputTokens/1000, result.Usage.Cost())
 			return nil
 		},
 	}

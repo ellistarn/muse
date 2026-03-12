@@ -25,12 +25,11 @@ const stateKey = "dream/state.json"
 
 // Result summarizes a dream run.
 type Result struct {
-	Processed    int
-	Pruned       int
-	Skills       int
-	InputTokens  int
-	OutputTokens int
-	Warnings     []string
+	Processed int
+	Pruned    int
+	Skills    int
+	Usage     bedrock.Usage
+	Warnings  []string
 }
 
 // Options configures a dream run.
@@ -104,10 +103,10 @@ func Run(ctx context.Context, store *storage.Client, llm *bedrock.Client, opts O
 	type mapResult struct {
 		key          string
 		observations string
+		usage        bedrock.Usage
 		err          error
 	}
 	results := make([]mapResult, len(pending))
-	var inputTokens, outputTokens atomic.Int64
 	var completed atomic.Int32
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 8)
@@ -127,9 +126,7 @@ func Run(ctx context.Context, store *storage.Client, llm *bedrock.Client, opts O
 			}
 			msgs := len(session.Messages)
 			obs, usage, err := reflect(ctx, llm, session)
-			inputTokens.Add(int64(usage.InputTokens))
-			outputTokens.Add(int64(usage.OutputTokens))
-			results[i] = mapResult{key: entry.Key, observations: obs, err: err}
+			results[i] = mapResult{key: entry.Key, observations: obs, usage: usage, err: err}
 			n := completed.Add(1)
 			if err != nil {
 				fmt.Printf("  [%d/%d] %s (%d msgs) error: %v\n", n, len(pending), entry.Key, msgs, err)
@@ -144,28 +141,27 @@ func Run(ctx context.Context, store *storage.Client, llm *bedrock.Client, opts O
 	// Collect observations, record warnings for failures
 	var allObservations []string
 	var warnings []string
+	var reflectUsage bedrock.Usage
 	processedKeys := map[string]time.Time{}
 	for _, r := range results {
 		if r.err != nil {
 			warnings = append(warnings, fmt.Sprintf("failed to process %s: %v", r.key, r.err))
 			continue
 		}
+		reflectUsage = reflectUsage.Add(r.usage)
 		if r.observations != "" {
 			allObservations = append(allObservations, r.observations)
 		}
 		processedKeys[r.key] = time.Now()
 	}
-	reflectUsage := bedrock.Usage{InputTokens: int(inputTokens.Load()), OutputTokens: int(outputTokens.Load())}
 	fmt.Printf("Reflected on %d memories ($%.4f)\n", len(allObservations), reflectUsage.Cost())
 
 	// Learn: compress observations into skills
-	fmt.Printf("Learning %d observations into skills...\n", len(allObservations))
+	fmt.Printf("Learning skills from %d reflections...\n", len(allObservations))
 	skills, learnUsage, err := learn(ctx, llm, allObservations)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
-	inputTokens.Add(int64(learnUsage.InputTokens))
-	outputTokens.Add(int64(learnUsage.OutputTokens))
 	fmt.Printf("Produced %d skills ($%.4f)\n", len(skills), learnUsage.Cost())
 
 	// Write skills to S3 (clear old skills first, dream produces a complete set)
@@ -190,12 +186,11 @@ func Run(ctx context.Context, store *storage.Client, llm *bedrock.Client, opts O
 	}
 
 	return &Result{
-		Processed:    len(allObservations),
-		Pruned:       pruned,
-		Skills:       len(skills),
-		InputTokens:  int(inputTokens.Load()),
-		OutputTokens: int(outputTokens.Load()),
-		Warnings:     warnings,
+		Processed: len(allObservations),
+		Pruned:    pruned,
+		Skills:    len(skills),
+		Usage:     reflectUsage.Add(learnUsage),
+		Warnings:  warnings,
 	}, nil
 }
 
