@@ -1,7 +1,7 @@
 # Muse
 
 A muse is the distilled essence of how you think. It absorbs your memories from agent interactions,
-distills them into skills, and uses those skills to advise any agent that asks.
+distills them into skills, and uses those skills to when asked questions.
 
 ## How it works
 
@@ -18,11 +18,11 @@ Each dream snapshots your previous skills before overwriting them, so you have a
 your muse has evolved. Reflections are persisted so you can re-synthesize skills later with better
 models or prompts (`dream --learn`) without re-processing all your memories.
 
-**Inspect** prints your current skills so you can see what your muse knows. Use
-`inspect --diff` to get an LLM-generated summary of what changed since the last dream.
+**Inspect** prints your current skills so you can see what your muse knows. Use `inspect --diff` to
+get an LLM-generated summary of what changed since the last dream.
 
-**Ask** asks your muse a question and gets back guidance shaped by your skills. Available both as
-a CLI command and as an MCP tool (via `listen`). Each call is stateless, a one-shot interaction with
+**Ask** asks your muse a question and gets back guidance shaped by your skills. Available both as a
+CLI command and as an MCP tool (via `listen`). Each call is stateless, a one-shot interaction with
 no session history or persistence.
 
 **Listen** starts an MCP server that exposes the **ask** tool so agents can query your muse
