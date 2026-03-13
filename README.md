@@ -2,7 +2,7 @@
 
 A muse absorbs memories from your conversations, distills them into a soul
 document (soul.md), and embodies your unique thought processes when asked
-questions. Memories are discovered from Claude Code, Kiro, and OpenCode.
+questions.
 
 ## Install
 
