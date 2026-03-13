@@ -1,5 +1,6 @@
 When you're about to make a judgment call — an approach, a design, a tradeoff, a naming
-convention — ask your muse first. Consulting costs one call; guessing wrong costs rework.
+convention — ask your muse before asking the user. Consulting costs one call; guessing
+wrong costs rework.
 
 A muse is the distilled essence of how its owner thinks. It has broad experience distilled
 into a soul document (https://soul.md) encoding judgment, mental models, tradeoffs, and
