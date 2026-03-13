@@ -9,7 +9,7 @@ import (
 
 	"github.com/ellistarn/muse/internal/bedrock"
 	"github.com/ellistarn/muse/internal/log"
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/prompts"
 )
@@ -153,15 +153,15 @@ func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	log.Println("Scanning local sessions...")
 	type result struct {
 		name     string
-		sessions []source.Session
+		sessions []memory.Session
 		err      error
 	}
-	providers := source.Providers()
+	providers := memory.Providers()
 	results := make([]result, len(providers))
 	var wg sync.WaitGroup
 	for i, provider := range providers {
 		wg.Add(1)
-		go func(i int, p source.Provider) {
+		go func(i int, p memory.Provider) {
 			defer wg.Done()
 			sessions, err := p.Sessions()
 			results[i] = result{name: p.Name(), sessions: sessions, err: err}
@@ -169,7 +169,7 @@ func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	}
 	wg.Wait()
 
-	var local []source.Session
+	var local []memory.Session
 	var warnings []string
 	for _, r := range results {
 		if r.err != nil {

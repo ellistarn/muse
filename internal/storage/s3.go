@@ -16,7 +16,7 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/ellistarn/muse/internal/awsconfig"
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 )
 
 const soulKey = "soul.md"
@@ -71,7 +71,7 @@ func (c *S3Store) ListSessions(ctx context.Context) ([]SessionEntry, error) {
 }
 
 // PutSession uploads a session as JSON and returns the number of bytes written.
-func (c *S3Store) PutSession(ctx context.Context, session *source.Session) (int, error) {
+func (c *S3Store) PutSession(ctx context.Context, session *memory.Session) (int, error) {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal session: %w", err)
@@ -91,7 +91,7 @@ func (c *S3Store) PutSession(ctx context.Context, session *source.Session) (int,
 }
 
 // GetSession downloads and deserializes a session from S3.
-func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*source.Session, error) {
+func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*memory.Session, error) {
 	key := sessionKey(src, sessionID)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
@@ -105,7 +105,7 @@ func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*sourc
 	if err != nil {
 		return nil, fmt.Errorf("failed to read session %s: %w", sessionID, err)
 	}
-	var session source.Session
+	var session memory.Session
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session %s: %w", sessionID, err)
 	}

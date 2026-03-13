@@ -11,7 +11,7 @@ import (
 
 	"github.com/ellistarn/muse/internal/llm"
 	"github.com/ellistarn/muse/internal/log"
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/prompts"
 )
@@ -260,7 +260,7 @@ type turn struct {
 	humanContent     string // human's message
 }
 
-func reflectOnSession(ctx context.Context, client LLM, session *source.Session) (string, llm.Usage, error) {
+func reflectOnSession(ctx context.Context, client LLM, session *memory.Session) (string, llm.Usage, error) {
 	turns := extractTurns(session)
 	if len(turns) == 0 {
 		return "", llm.Usage{}, nil
@@ -388,7 +388,7 @@ const maxChunkChars = 200_000
 // the assistant message that preceded a human response with that human message.
 // Sessions with fewer than 2 human turns are skipped (no corrections or
 // preferences were expressed).
-func extractTurns(session *source.Session) []turn {
+func extractTurns(session *memory.Session) []turn {
 	var userTurns int
 	for _, msg := range session.Messages {
 		if msg.Role == "user" && len(msg.Content) > 0 {

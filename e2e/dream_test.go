@@ -9,14 +9,14 @@ import (
 
 	"github.com/ellistarn/muse/internal/dream"
 	"github.com/ellistarn/muse/internal/llm"
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
 // mockStore implements storage.Store with in-memory state.
 type mockStore struct {
 	sessions    []storage.SessionEntry
-	data        map[string]*source.Session
+	data        map[string]*memory.Session
 	soul        string
 	reflections map[string]string // memoryKey -> content
 	deleted     []string
@@ -24,12 +24,12 @@ type mockStore struct {
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		data:        map[string]*source.Session{},
+		data:        map[string]*memory.Session{},
 		reflections: map[string]string{},
 	}
 }
 
-func (m *mockStore) addSession(src, id string, modified time.Time, messages []source.Message) {
+func (m *mockStore) addSession(src, id string, modified time.Time, messages []memory.Message) {
 	key := fmt.Sprintf("memories/%s/%s.json", src, id)
 	m.sessions = append(m.sessions, storage.SessionEntry{
 		Source:       src,
@@ -37,7 +37,7 @@ func (m *mockStore) addSession(src, id string, modified time.Time, messages []so
 		Key:          key,
 		LastModified: modified,
 	})
-	m.data[src+"/"+id] = &source.Session{
+	m.data[src+"/"+id] = &memory.Session{
 		Source:    src,
 		SessionID: id,
 		Messages:  messages,
@@ -48,7 +48,7 @@ func (m *mockStore) ListSessions(_ context.Context) ([]storage.SessionEntry, err
 	return m.sessions, nil
 }
 
-func (m *mockStore) GetSession(_ context.Context, src, sessionID string) (*source.Session, error) {
+func (m *mockStore) GetSession(_ context.Context, src, sessionID string) (*memory.Session, error) {
 	s, ok := m.data[src+"/"+sessionID]
 	if !ok {
 		return nil, fmt.Errorf("session not found: %s/%s", src, sessionID)
@@ -56,7 +56,7 @@ func (m *mockStore) GetSession(_ context.Context, src, sessionID string) (*sourc
 	return s, nil
 }
 
-func (m *mockStore) PutSession(_ context.Context, session *source.Session) (int, error) {
+func (m *mockStore) PutSession(_ context.Context, session *memory.Session) (int, error) {
 	key := fmt.Sprintf("memories/%s/%s.json", session.Source, session.SessionID)
 	m.data[session.Source+"/"+session.SessionID] = session
 	m.sessions = append(m.sessions, storage.SessionEntry{
@@ -141,13 +141,13 @@ func (m *mockLLM) Converse(_ context.Context, system, user string, _ ...llm.Conv
 
 func TestDreamPipeline(t *testing.T) {
 	store := newMockStore()
-	store.addSession("claude-code", "sess-1", time.Now(), []source.Message{
+	store.addSession("claude-code", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "use kebab-case for file names"},
 		{Role: "assistant", Content: "OK, I'll rename them."},
 		{Role: "user", Content: "also use lowercase"},
 		{Role: "assistant", Content: "Done."},
 	})
-	store.addSession("claude-code", "sess-2", time.Now(), []source.Message{
+	store.addSession("claude-code", "sess-2", time.Now(), []memory.Message{
 		{Role: "user", Content: "never use emojis in commit messages"},
 		{Role: "assistant", Content: "Understood."},
 		{Role: "user", Content: "and keep them short"},
@@ -207,7 +207,7 @@ func TestDreamPipelineNoMemories(t *testing.T) {
 func TestDreamPipelineLimit(t *testing.T) {
 	store := newMockStore()
 	for i := 0; i < 5; i++ {
-		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []source.Message{
+		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -239,7 +239,7 @@ func TestDreamPipelineLimit(t *testing.T) {
 func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	store := newMockStore()
 	for i := 0; i < 4; i++ {
-		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []source.Message{
+		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -299,7 +299,7 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 func TestDreamPipelineEmptyConversation(t *testing.T) {
 	store := newMockStore()
 	// Session with only empty messages produces no observations
-	store.addSession("test", "empty", time.Now(), []source.Message{
+	store.addSession("test", "empty", time.Now(), []memory.Message{
 		{Role: "user", Content: ""},
 		{Role: "assistant", Content: ""},
 	})
@@ -318,7 +318,7 @@ func TestDreamPipelineEmptyConversation(t *testing.T) {
 
 func TestDreamPipelineReflect(t *testing.T) {
 	store := newMockStore()
-	store.addSession("test", "sess-1", time.Now(), []source.Message{
+	store.addSession("test", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 		{Role: "user", Content: "one more thing"},

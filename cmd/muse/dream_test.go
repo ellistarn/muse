@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ellistarn/muse/internal/llm"
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -55,7 +55,7 @@ func TestRunDream_PropagatesLearnError(t *testing.T) {
 
 func TestRunDream_SuccessfulRun(t *testing.T) {
 	store := newTestStore()
-	store.addSession("test", "sess-1", []source.Message{
+	store.addSession("test", "sess-1", []memory.Message{
 		{Role: "user", Content: "use tabs"},
 		{Role: "assistant", Content: "ok"},
 		{Role: "user", Content: "also no emojis"},
@@ -103,19 +103,19 @@ func TestRunDream_SuccessfulLearn(t *testing.T) {
 // testStore implements storage.Store with in-memory state.
 type testStore struct {
 	sessions    []storage.SessionEntry
-	data        map[string]*source.Session
+	data        map[string]*memory.Session
 	soul        string
 	reflections map[string]string
 }
 
 func newTestStore() *testStore {
 	return &testStore{
-		data:        map[string]*source.Session{},
+		data:        map[string]*memory.Session{},
 		reflections: map[string]string{},
 	}
 }
 
-func (s *testStore) addSession(src, id string, messages []source.Message) {
+func (s *testStore) addSession(src, id string, messages []memory.Message) {
 	key := fmt.Sprintf("memories/%s/%s.json", src, id)
 	s.sessions = append(s.sessions, storage.SessionEntry{
 		Source:       src,
@@ -123,7 +123,7 @@ func (s *testStore) addSession(src, id string, messages []source.Message) {
 		Key:          key,
 		LastModified: time.Now(),
 	})
-	s.data[src+"/"+id] = &source.Session{
+	s.data[src+"/"+id] = &memory.Session{
 		Source:    src,
 		SessionID: id,
 		Messages:  messages,
@@ -133,14 +133,14 @@ func (s *testStore) addSession(src, id string, messages []source.Message) {
 func (s *testStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
 	return s.sessions, nil
 }
-func (s *testStore) GetSession(_ context.Context, src, id string) (*source.Session, error) {
+func (s *testStore) GetSession(_ context.Context, src, id string) (*memory.Session, error) {
 	sess, ok := s.data[src+"/"+id]
 	if !ok {
 		return nil, fmt.Errorf("session not found: %s/%s", src, id)
 	}
 	return sess, nil
 }
-func (s *testStore) PutSession(_ context.Context, session *source.Session) (int, error) {
+func (s *testStore) PutSession(_ context.Context, session *memory.Session) (int, error) {
 	key := fmt.Sprintf("memories/%s/%s.json", session.Source, session.SessionID)
 	s.data[session.Source+"/"+session.SessionID] = session
 	s.sessions = append(s.sessions, storage.SessionEntry{
@@ -196,10 +196,10 @@ type failingStore struct{ err error }
 func (s *failingStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
 	return nil, s.err
 }
-func (s *failingStore) GetSession(_ context.Context, _, _ string) (*source.Session, error) {
+func (s *failingStore) GetSession(_ context.Context, _, _ string) (*memory.Session, error) {
 	return nil, s.err
 }
-func (s *failingStore) PutSession(_ context.Context, _ *source.Session) (int, error) {
+func (s *failingStore) PutSession(_ context.Context, _ *memory.Session) (int, error) {
 	return 0, s.err
 }
 func (s *failingStore) GetSoul(_ context.Context) (string, error) { return "", s.err }

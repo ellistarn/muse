@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 )
 
 // LocalStore implements Store backed by the local filesystem, rooted at ~/.muse/.
@@ -79,7 +79,7 @@ func (l *LocalStore) ListSessions(_ context.Context) ([]SessionEntry, error) {
 }
 
 // PutSession writes a session as JSON and returns the number of bytes written.
-func (l *LocalStore) PutSession(_ context.Context, session *source.Session) (int, error) {
+func (l *LocalStore) PutSession(_ context.Context, session *memory.Session) (int, error) {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal session: %w", err)
@@ -95,7 +95,7 @@ func (l *LocalStore) PutSession(_ context.Context, session *source.Session) (int
 }
 
 // GetSession reads and deserializes a session from the filesystem.
-func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*source.Session, error) {
+func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*memory.Session, error) {
 	path := filepath.Join(l.root, "memories", src, sessionID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -104,7 +104,7 @@ func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*sour
 		}
 		return nil, fmt.Errorf("failed to read session %s: %w", sessionID, err)
 	}
-	var session source.Session
+	var session memory.Session
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session %s: %w", sessionID, err)
 	}

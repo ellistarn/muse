@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ellistarn/muse/internal/source"
+	"github.com/ellistarn/muse/internal/memory"
 )
 
 // Store is the interface for all storage operations. Implementations include
@@ -13,8 +13,8 @@ import (
 type Store interface {
 	// Sessions
 	ListSessions(ctx context.Context) ([]SessionEntry, error)
-	GetSession(ctx context.Context, src, sessionID string) (*source.Session, error)
-	PutSession(ctx context.Context, session *source.Session) (int, error)
+	GetSession(ctx context.Context, src, sessionID string) (*memory.Session, error)
+	PutSession(ctx context.Context, session *memory.Session) (int, error)
 
 	// Soul
 	GetSoul(ctx context.Context) (string, error)
