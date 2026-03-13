@@ -21,7 +21,7 @@ func newDreamCmd() *cobra.Command {
 		Use:   "dream",
 		Short: "Distill a soul from memories",
 		Long: `Processes your uploaded memories and distills them into a soul document that
-captures your expertise. Each dream snapshots the previous soul before
+captures how you think. Each dream snapshots the previous soul before
 overwriting it.
 
 Use --learn to re-distill the soul from existing reflections without
