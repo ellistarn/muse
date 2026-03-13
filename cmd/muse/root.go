@@ -11,8 +11,29 @@ var bucket string
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:           "muse",
-		Short:         "The distilled essence of how you think",
+		Use:   "muse",
+		Short: "The distilled essence of how you think",
+		Long: `A muse absorbs your memories from agent interactions, distills them into a
+soul document, and embodies your unique thought processes when asked questions.
+
+Workflow:
+
+  1. muse push       Collect local agent sessions and upload them to storage
+  2. muse dream      Reflect on memories and distill a soul document
+  3. muse ask        Ask your muse a question (stateless, one-shot)
+  4. muse listen     Start an MCP server so agents can ask your muse
+
+Other commands:
+
+  muse inspect       View your soul or see what changed since the last dream
+
+Getting started:
+
+  export MUSE_BUCKET=$USER-muse    # storage bucket
+  export MUSE_MODEL=<model-id>     # model override (optional)
+  muse push && muse dream && muse inspect
+
+Run "muse listen --help" for MCP server configuration.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}

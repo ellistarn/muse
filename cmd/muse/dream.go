@@ -20,6 +20,16 @@ func newDreamCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dream",
 		Short: "Distill a soul from memories",
+		Long: `Processes your uploaded memories and distills them into a soul document that
+captures how you think. Each dream snapshots the previous soul before
+overwriting it.
+
+Use --learn to re-distill the soul from existing reflections without
+reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
+		Example: `  muse dream              # reflect on new memories and distill soul
+  muse dream --learn      # re-distill soul from existing reflections
+  muse dream --reflect    # re-reflect on all memories from scratch
+  muse dream --limit 50   # process at most 50 memories`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
 				return err

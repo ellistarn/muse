@@ -15,7 +15,12 @@ func newAskCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ask [question]",
 		Short: "Ask your muse a question",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Sends a question to your muse and streams the response. Each call is
+stateless — your muse has no memory of previous questions. Ask opinionated
+questions ("Is X a good approach for Y?") rather than factual lookups.`,
+		Example: `  muse ask "Is a monorepo the right call for this project?"
+  muse ask "How should I structure error handling in Go?"`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
 				return err
