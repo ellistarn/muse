@@ -12,6 +12,10 @@ func newPushCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "push",
 		Short: "Push memories to storage",
+		Long: `Finds local agent sessions (OpenCode, Claude Code, Kiro, etc.) and uploads
+them to your S3 bucket. Uploads are incremental — sessions already in storage
+are skipped. Run this before dreaming to give your muse new material.`,
+		Example: `  muse push`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
 				return err

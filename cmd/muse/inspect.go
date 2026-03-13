@@ -16,6 +16,14 @@ func newInspectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "inspect",
 		Short: "Inspect the distilled soul",
+		Long: `Prints your current soul document to stdout. If no soul exists yet, prompts
+you to run 'muse dream'.
+
+Use --diff to generate an LLM-summarized comparison between the current soul
+and the most recent dream snapshot, showing what was added, removed, or
+revised.`,
+		Example: `  muse inspect          # print the soul
+  muse inspect --diff   # summarize what changed since the last dream`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireBucket(); err != nil {
 				return err
