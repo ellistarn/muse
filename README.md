@@ -13,8 +13,8 @@ go install github.com/ellistarn/muse/cmd/muse@latest
 ## Getting Started
 
 ```bash
-muse dream             # discover memories and distill your soul
-muse soul              # print the soul document
+muse dream             # discover memories and distill soul.md
+muse soul              # print soul.md
 ```
 
 Wire up the MCP server so agents can ask your muse questions:
