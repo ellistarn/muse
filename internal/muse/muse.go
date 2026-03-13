@@ -38,22 +38,18 @@ type AskResult struct {
 
 // Muse holds the state needed for all operations.
 type Muse struct {
-	storage  *storage.Client
+	storage  storage.Store
 	bedrock  *bedrock.Client
 	soul     string // the full soul document, loaded at init
 	sessions *sessionStore
 }
 
-func New(ctx context.Context, bucket string) (*Muse, error) {
-	storageClient, err := storage.NewClient(ctx, bucket)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create storage client: %w", err)
-	}
+func New(ctx context.Context, store storage.Store) (*Muse, error) {
 	bedrockClient, err := bedrock.NewClient(ctx, bedrock.ModelOpus)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bedrock client: %w", err)
 	}
-	soul, err := storageClient.GetSoul(ctx)
+	soul, err := store.GetSoul(ctx)
 	if err != nil {
 		if !storage.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to load soul: %w", err)
@@ -66,7 +62,7 @@ func New(ctx context.Context, bucket string) (*Muse, error) {
 		log.Println("No soul found (run 'muse dream' to generate one)")
 	}
 	return &Muse{
-		storage:  storageClient,
+		storage:  store,
 		bedrock:  bedrockClient,
 		soul:     soul,
 		sessions: newSessionStore(),
@@ -141,7 +137,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 	}, nil
 }
 
-// Upload scans local sources, diffs against S3, and uploads changed sessions.
+// Upload scans local sources, diffs against storage, and uploads changed sessions.
 func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	log.Println("Listing remote sessions...")
 	existing, err := m.storage.ListSessions(ctx)

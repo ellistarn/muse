@@ -21,38 +21,28 @@ import (
 
 const soulKey = "soul.md"
 
-// IsNotFound reports whether the error is an S3 NoSuchKey error.
-func IsNotFound(err error) bool {
-	var nsk *s3types.NoSuchKey
-	return errors.As(err, &nsk)
-}
-
-type Client struct {
+// S3Store implements Store backed by an S3 bucket.
+type S3Store struct {
 	s3     *s3.Client
 	bucket string
 }
 
-func NewClient(ctx context.Context, bucket string) (*Client, error) {
+// Verify S3Store implements Store at compile time.
+var _ Store = (*S3Store)(nil)
+
+func NewS3Store(ctx context.Context, bucket string) (*S3Store, error) {
 	cfg, err := awsconfig.Load(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{
+	return &S3Store{
 		s3:     s3.NewFromConfig(cfg),
 		bucket: bucket,
 	}, nil
 }
 
-// SessionEntry is the metadata returned by ListSessions without downloading full content.
-type SessionEntry struct {
-	Source       string
-	SessionID    string
-	Key          string
-	LastModified time.Time
-}
-
 // ListSessions returns all session keys with their S3 LastModified timestamps.
-func (c *Client) ListSessions(ctx context.Context) ([]SessionEntry, error) {
+func (c *S3Store) ListSessions(ctx context.Context) ([]SessionEntry, error) {
 	var entries []SessionEntry
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
 		Bucket: &c.bucket,
@@ -81,7 +71,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionEntry, error) {
 }
 
 // PutSession uploads a session as JSON and returns the number of bytes written.
-func (c *Client) PutSession(ctx context.Context, session *source.Session) (int, error) {
+func (c *S3Store) PutSession(ctx context.Context, session *source.Session) (int, error) {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal session: %w", err)
@@ -101,14 +91,14 @@ func (c *Client) PutSession(ctx context.Context, session *source.Session) (int, 
 }
 
 // GetSession downloads and deserializes a session from S3.
-func (c *Client) GetSession(ctx context.Context, src, sessionID string) (*source.Session, error) {
+func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*source.Session, error) {
 	key := sessionKey(src, sessionID)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &key,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session %s: %w", sessionID, err)
+		return nil, wrapS3NotFound(err, key)
 	}
 	defer out.Body.Close()
 	data, err := io.ReadAll(out.Body)
@@ -123,13 +113,13 @@ func (c *Client) GetSession(ctx context.Context, src, sessionID string) (*source
 }
 
 // GetSoul downloads the soul document from S3.
-func (c *Client) GetSoul(ctx context.Context) (string, error) {
+func (c *S3Store) GetSoul(ctx context.Context) (string, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    aws.String(soulKey),
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get soul: %w", err)
+		return "", wrapS3NotFound(err, soulKey)
 	}
 	defer out.Body.Close()
 	data, err := io.ReadAll(out.Body)
@@ -140,7 +130,7 @@ func (c *Client) GetSoul(ctx context.Context) (string, error) {
 }
 
 // PutSoul writes the soul document to S3.
-func (c *Client) PutSoul(ctx context.Context, content string) error {
+func (c *S3Store) PutSoul(ctx context.Context, content string) error {
 	contentType := "text/markdown"
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &c.bucket,
@@ -155,7 +145,7 @@ func (c *Client) PutSoul(ctx context.Context, content string) error {
 }
 
 // SnapshotSoul copies the current soul to dreams/history/{timestamp}/soul.md.
-func (c *Client) SnapshotSoul(ctx context.Context, timestamp string) error {
+func (c *S3Store) SnapshotSoul(ctx context.Context, timestamp string) error {
 	dstKey := fmt.Sprintf("dreams/history/%s/soul.md", timestamp)
 	copySource := fmt.Sprintf("%s/%s", c.bucket, soulKey)
 	_, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
@@ -170,7 +160,7 @@ func (c *Client) SnapshotSoul(ctx context.Context, timestamp string) error {
 }
 
 // PutReflection writes a reflection to S3 under dreams/reflections/{key}.md.
-func (c *Client) PutReflection(ctx context.Context, key, content string) error {
+func (c *S3Store) PutReflection(ctx context.Context, key, content string) error {
 	// Replace the memories/ prefix so reflections mirror the memory layout
 	path := fmt.Sprintf("dreams/reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(key, ".json"), "memories/"))
 	contentType := "text/markdown"
@@ -187,7 +177,7 @@ func (c *Client) PutReflection(ctx context.Context, key, content string) error {
 }
 
 // ListReflections returns the keys of all persisted reflections under dreams/reflections/.
-func (c *Client) ListReflections(ctx context.Context) (map[string]time.Time, error) {
+func (c *S3Store) ListReflections(ctx context.Context) (map[string]time.Time, error) {
 	reflections := map[string]time.Time{}
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
 		Bucket: &c.bucket,
@@ -210,14 +200,14 @@ func (c *Client) ListReflections(ctx context.Context) (map[string]time.Time, err
 }
 
 // GetReflection downloads a reflection's content from S3.
-func (c *Client) GetReflection(ctx context.Context, memoryKey string) (string, error) {
+func (c *S3Store) GetReflection(ctx context.Context, memoryKey string) (string, error) {
 	path := fmt.Sprintf("dreams/reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(memoryKey, ".json"), "memories/"))
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &path,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get reflection for %s: %w", memoryKey, err)
+		return "", wrapS3NotFound(err, memoryKey)
 	}
 	defer out.Body.Close()
 	data, err := io.ReadAll(out.Body)
@@ -228,7 +218,7 @@ func (c *Client) GetReflection(ctx context.Context, memoryKey string) (string, e
 }
 
 // DeletePrefix removes all objects under a given S3 prefix.
-func (c *Client) DeletePrefix(ctx context.Context, prefix string) error {
+func (c *S3Store) DeletePrefix(ctx context.Context, prefix string) error {
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
 		Bucket: &c.bucket,
 		Prefix: &prefix,
@@ -252,7 +242,7 @@ func (c *Client) DeletePrefix(ctx context.Context, prefix string) error {
 }
 
 // ListDreams returns timestamps of all dream snapshots, sorted ascending.
-func (c *Client) ListDreams(ctx context.Context) ([]string, error) {
+func (c *S3Store) ListDreams(ctx context.Context) ([]string, error) {
 	prefix := "dreams/history/"
 	out, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket:    &c.bucket,
@@ -277,14 +267,14 @@ func (c *Client) ListDreams(ctx context.Context) ([]string, error) {
 }
 
 // GetDreamSoul loads the soul from a specific dream snapshot.
-func (c *Client) GetDreamSoul(ctx context.Context, timestamp string) (string, error) {
+func (c *S3Store) GetDreamSoul(ctx context.Context, timestamp string) (string, error) {
 	key := fmt.Sprintf("dreams/history/%s/soul.md", timestamp)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &key,
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get dream soul for %s: %w", timestamp, err)
+		return "", wrapS3NotFound(err, key)
 	}
 	defer out.Body.Close()
 	data, err := io.ReadAll(out.Body)
@@ -292,6 +282,15 @@ func (c *Client) GetDreamSoul(ctx context.Context, timestamp string) (string, er
 		return "", fmt.Errorf("failed to read dream soul for %s: %w", timestamp, err)
 	}
 	return string(data), nil
+}
+
+// wrapS3NotFound converts S3 NoSuchKey errors to NotFoundError.
+func wrapS3NotFound(err error, key string) error {
+	var nsk *s3types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return &NotFoundError{Key: key}
+	}
+	return err
 }
 
 func sessionKey(src, sessionID string) string {

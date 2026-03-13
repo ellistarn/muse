@@ -23,11 +23,8 @@ Use --diff to summarize what changed since the last dream.`,
 		Example: `  muse inspect          # print the soul
   muse inspect --diff   # summarize what changed since the last dream`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireBucket(); err != nil {
-				return err
-			}
 			ctx := cmd.Context()
-			store, err := storage.NewClient(ctx, bucket)
+			store, err := newStore(ctx)
 			if err != nil {
 				return err
 			}
@@ -53,7 +50,7 @@ Use --diff to summarize what changed since the last dream.`,
 	return cmd
 }
 
-func runDiff(cmd *cobra.Command, store *storage.Client) error {
+func runDiff(cmd *cobra.Command, store storage.Store) error {
 	ctx := cmd.Context()
 
 	log.Println("Loading dream history...")

@@ -27,11 +27,12 @@ Add this to your agent's MCP config:
   }`,
 		Example: `  muse listen`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireBucket(); err != nil {
+			ctx := cmd.Context()
+			store, err := newStore(ctx)
+			if err != nil {
 				return err
 			}
-			ctx := cmd.Context()
-			m, err := muse.New(ctx, bucket)
+			m, err := muse.New(ctx, store)
 			if err != nil {
 				return err
 			}

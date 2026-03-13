@@ -22,11 +22,12 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
   muse ask "How should I structure error handling in Go?"`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireBucket(); err != nil {
+			ctx := cmd.Context()
+			store, err := newStore(ctx)
+			if err != nil {
 				return err
 			}
-			ctx := cmd.Context()
-			m, err := muse.New(ctx, bucket)
+			m, err := muse.New(ctx, store)
 			if err != nil {
 				return err
 			}

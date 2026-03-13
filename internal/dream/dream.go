@@ -16,18 +16,6 @@ import (
 	"github.com/ellistarn/muse/prompts"
 )
 
-// Store is the subset of storage.Client used by the dream pipeline.
-type Store interface {
-	ListSessions(ctx context.Context) ([]storage.SessionEntry, error)
-	GetSession(ctx context.Context, src, sessionID string) (*source.Session, error)
-	ListReflections(ctx context.Context) (map[string]time.Time, error)
-	GetReflection(ctx context.Context, memoryKey string) (string, error)
-	PutReflection(ctx context.Context, key, content string) error
-	DeletePrefix(ctx context.Context, prefix string) error
-	PutSoul(ctx context.Context, content string) error
-	SnapshotSoul(ctx context.Context, timestamp string) error
-}
-
 // LLM is the subset of an LLM client used by the dream pipeline.
 type LLM interface {
 	Converse(ctx context.Context, system, user string, opts ...llm.ConverseOption) (string, llm.Usage, error)
@@ -58,7 +46,7 @@ func estimateTokens(s string) int {
 // Run executes the dream pipeline: reflect on new memories, then learn a soul
 // from all reflections. Reflections are the source of truth for what has been
 // processed; there is no separate state file.
-func Run(ctx context.Context, store Store, reflectLLM, learnLLM LLM, opts Options) (*Result, error) {
+func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opts Options) (*Result, error) {
 	// List all memories and existing reflections
 	log.Println("Listing memories...")
 	entries, err := store.ListSessions(ctx)
@@ -212,7 +200,7 @@ func Run(ctx context.Context, store Store, reflectLLM, learnLLM LLM, opts Option
 
 // LearnOnly re-runs only the learn phase using persisted reflections.
 // Use this to re-synthesize the soul with improved techniques without re-reflecting.
-func LearnOnly(ctx context.Context, store Store, learnLLM LLM) (*Result, error) {
+func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result, error) {
 	allReflections, err := loadAllReflections(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load reflections: %w", err)
@@ -235,7 +223,7 @@ func LearnOnly(ctx context.Context, store Store, learnLLM LLM) (*Result, error) 
 }
 
 // writeSoul snapshots the existing soul and writes the new one.
-func writeSoul(ctx context.Context, store Store, soul string) error {
+func writeSoul(ctx context.Context, store storage.Store, soul string) error {
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	log.Printf("Snapshotting previous soul to dreams/history/%s/...\n", timestamp)
 	if err := store.SnapshotSoul(ctx, timestamp); err != nil {
@@ -248,7 +236,7 @@ func writeSoul(ctx context.Context, store Store, soul string) error {
 }
 
 // loadAllReflections fetches every persisted reflection from storage.
-func loadAllReflections(ctx context.Context, store Store) ([]string, error) {
+func loadAllReflections(ctx context.Context, store storage.Store) ([]string, error) {
 	index, err := store.ListReflections(ctx)
 	if err != nil {
 		return nil, err
@@ -360,7 +348,7 @@ func buildHumanFocusedView(ctx context.Context, client LLM, turns []turn) ([]str
 	return chunks, totalUsage, nil
 }
 
-func learn(ctx context.Context, client LLM, store Store, observations []string) (llm.Usage, error) {
+func learn(ctx context.Context, client LLM, store storage.Store, observations []string) (llm.Usage, error) {
 	if len(observations) == 0 {
 		return llm.Usage{}, nil
 	}

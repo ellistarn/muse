@@ -13,7 +13,7 @@ import (
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-// mockStore implements dream.Store with in-memory state.
+// mockStore implements storage.Store with in-memory state.
 type mockStore struct {
 	sessions    []storage.SessionEntry
 	data        map[string]*source.Session
@@ -56,6 +56,22 @@ func (m *mockStore) GetSession(_ context.Context, src, sessionID string) (*sourc
 	return s, nil
 }
 
+func (m *mockStore) PutSession(_ context.Context, session *source.Session) (int, error) {
+	key := fmt.Sprintf("memories/%s/%s.json", session.Source, session.SessionID)
+	m.data[session.Source+"/"+session.SessionID] = session
+	m.sessions = append(m.sessions, storage.SessionEntry{
+		Source: session.Source, SessionID: session.SessionID, Key: key, LastModified: time.Now(),
+	})
+	return 0, nil
+}
+
+func (m *mockStore) GetSoul(_ context.Context) (string, error) {
+	if m.soul == "" {
+		return "", &storage.NotFoundError{Key: "soul.md"}
+	}
+	return m.soul, nil
+}
+
 func (m *mockStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
 	result := map[string]time.Time{}
 	for key := range m.reflections {
@@ -92,6 +108,14 @@ func (m *mockStore) PutSoul(_ context.Context, content string) error {
 
 func (m *mockStore) SnapshotSoul(_ context.Context, _ string) error {
 	return nil
+}
+
+func (m *mockStore) ListDreams(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockStore) GetDreamSoul(_ context.Context, _ string) (string, error) {
+	return "", &storage.NotFoundError{Key: "dream"}
 }
 
 // mockLLM implements dream.LLM with canned responses.

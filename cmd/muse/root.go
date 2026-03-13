@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ellistarn/muse/internal/storage"
 )
 
 var bucket string
@@ -29,9 +32,9 @@ Other commands:
 
 Getting started:
 
-  export MUSE_BUCKET=$USER-muse    # storage bucket
-  export MUSE_MODEL=<model-id>     # model override (optional)
   muse push && muse dream && muse inspect
+
+Data is stored locally at ~/.muse/ by default. Set MUSE_BUCKET to use S3 instead.
 
 Run "muse listen --help" for MCP server configuration.`,
 		SilenceErrors: true,
@@ -46,9 +49,17 @@ Run "muse listen --help" for MCP server configuration.`,
 	return cmd
 }
 
-func requireBucket() error {
-	if bucket == "" {
-		return fmt.Errorf("bucket is required: use --bucket or set MUSE_BUCKET")
+// newStore returns an S3-backed store when a bucket is configured,
+// otherwise a local filesystem store rooted at ~/.muse/.
+func newStore(ctx context.Context) (storage.Store, error) {
+	if bucket != "" {
+		fmt.Fprintf(os.Stderr, "Using S3 storage (bucket: %s)\n", bucket)
+		return storage.NewS3Store(ctx, bucket)
 	}
-	return nil
+	store, err := storage.NewLocalStore()
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "Using local storage at %s\n", store.Root())
+	return store, nil
 }

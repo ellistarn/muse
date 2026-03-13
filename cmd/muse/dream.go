@@ -31,11 +31,8 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
   muse dream --reflect    # re-reflect on all memories from scratch
   muse dream --limit 50   # process at most 50 memories`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireBucket(); err != nil {
-				return err
-			}
 			ctx := cmd.Context()
-			store, err := storage.NewClient(ctx, bucket)
+			store, err := newStore(ctx)
 			if err != nil {
 				return err
 			}
@@ -67,7 +64,7 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 
 // runDream executes the dream pipeline and prints results. Extracted from the
 // command handler so it can be tested with mock dependencies.
-func runDream(ctx context.Context, stdout, stderr io.Writer, store dream.Store, reflectLLM, learnLLM dream.LLM, learn, reflect bool, limit int) error {
+func runDream(ctx context.Context, stdout, stderr io.Writer, store storage.Store, reflectLLM, learnLLM dream.LLM, learn, reflect bool, limit int) error {
 	var (
 		result *dream.Result
 		err    error

@@ -13,9 +13,7 @@ go install github.com/ellistarn/muse/cmd/muse@latest
 ## Getting Started
 
 ```bash
-export MUSE_BUCKET=$USER-muse
-
-muse push              # upload local agent sessions to storage
+muse push              # push memories to storage
 muse dream             # distill your soul from memories
 muse inspect           # see what your muse learned
 ```
@@ -31,6 +29,16 @@ Wire up the MCP server so agents can ask your muse questions:
     }
   }
 }
+```
+
+## Storage
+
+By default, data is stored locally at `~/.muse/`. To use an S3 bucket instead
+(for sharing across machines or hosted deployment), set the `MUSE_BUCKET`
+environment variable:
+
+```bash
+export MUSE_BUCKET=$USER-muse
 ```
 
 Run `muse --help` for detailed usage.

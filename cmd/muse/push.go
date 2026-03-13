@@ -12,16 +12,17 @@ func newPushCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "push",
 		Short: "Push memories to storage",
-		Long: `Finds local agent sessions and uploads them to your storage bucket. Uploads
-are incremental — sessions already in storage are skipped. Run this before
-dreaming so your muse has new material.`,
+		Long: `Finds agent sessions and uploads them to storage. Uploads are incremental
+— sessions already in storage are skipped. Run this before dreaming so
+your muse has new material.`,
 		Example: `  muse push`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireBucket(); err != nil {
+			ctx := cmd.Context()
+			store, err := newStore(ctx)
+			if err != nil {
 				return err
 			}
-			ctx := cmd.Context()
-			m, err := muse.New(ctx, bucket)
+			m, err := muse.New(ctx, store)
 			if err != nil {
 				return err
 			}

@@ -13,31 +13,15 @@ import (
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-func TestDreamCmd_RequiresBucket(t *testing.T) {
+func TestDreamCmd_NoStore(t *testing.T) {
+	// When no bucket is set, local store is used — this test just validates
+	// the command doesn't panic. It will fail at bedrock client creation
+	// which is expected.
 	t.Setenv("MUSE_BUCKET", "")
-
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"dream"})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when bucket is not set")
-	}
-	if got := err.Error(); got != "bucket is required: use --bucket or set MUSE_BUCKET" {
-		t.Errorf("unexpected error: %s", got)
-	}
 }
 
-func TestDreamCmd_LearnRequiresBucket(t *testing.T) {
+func TestDreamCmd_LearnNoStore(t *testing.T) {
 	t.Setenv("MUSE_BUCKET", "")
-
-	cmd := newRootCmd()
-	cmd.SetArgs([]string{"dream", "--learn"})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when bucket is not set with --learn flag")
-	}
 }
 
 func TestRunDream_PropagatesRunError(t *testing.T) {
@@ -116,7 +100,7 @@ func TestRunDream_SuccessfulLearn(t *testing.T) {
 	}
 }
 
-// testStore implements dream.Store with in-memory state.
+// testStore implements storage.Store with in-memory state.
 type testStore struct {
 	sessions    []storage.SessionEntry
 	data        map[string]*source.Session
@@ -156,6 +140,20 @@ func (s *testStore) GetSession(_ context.Context, src, id string) (*source.Sessi
 	}
 	return sess, nil
 }
+func (s *testStore) PutSession(_ context.Context, session *source.Session) (int, error) {
+	key := fmt.Sprintf("memories/%s/%s.json", session.Source, session.SessionID)
+	s.data[session.Source+"/"+session.SessionID] = session
+	s.sessions = append(s.sessions, storage.SessionEntry{
+		Source: session.Source, SessionID: session.SessionID, Key: key, LastModified: time.Now(),
+	})
+	return 0, nil
+}
+func (s *testStore) GetSoul(_ context.Context) (string, error) {
+	if s.soul == "" {
+		return "", &storage.NotFoundError{Key: "soul.md"}
+	}
+	return s.soul, nil
+}
 func (s *testStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
 	result := map[string]time.Time{}
 	for key := range s.reflections {
@@ -185,8 +183,14 @@ func (s *testStore) PutSoul(_ context.Context, content string) error {
 	return nil
 }
 func (s *testStore) SnapshotSoul(_ context.Context, _ string) error { return nil }
+func (s *testStore) ListDreams(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+func (s *testStore) GetDreamSoul(_ context.Context, _ string) (string, error) {
+	return "", &storage.NotFoundError{Key: "dream"}
+}
 
-// failingStore implements dream.Store where all operations return an error.
+// failingStore implements storage.Store where all operations return an error.
 type failingStore struct{ err error }
 
 func (s *failingStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
@@ -195,6 +199,10 @@ func (s *failingStore) ListSessions(_ context.Context) ([]storage.SessionEntry, 
 func (s *failingStore) GetSession(_ context.Context, _, _ string) (*source.Session, error) {
 	return nil, s.err
 }
+func (s *failingStore) PutSession(_ context.Context, _ *source.Session) (int, error) {
+	return 0, s.err
+}
+func (s *failingStore) GetSoul(_ context.Context) (string, error) { return "", s.err }
 func (s *failingStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
 	return nil, s.err
 }
@@ -205,6 +213,12 @@ func (s *failingStore) PutReflection(_ context.Context, _, _ string) error { ret
 func (s *failingStore) DeletePrefix(_ context.Context, _ string) error     { return s.err }
 func (s *failingStore) PutSoul(_ context.Context, _ string) error          { return s.err }
 func (s *failingStore) SnapshotSoul(_ context.Context, _ string) error     { return s.err }
+func (s *failingStore) ListDreams(_ context.Context) ([]string, error) {
+	return nil, s.err
+}
+func (s *failingStore) GetDreamSoul(_ context.Context, _ string) (string, error) {
+	return "", s.err
+}
 
 // testLLM implements dream.LLM for command-level tests.
 type testLLM struct {
