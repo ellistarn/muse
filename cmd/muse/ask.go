@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ellistarn/muse/internal/bedrock"
 	"github.com/ellistarn/muse/internal/muse"
 )
 
@@ -24,12 +26,18 @@ func newAskCmd() *cobra.Command {
 				return err
 			}
 			question := strings.Join(args, " ")
-			result, err := m.Ask(ctx, muse.AskInput{Question: question})
-			if err != nil {
-				return err
+			var wroteOutput bool
+			_, err = m.Ask(ctx, muse.AskInput{
+				Question: question,
+				StreamFunc: bedrock.StreamFunc(func(delta string) {
+					fmt.Fprint(os.Stdout, delta)
+					wroteOutput = true
+				}),
+			})
+			if wroteOutput {
+				fmt.Fprintln(os.Stdout) // trailing newline after stream completes
 			}
-			fmt.Println(result.Response)
-			return nil
+			return err
 		},
 	}
 }

@@ -24,8 +24,9 @@ type UploadResult struct {
 
 // AskInput contains the parameters for an Ask call.
 type AskInput struct {
-	Question  string // the user's message
-	SessionID string // if set, continues an existing conversation
+	Question   string             // the user's message
+	SessionID  string             // if set, continues an existing conversation
+	StreamFunc bedrock.StreamFunc // if set, text deltas are streamed through this callback
 }
 
 // AskResult contains the output from an Ask call.
@@ -115,7 +116,13 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 		}
 	}
 
-	result, err := m.bedrock.ConverseMessages(ctx, session.System, session.Messages, nil)
+	var result *bedrock.ConverseResult
+	var err error
+	if input.StreamFunc != nil {
+		result, err = m.bedrock.ConverseMessagesStream(ctx, session.System, session.Messages, input.StreamFunc)
+	} else {
+		result, err = m.bedrock.ConverseMessages(ctx, session.System, session.Messages, nil)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("converse failed: %w", err)
 	}

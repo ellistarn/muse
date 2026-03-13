@@ -64,6 +64,13 @@ type Runtime interface {
 	Converse(ctx context.Context, params *bedrockruntime.ConverseInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.ConverseOutput, error)
 }
 
+// StreamingRuntime extends Runtime with streaming support.
+// The real bedrockruntime.Client satisfies both interfaces.
+type StreamingRuntime interface {
+	Runtime
+	ConverseStream(ctx context.Context, params *bedrockruntime.ConverseStreamInput, optFns ...func(*bedrockruntime.Options)) (*bedrockruntime.ConverseStreamOutput, error)
+}
+
 // Client wraps Bedrock's Converse API with rate limiting and retry.
 type Client struct {
 	runtime  Runtime
@@ -202,32 +209,21 @@ func (c *Client) ConverseMessages(ctx context.Context, system string, messages [
 }
 
 func (c *Client) converseRaw(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration, opts llm.ConverseOptions) (string, Usage, types.StopReason, []types.ContentBlock, error) {
-	var lastErr error
-	for attempt := range maxRetries {
-		// Wait for a request token (rate limiting)
-		select {
-		case <-ctx.Done():
-			return "", Usage{}, "", nil, ctx.Err()
-		case <-c.throttle:
-		}
-
-		text, usage, stop, content, err := c.converseRawOnce(ctx, system, messages, toolConfig, opts)
-		if err == nil {
-			return text, usage, stop, content, nil
-		}
-		if !isThrottling(err) {
-			return text, usage, stop, content, err
-		}
-		lastErr = err
-		backoff := backoffDuration(attempt)
-		log.Printf("  throttled (attempt %d/%d), backing off %s\n", attempt+1, maxRetries, backoff.Round(time.Millisecond))
-		select {
-		case <-ctx.Done():
-			return "", Usage{}, "", nil, ctx.Err()
-		case <-time.After(backoff):
-		}
+	var (
+		text    string
+		usage   Usage
+		stop    types.StopReason
+		content []types.ContentBlock
+	)
+	err := c.retryThrottled(ctx, func() error {
+		var err error
+		text, usage, stop, content, err = c.converseRawOnce(ctx, system, messages, toolConfig, opts)
+		return err
+	})
+	if err != nil {
+		return text, usage, stop, content, err
 	}
-	return "", Usage{}, "", nil, fmt.Errorf("throttled after %d retries: %w", maxRetries, lastErr)
+	return text, usage, stop, content, nil
 }
 
 func (c *Client) converseRawOnce(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration, opts llm.ConverseOptions) (string, Usage, types.StopReason, []types.ContentBlock, error) {
@@ -239,10 +235,8 @@ func (c *Client) converseRawOnce(ctx context.Context, system string, messages []
 		maxTokens += opts.ThinkingBudget
 	}
 	input := &bedrockruntime.ConverseInput{
-		ModelId: &c.model,
-		System: []types.SystemContentBlock{
-			&types.SystemContentBlockMemberText{Value: system},
-		},
+		ModelId:  &c.model,
+		System:   systemBlocks(system),
 		Messages: messages,
 		InferenceConfig: &types.InferenceConfiguration{
 			MaxTokens: aws.Int32(maxTokens),
@@ -316,4 +310,146 @@ func backoffDuration(attempt int) time.Duration {
 	// Add jitter: 50-100% of calculated backoff
 	jitter := 0.5 + rand.Float64()*0.5
 	return time.Duration(backoff * jitter)
+}
+
+// retryThrottled runs fn with rate limiting and retries on throttling errors.
+// Non-throttling errors (including nil) are returned immediately.
+func (c *Client) retryThrottled(ctx context.Context, fn func() error) error {
+	var lastErr error
+	for attempt := range maxRetries {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.throttle:
+		}
+		err := fn()
+		if err == nil || !isThrottling(err) {
+			return err
+		}
+		lastErr = err
+		backoff := backoffDuration(attempt)
+		log.Printf("  throttled (attempt %d/%d), backing off %s\n", attempt+1, maxRetries, backoff.Round(time.Millisecond))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return fmt.Errorf("throttled after %d retries: %w", maxRetries, lastErr)
+}
+
+// systemBlocks builds the system content blocks with a cache point after the
+// text. The cache point tells Bedrock to cache the system prompt prefix so
+// repeated calls with the same soul skip re-processing input tokens.
+func systemBlocks(system string) []types.SystemContentBlock {
+	return []types.SystemContentBlock{
+		&types.SystemContentBlockMemberText{Value: system},
+		&types.SystemContentBlockMemberCachePoint{Value: types.CachePointBlock{
+			Type: types.CachePointTypeDefault,
+		}},
+	}
+}
+
+// StreamFunc receives text deltas as they arrive from the model.
+type StreamFunc func(delta string)
+
+// ConverseMessagesStream sends a full message history and streams text deltas
+// through fn. Falls back to non-streaming Converse if the runtime doesn't
+// support ConverseStream. Returns the complete result for session bookkeeping.
+func (c *Client) ConverseMessagesStream(ctx context.Context, system string, messages []types.Message, fn StreamFunc, opts ...llm.ConverseOption) (*ConverseResult, error) {
+	sr, ok := c.runtime.(StreamingRuntime)
+	if !ok {
+		// Fallback: non-streaming path (test mocks, etc.)
+		result, err := c.ConverseMessages(ctx, system, messages, nil, opts...)
+		if err != nil {
+			return nil, err
+		}
+		if fn != nil {
+			fn(result.Text)
+		}
+		return result, nil
+	}
+
+	o := llm.Apply(opts)
+	maxTokens := int32(defaultMaxTokens)
+	if o.MaxTokens > 0 {
+		maxTokens = o.MaxTokens
+	}
+	if o.ThinkingBudget > 0 {
+		maxTokens += o.ThinkingBudget
+	}
+
+	input := &bedrockruntime.ConverseStreamInput{
+		ModelId:  &c.model,
+		System:   systemBlocks(system),
+		Messages: messages,
+		InferenceConfig: &types.InferenceConfiguration{
+			MaxTokens: aws.Int32(maxTokens),
+		},
+	}
+
+	var result *ConverseResult
+	err := c.retryThrottled(ctx, func() error {
+		var err error
+		result, err = c.converseStreamOnce(ctx, sr, input, fn)
+		return err
+	})
+	return result, err
+}
+
+func (c *Client) converseStreamOnce(ctx context.Context, sr StreamingRuntime, input *bedrockruntime.ConverseStreamInput, fn StreamFunc) (*ConverseResult, error) {
+	out, err := sr.ConverseStream(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("converse stream failed: %w", err)
+	}
+	stream := out.GetStream()
+	defer stream.Close()
+
+	var text strings.Builder
+	var usage Usage
+	var stopReason types.StopReason
+	var content []types.ContentBlock
+
+	for event := range stream.Events() {
+		switch ev := event.(type) {
+		case *types.ConverseStreamOutputMemberContentBlockDelta:
+			if td, ok := ev.Value.Delta.(*types.ContentBlockDeltaMemberText); ok {
+				text.WriteString(td.Value)
+				if fn != nil {
+					fn(td.Value)
+				}
+			}
+		case *types.ConverseStreamOutputMemberMessageStop:
+			stopReason = ev.Value.StopReason
+		case *types.ConverseStreamOutputMemberMetadata:
+			if ev.Value.Usage != nil {
+				if ev.Value.Usage.InputTokens != nil {
+					usage.InputTokens = int(*ev.Value.Usage.InputTokens)
+				}
+				if ev.Value.Usage.OutputTokens != nil {
+					usage.OutputTokens = int(*ev.Value.Usage.OutputTokens)
+				}
+			}
+			usage.Cost_ = float64(usage.InputTokens)*c.pricing.inputPerToken + float64(usage.OutputTokens)*c.pricing.outputPerToken
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("stream error: %w", err)
+	}
+
+	fullText := text.String()
+	content = append(content, &types.ContentBlockMemberText{Value: fullText})
+
+	if stopReason == types.StopReasonMaxTokens {
+		return &ConverseResult{Text: fullText, Usage: usage, StopReason: stopReason, Content: content},
+			fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+	}
+
+	return &ConverseResult{
+		Text:       fullText,
+		Usage:      usage,
+		StopReason: stopReason,
+		Content:    content,
+	}, nil
 }
