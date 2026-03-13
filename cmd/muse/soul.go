@@ -15,7 +15,7 @@ func newSoulCmd() *cobra.Command {
 	var diff bool
 	cmd := &cobra.Command{
 		Use:   "soul",
-		Short: "Print the soul document",
+		Short: "Print soul.md",
 		Long: `Prints your current soul document to stdout. If no soul exists yet, prompts
 you to run 'muse dream'.
 

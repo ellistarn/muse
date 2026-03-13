@@ -21,10 +21,13 @@ func newDreamCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dream",
 		Short: "Distill a soul from memories",
-		Long: `Discovers new memories from agent sessions, reflects on them, and distills
-them into a soul document that captures how you think. Safe to run repeatedly
-— only new memories are discovered and only unreflected memories are processed.
-The soul is always re-distilled.
+		Long: `Discovers new memories, reflects on them, and distills a soul document
+(soul.md) that captures how you think. Safe to run repeatedly — only new
+memories are discovered and only unreflected memories are processed. The
+soul is always re-distilled.
+
+The pipeline is a map-reduce: reflect maps each memory into observations,
+then learn reduces all observations into a single soul document.
 
 Use --learn to re-distill the soul from existing reflections without
 reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
