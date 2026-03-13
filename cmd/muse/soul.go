@@ -11,17 +11,17 @@ import (
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-func newInspectCmd() *cobra.Command {
+func newSoulCmd() *cobra.Command {
 	var diff bool
 	cmd := &cobra.Command{
-		Use:   "inspect",
-		Short: "Inspect the distilled soul",
+		Use:   "soul",
+		Short: "Print the soul document",
 		Long: `Prints your current soul document to stdout. If no soul exists yet, prompts
 you to run 'muse dream'.
 
 Use --diff to summarize what changed since the last dream.`,
-		Example: `  muse inspect          # print the soul
-  muse inspect --diff   # summarize what changed since the last dream`,
+		Example: `  muse soul          # print the soul
+  muse soul --diff   # summarize what changed since the last dream`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			store, err := newStore(ctx)

@@ -13,9 +13,8 @@ go install github.com/ellistarn/muse/cmd/muse@latest
 ## Getting Started
 
 ```bash
-muse load              # load memories into storage
-muse dream             # distill your soul from memories
-muse inspect           # see what your muse learned
+muse dream             # discover memories and distill your soul
+muse soul              # print the soul document
 ```
 
 Wire up the MCP server so agents can ask your muse questions:

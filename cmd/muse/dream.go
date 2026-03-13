@@ -10,6 +10,7 @@ import (
 	"github.com/ellistarn/muse/internal/bedrock"
 	"github.com/ellistarn/muse/internal/dream"
 	"github.com/ellistarn/muse/internal/log"
+	"github.com/ellistarn/muse/internal/muse"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -20,13 +21,14 @@ func newDreamCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "dream",
 		Short: "Distill a soul from memories",
-		Long: `Processes your uploaded memories and distills them into a soul document that
-captures how you think. Each dream snapshots the previous soul before
-overwriting it.
+		Long: `Discovers new memories from agent sessions, reflects on them, and distills
+them into a soul document that captures how you think. Safe to run repeatedly
+— only new memories are discovered and only unreflected memories are processed.
+The soul is always re-distilled.
 
 Use --learn to re-distill the soul from existing reflections without
 reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
-		Example: `  muse dream              # reflect on new memories and distill soul
+		Example: `  muse dream              # discover memories, reflect, and distill soul
   muse dream --learn      # re-distill soul from existing reflections
   muse dream --reflect    # re-reflect on all memories from scratch
   muse dream --limit 50   # process at most 50 memories`,
@@ -36,6 +38,28 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 			if err != nil {
 				return err
 			}
+
+			// Discover and store new memories (skip for --learn since it
+			// only re-distills from existing reflections)
+			if !learn {
+				m, err := muse.New(ctx, store)
+				if err != nil {
+					return err
+				}
+				result, err := m.Upload(ctx)
+				if err != nil {
+					return err
+				}
+				for _, w := range result.Warnings {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+				}
+				if result.Uploaded > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "Discovered %d new memories (%s)\n", result.Uploaded, muse.FormatBytes(result.Bytes))
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "No new memories\n")
+				}
+			}
+
 			if learn {
 				client, cerr := bedrock.NewClient(ctx, bedrock.ModelOpus)
 				if cerr != nil {

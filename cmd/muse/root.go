@@ -21,18 +21,14 @@ soul document, and embodies your unique thought processes when asked questions.
 
 Workflow:
 
-  1. muse load       Load memories from agent sessions into storage
-  2. muse dream      Reflect on memories and distill a soul document
+  1. muse dream      Discover memories, reflect, and distill a soul document
+  2. muse soul       Print the soul document
   3. muse ask        Ask your muse a question (stateless, one-shot)
   4. muse listen     Start an MCP server so agents can ask your muse
 
-Other commands:
-
-  muse inspect       View your soul or see what changed since the last dream
-
 Getting started:
 
-  muse load && muse dream && muse inspect
+  muse dream && muse soul
 
 Data is stored locally at ~/.muse/ by default. Set MUSE_BUCKET to use S3 instead.
 
@@ -41,9 +37,8 @@ Run "muse listen --help" for MCP server configuration.`,
 		SilenceUsage:  true,
 	}
 	cmd.PersistentFlags().StringVar(&bucket, "bucket", os.Getenv("MUSE_BUCKET"), "S3 bucket name (or set MUSE_BUCKET)")
-	cmd.AddCommand(newLoadCmd())
 	cmd.AddCommand(newDreamCmd())
-	cmd.AddCommand(newInspectCmd())
+	cmd.AddCommand(newSoulCmd())
 	cmd.AddCommand(newListenCmd())
 	cmd.AddCommand(newAskCmd())
 	return cmd
