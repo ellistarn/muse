@@ -28,11 +28,11 @@ func askHandler(m *muse.Muse) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		question, err := req.RequireString("question")
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		answer, err := m.Ask(ctx, question)
 		if err != nil {
-			return nil, fmt.Errorf("failed to ask: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to ask: %v", err)), nil
 		}
 		return mcp.NewToolResultText(answer), nil
 	}

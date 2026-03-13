@@ -181,9 +181,9 @@ Keep commit messages plain text, no emojis.`,
 		t.Errorf("expected DeletePrefix(\"skills/\"), got %v", store.deleted)
 	}
 
-	// Verify LLM was called: 2 reflect + 1 learn = 3 calls
-	if len(llm.calls) != 3 {
-		t.Errorf("LLM calls = %d, want 3", len(llm.calls))
+	// Verify LLM was called: 2 sessions * 3 reflect steps (summarize + extract + refine) + 1 learn = 7 calls
+	if len(llm.calls) != 7 {
+		t.Errorf("LLM calls = %d, want 7", len(llm.calls))
 	}
 }
 
@@ -239,8 +239,9 @@ Content here.`,
 	if result.Remaining != 3 {
 		t.Errorf("Remaining = %d, want 3", result.Remaining)
 	}
-	if len(llm.calls) != 3 {
-		t.Errorf("LLM calls = %d, want 3 (2 reflect + 1 learn)", len(llm.calls))
+	// 2 sessions * 3 reflect steps + 1 learn = 7
+	if len(llm.calls) != 7 {
+		t.Errorf("LLM calls = %d, want 7 (2 sessions * 3 reflect steps + 1 learn)", len(llm.calls))
 	}
 }
 
@@ -297,9 +298,9 @@ Content here.`,
 	if len(store.reflections) != 4 {
 		t.Errorf("reflections after second run = %d, want 4", len(store.reflections))
 	}
-	// 2 reflect + 1 learn, and learn should have received all 4 reflections
-	if len(llm.calls) != 3 {
-		t.Errorf("second run LLM calls = %d, want 3", len(llm.calls))
+	// 2 sessions * 3 reflect steps + 1 learn = 7, and learn should have received all 4 reflections
+	if len(llm.calls) != 7 {
+		t.Errorf("second run LLM calls = %d, want 7", len(llm.calls))
 	}
 	// The learn call (last one) should contain all 4 observations joined by ---
 	learnInput := llm.calls[len(llm.calls)-1].user

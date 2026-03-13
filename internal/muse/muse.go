@@ -67,10 +67,12 @@ func New(ctx context.Context, bucket string) (*Muse, error) {
 
 // NewForTest creates a Muse with caller-provided dependencies.
 func NewForTest(s3Client skill.S3API, bedrockClient *bedrock.Client, bucket string) *Muse {
+	catalog, _ := skill.LoadCatalog(context.Background(), s3Client, bucket)
 	return &Muse{
 		s3:      s3Client,
 		bedrock: bedrockClient,
 		bucket:  bucket,
+		catalog: catalog,
 	}
 }
 
