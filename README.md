@@ -20,12 +20,12 @@ muse dream             # distill your soul from memories
 muse inspect           # see what your muse learned
 ```
 
-Once you have a soul, wire up the MCP server so agents can ask your muse questions:
+Wire up the MCP server so agents can ask your muse questions:
 
 ```json
 {
   "mcpServers": {
-    "<your-name>": {
+    "${USER}": {
       "command": "muse",
       "args": ["listen"]
     }
