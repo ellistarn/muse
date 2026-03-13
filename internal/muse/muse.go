@@ -156,22 +156,13 @@ func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	log.Println("Scanning local sessions...")
 	var local []source.Session
 	var warnings []string
-	if sessions, err := source.OpenCodeSessions(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to read OpenCode sessions: %v", err))
-	} else {
-		log.Printf("Found %d OpenCode sessions\n", len(sessions))
-		local = append(local, sessions...)
-	}
-	if sessions, err := source.ClaudeCodeSessions(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to read Claude Code sessions: %v", err))
-	} else {
-		log.Printf("Found %d Claude Code sessions\n", len(sessions))
-		local = append(local, sessions...)
-	}
-	if sessions, err := source.KiroSessions(); err != nil {
-		warnings = append(warnings, fmt.Sprintf("failed to read Kiro sessions: %v", err))
-	} else {
-		log.Printf("Found %d Kiro sessions\n", len(sessions))
+	for _, provider := range source.Providers() {
+		sessions, err := provider.Sessions()
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("failed to read %s sessions: %v", provider.Name(), err))
+			continue
+		}
+		log.Printf("Found %d %s sessions\n", len(sessions), provider.Name())
 		local = append(local, sessions...)
 	}
 

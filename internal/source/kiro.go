@@ -10,8 +10,12 @@ import (
 	"time"
 )
 
-// KiroSessions reads all sessions from Kiro's workspace session files.
-func KiroSessions() ([]Session, error) {
+// Kiro reads sessions from Kiro's workspace session files.
+type Kiro struct{}
+
+func (k *Kiro) Name() string { return "Kiro" }
+
+func (k *Kiro) Sessions() ([]Session, error) {
 	kiroDir := os.Getenv("MUSE_KIRO_DIR")
 	if kiroDir == "" {
 		dir, err := defaultKiroDir()

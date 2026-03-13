@@ -12,8 +12,12 @@ import (
 
 const defaultClaudeDir = ".claude"
 
-// ClaudeCodeSessions reads all sessions from Claude Code's JSONL files.
-func ClaudeCodeSessions() ([]Session, error) {
+// ClaudeCode reads sessions from Claude Code's JSONL files.
+type ClaudeCode struct{}
+
+func (c *ClaudeCode) Name() string { return "Claude Code" }
+
+func (c *ClaudeCode) Sessions() ([]Session, error) {
 	claudeDir := os.Getenv("MUSE_CLAUDE_DIR")
 	if claudeDir == "" {
 		home, err := os.UserHomeDir()

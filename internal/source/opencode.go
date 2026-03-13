@@ -13,8 +13,12 @@ import (
 
 const defaultOpenCodeDB = ".local/share/opencode/opencode.db"
 
-// OpenCodeSessions reads all sessions from the OpenCode SQLite database.
-func OpenCodeSessions() ([]Session, error) {
+// OpenCode reads sessions from the OpenCode SQLite database.
+type OpenCode struct{}
+
+func (o *OpenCode) Name() string { return "OpenCode" }
+
+func (o *OpenCode) Sessions() ([]Session, error) {
 	dbPath := os.Getenv("MUSE_OPENCODE_DB")
 	if dbPath == "" {
 		home, err := os.UserHomeDir()

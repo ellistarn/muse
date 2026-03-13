@@ -5,6 +5,25 @@ import (
 	"time"
 )
 
+// Provider is the interface for memory sources. Each provider knows how to
+// discover and normalize sessions from a specific agent or platform.
+type Provider interface {
+	// Name returns a human-readable name for this source (e.g. "OpenCode").
+	Name() string
+	// Sessions returns all sessions available from this source.
+	// Returns (nil, nil) if the source data doesn't exist on this machine.
+	Sessions() ([]Session, error)
+}
+
+// Providers returns the default set of memory providers.
+func Providers() []Provider {
+	return []Provider{
+		&OpenCode{},
+		&ClaudeCode{},
+		&Kiro{},
+	}
+}
+
 // Session is the normalized representation of a conversation from any agent.
 type Session struct {
 	SchemaVersion int       `json:"schema_version"`
