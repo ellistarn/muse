@@ -8,14 +8,14 @@ import (
 	"github.com/ellistarn/muse/internal/muse"
 )
 
-func newPushCmd() *cobra.Command {
+func newLoadCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "push",
-		Short: "Push memories to storage",
-		Long: `Finds agent sessions and uploads them to storage. Uploads are incremental
+		Use:   "load",
+		Short: "Load memories into storage",
+		Long: `Finds agent sessions and loads them into storage. Loads are incremental
 — sessions already in storage are skipped. Run this before dreaming so
 your muse has new material.`,
-		Example: `  muse push`,
+		Example: `  muse load`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			store, err := newStore(ctx)
@@ -35,7 +35,7 @@ your muse has new material.`,
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Found %d local sessions\n", result.Total)
 			if result.Uploaded > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "Uploaded %d sessions (%s), %d unchanged\n", result.Uploaded, muse.FormatBytes(result.Bytes), result.Skipped)
+				fmt.Fprintf(cmd.OutOrStdout(), "Loaded %d sessions (%s), %d unchanged\n", result.Uploaded, muse.FormatBytes(result.Bytes), result.Skipped)
 			} else {
 				fmt.Fprintf(cmd.OutOrStdout(), "All %d sessions unchanged\n", result.Skipped)
 			}

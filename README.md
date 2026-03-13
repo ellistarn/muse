@@ -13,7 +13,7 @@ go install github.com/ellistarn/muse/cmd/muse@latest
 ## Getting Started
 
 ```bash
-muse push              # push memories to storage
+muse load              # load memories into storage
 muse dream             # distill your soul from memories
 muse inspect           # see what your muse learned
 ```
