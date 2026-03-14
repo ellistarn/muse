@@ -33,7 +33,7 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 			}
 			question := strings.Join(args, " ")
 			var wroteOutput bool
-			_, err = m.Ask(ctx, muse.AskInput{
+			result, err := m.Ask(ctx, muse.AskInput{
 				Question: question,
 				StreamFunc: bedrock.StreamFunc(func(delta string) {
 					fmt.Fprint(os.Stdout, delta)
@@ -43,7 +43,12 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 			if wroteOutput {
 				fmt.Fprintln(os.Stdout) // trailing newline after stream completes
 			}
-			return err
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "tokens: %d in / %d out · $%.4f\n",
+				result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.Cost())
+			return nil
 		},
 	}
 }

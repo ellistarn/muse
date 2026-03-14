@@ -27,6 +27,7 @@ type Result struct {
 	Pruned    int
 	Remaining int // memories still pending reflection
 	Usage     inference.Usage
+	Soul      string // the distilled soul document
 	Warnings  []string
 }
 
@@ -38,10 +39,8 @@ type Options struct {
 	Limit int
 }
 
-// estimateTokens returns a rough token count for a string (~4 chars per token).
-func estimateTokens(s string) int {
-	return len(s) / 4
-}
+// estimateTokens is a convenience alias for inference.EstimateTokens.
+var estimateTokens = inference.EstimateTokens
 
 // Run executes the dream pipeline: reflect on new memories, then learn a soul
 // from all reflections. Reflections are the source of truth for what has been
@@ -179,7 +178,7 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 	}
 
 	log.Printf("Distilling soul from %d reflections...\n", len(allReflections))
-	learnUsage, err := learn(ctx, learnLLM, store, allReflections)
+	soul, learnUsage, err := learn(ctx, learnLLM, store, allReflections)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
@@ -194,6 +193,7 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 		Pruned:    pruned,
 		Remaining: remaining,
 		Usage:     reflectUsage.Add(learnUsage),
+		Soul:      soul,
 		Warnings:  warnings,
 	}, nil
 }
@@ -210,7 +210,7 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result,
 	}
 
 	log.Printf("Re-distilling soul from %d reflections...\n", len(allReflections))
-	usage, err := learn(ctx, learnLLM, store, allReflections)
+	soul, usage, err := learn(ctx, learnLLM, store, allReflections)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
@@ -218,6 +218,7 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result,
 
 	return &Result{
 		Usage:    usage,
+		Soul:     soul,
 		Warnings: nil,
 	}, nil
 }
@@ -342,21 +343,21 @@ func buildHumanFocusedView(ctx context.Context, client LLM, turns []turn) ([]str
 	return chunks, totalUsage, nil
 }
 
-func learn(ctx context.Context, client LLM, store storage.Store, observations []string) (inference.Usage, error) {
+func learn(ctx context.Context, client LLM, store storage.Store, observations []string) (string, inference.Usage, error) {
 	if len(observations) == 0 {
-		return inference.Usage{}, nil
+		return "", inference.Usage{}, nil
 	}
 	input := strings.Join(observations, "\n\n---\n\n")
 	soul, usage, err := client.Converse(ctx, prompts.Learn, input, inference.WithThinking(16000))
 	if err != nil {
-		return usage, err
+		return "", usage, err
 	}
 	// Strip markdown code fences the LLM sometimes wraps output in
 	soul = stripCodeFences(soul)
 	if err := writeSoul(ctx, store, soul); err != nil {
-		return usage, fmt.Errorf("failed to write soul: %w", err)
+		return "", usage, fmt.Errorf("failed to write soul: %w", err)
 	}
-	return usage, nil
+	return soul, usage, nil
 }
 
 // stripCodeFences removes wrapping ```markdown ... ``` from LLM output.

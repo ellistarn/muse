@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"github.com/ellistarn/muse/internal/bedrock"
+	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/log"
 	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
@@ -32,8 +33,9 @@ type AskInput struct {
 
 // AskResult contains the output from an Ask call.
 type AskResult struct {
-	Response  string // the muse's response text
-	SessionID string // session ID for continuing the conversation
+	Response  string          // the muse's response text
+	SessionID string          // session ID for continuing the conversation
+	Usage     inference.Usage // token usage and cost for this call
 }
 
 // Muse holds the state needed for all operations.
@@ -134,6 +136,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 	return &AskResult{
 		Response:  result.Text,
 		SessionID: sessionID,
+		Usage:     result.Usage,
 	}, nil
 }
 

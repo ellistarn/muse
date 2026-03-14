@@ -9,6 +9,7 @@ import (
 
 	"github.com/ellistarn/muse/internal/bedrock"
 	"github.com/ellistarn/muse/internal/dream"
+	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/log"
 	"github.com/ellistarn/muse/internal/muse"
 	"github.com/ellistarn/muse/internal/storage"
@@ -115,5 +116,8 @@ func runDream(ctx context.Context, stdout, stderr io.Writer, store storage.Store
 	}
 	fmt.Fprintf(stdout, "Soul distilled (%dk input, %dk output tokens, $%.2f)\n",
 		result.Usage.InputTokens/1000, result.Usage.OutputTokens/1000, result.Usage.Cost())
+	if result.Soul != "" {
+		fmt.Fprintf(stdout, "soul.md: ~%d tokens\n", inference.EstimateTokens(result.Soul))
+	}
 	return nil
 }

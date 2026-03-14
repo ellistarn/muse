@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/bedrock"
+	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/log"
 	"github.com/ellistarn/muse/internal/storage"
 )
@@ -43,6 +44,7 @@ Use --diff to summarize what changed since the last dream.`,
 				return nil
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(soul))
+			fmt.Fprintf(cmd.ErrOrStderr(), "soul.md: ~%d tokens\n", inference.EstimateTokens(soul))
 			return nil
 		},
 	}
@@ -97,5 +99,7 @@ func runDiff(cmd *cobra.Command, store storage.Store) error {
 	}
 	log.Printf("Diff complete ($%.4f)\n", usage.Cost())
 	fmt.Fprintf(cmd.OutOrStdout(), "Changes since %s:\n\n%s\n", prevTimestamp, strings.TrimSpace(summary))
+	fmt.Fprintf(cmd.ErrOrStderr(), "tokens: %d in / %d out · $%.4f\n",
+		usage.InputTokens, usage.OutputTokens, usage.Cost())
 	return nil
 }

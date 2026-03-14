@@ -7,6 +7,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/ellistarn/muse/internal/log"
 	"github.com/ellistarn/muse/internal/muse"
 	"github.com/ellistarn/muse/prompts"
 )
@@ -34,6 +35,8 @@ func NewServer(m *muse.Muse) *server.MCPServer {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to ask: %v", err)), nil
 			}
 			sessionID = result.SessionID
+			log.Printf("tokens: %d in / %d out · $%.4f\n",
+				result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.Cost())
 			return mcp.NewToolResultText(result.Response), nil
 		},
 	)
