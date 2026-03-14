@@ -53,7 +53,7 @@ To copy data between local and S3:
 
 ```bash
 muse sync local s3              # push everything to S3
-muse sync s3 local memories     # pull only memories
+muse sync s3 local memories     # pull memories from S3
 ```
 
 Run `muse --help` for detailed usage.
