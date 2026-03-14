@@ -29,7 +29,12 @@ func NewLocalStore() (*LocalStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine home directory: %w", err)
 	}
-	return &LocalStore{root: filepath.Join(home, ".muse")}, nil
+	return NewLocalStoreWithRoot(filepath.Join(home, ".muse")), nil
+}
+
+// NewLocalStoreWithRoot creates a LocalStore rooted at the given directory.
+func NewLocalStoreWithRoot(root string) *LocalStore {
+	return &LocalStore{root: root}
 }
 
 // Root returns the filesystem root directory for this store.

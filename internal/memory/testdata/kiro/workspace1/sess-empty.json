@@ -1,0 +1,7 @@
+{
+  "history": [
+    {"message": {"role": "system", "content": "You are a helpful assistant.", "id": "msg-sys"}}
+  ],
+  "title": "Empty Session",
+  "sessionId": "sess-empty"
+}

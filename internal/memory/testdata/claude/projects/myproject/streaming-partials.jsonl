@@ -1,0 +1,5 @@
+{"type":"user","uuid":"uuid-20","sessionId":"streaming-partials","timestamp":"2024-01-15T12:00:00Z","cwd":"/home/user/project","message":{"role":"user","content":"hello"}}
+{"type":"assistant","uuid":"uuid-21","parentUuid":"uuid-20","sessionId":"streaming-partials","timestamp":"2024-01-15T12:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"I'm thinking..."}],"model":"claude-sonnet-4-20250514"}}
+{"type":"assistant","uuid":"uuid-22","parentUuid":"uuid-20","sessionId":"streaming-partials","timestamp":"2024-01-15T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"Hello! How can I help?"}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}
+{"type":"user","uuid":"uuid-23","parentUuid":"uuid-22","sessionId":"streaming-partials","timestamp":"2024-01-15T12:01:00Z","cwd":"/home/user/project","message":{"role":"user","content":"thanks"}}
+{"type":"assistant","uuid":"uuid-24","parentUuid":"uuid-23","sessionId":"streaming-partials","timestamp":"2024-01-15T12:01:01Z","message":{"role":"assistant","content":[{"type":"text","text":"You're welcome!"}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}

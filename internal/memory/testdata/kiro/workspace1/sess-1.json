@@ -1,0 +1,10 @@
+{
+  "history": [
+    {"message": {"role": "user", "content": [{"type": "text", "text": "help me debug this API endpoint"}], "id": "msg-1"}},
+    {"message": {"role": "assistant", "content": "I can help with that. Can you share the error?", "id": "msg-2"}},
+    {"message": {"role": "user", "content": [{"type": "text", "text": "getting a 500 error on POST /users"}], "id": "msg-3"}},
+    {"message": {"role": "assistant", "content": "Let me check the handler.", "id": "msg-4"}}
+  ],
+  "title": "Debugging API",
+  "sessionId": "sess-1"
+}

@@ -1,0 +1,4 @@
+{"type":"user","uuid":"uuid-1","sessionId":"basic-session","timestamp":"2024-01-15T10:00:00Z","cwd":"/home/user/project","message":{"role":"user","content":"use kebab-case for file names"}}
+{"type":"assistant","uuid":"uuid-2","parentUuid":"uuid-1","sessionId":"basic-session","timestamp":"2024-01-15T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"OK, I'll use kebab-case."}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}
+{"type":"user","uuid":"uuid-3","parentUuid":"uuid-2","sessionId":"basic-session","timestamp":"2024-01-15T10:01:00Z","cwd":"/home/user/project","message":{"role":"user","content":"also add type annotations"}}
+{"type":"assistant","uuid":"uuid-4","parentUuid":"uuid-3","sessionId":"basic-session","timestamp":"2024-01-15T10:01:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}}

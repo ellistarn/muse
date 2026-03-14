@@ -1,0 +1,2 @@
+{"type":"system","uuid":"uuid-30","sessionId":"empty-session","timestamp":"2024-01-15T09:00:00Z","message":{"role":"system","content":"session started"}}
+{"type":"system","uuid":"uuid-31","sessionId":"empty-session","timestamp":"2024-01-15T09:00:01Z","message":{"role":"system","content":"configuration loaded"}}

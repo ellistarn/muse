@@ -8,151 +8,28 @@ import (
 	"time"
 
 	"github.com/ellistarn/muse/internal/dream"
-	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/memory"
-	"github.com/ellistarn/muse/internal/storage"
+	"github.com/ellistarn/muse/internal/testutil"
 )
 
-// mockStore implements storage.Store with in-memory state.
-type mockStore struct {
-	sessions    []storage.SessionEntry
-	data        map[string]*memory.Session
-	muse        string
-	reflections map[string]string // memoryKey -> content
-	deleted     []string
-}
-
-func newMockStore() *mockStore {
-	return &mockStore{
-		data:        map[string]*memory.Session{},
-		reflections: map[string]string{},
-	}
-}
-
-func (m *mockStore) addSession(src, id string, modified time.Time, messages []memory.Message) {
-	key := fmt.Sprintf("memories/%s/%s.json", src, id)
-	m.sessions = append(m.sessions, storage.SessionEntry{
-		Source:       src,
-		SessionID:    id,
-		Key:          key,
-		LastModified: modified,
-	})
-	m.data[src+"/"+id] = &memory.Session{
-		Source:    src,
-		SessionID: id,
-		Messages:  messages,
-	}
-}
-
-func (m *mockStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
-	return m.sessions, nil
-}
-
-func (m *mockStore) GetSession(_ context.Context, src, sessionID string) (*memory.Session, error) {
-	s, ok := m.data[src+"/"+sessionID]
-	if !ok {
-		return nil, fmt.Errorf("session not found: %s/%s", src, sessionID)
-	}
-	return s, nil
-}
-
-func (m *mockStore) PutSession(_ context.Context, session *memory.Session) (int, error) {
-	key := fmt.Sprintf("memories/%s/%s.json", session.Source, session.SessionID)
-	m.data[session.Source+"/"+session.SessionID] = session
-	m.sessions = append(m.sessions, storage.SessionEntry{
-		Source: session.Source, SessionID: session.SessionID, Key: key, LastModified: time.Now(),
-	})
-	return 0, nil
-}
-
-func (m *mockStore) GetMuse(_ context.Context) (string, error) {
-	if m.muse == "" {
-		return "", &storage.NotFoundError{Key: "muse.md"}
-	}
-	return m.muse, nil
-}
-
-func (m *mockStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
-	result := map[string]time.Time{}
-	for key := range m.reflections {
-		result[key] = time.Now()
-	}
-	return result, nil
-}
-
-func (m *mockStore) GetReflection(_ context.Context, memoryKey string) (string, error) {
-	content, ok := m.reflections[memoryKey]
-	if !ok {
-		return "", fmt.Errorf("reflection not found: %s", memoryKey)
-	}
-	return content, nil
-}
-
-func (m *mockStore) PutReflection(_ context.Context, key, content string) error {
-	m.reflections[key] = content
-	return nil
-}
-
-func (m *mockStore) DeletePrefix(_ context.Context, prefix string) error {
-	m.deleted = append(m.deleted, prefix)
-	if prefix == "reflections/" {
-		m.reflections = map[string]string{}
-	}
-	return nil
-}
-
-func (m *mockStore) PutMuse(_ context.Context, _, content string) error {
-	m.muse = content
-	return nil
-}
-
-func (m *mockStore) ListMuses(_ context.Context) ([]string, error) {
-	return nil, nil
-}
-
-func (m *mockStore) GetMuseVersion(_ context.Context, _ string) (string, error) {
-	return "", &storage.NotFoundError{Key: "muse"}
-}
-
-// mockLLM implements dream.LLM with canned responses.
-type mockLLM struct {
-	reflectResponse string
-	learnResponse   string
-	calls           []llmCall
-}
-
-type llmCall struct {
-	system string
-	user   string
-}
-
-func (m *mockLLM) Converse(_ context.Context, system, user string, _ ...inference.ConverseOption) (string, inference.Usage, error) {
-	m.calls = append(m.calls, llmCall{system: system, user: user})
-	usage := inference.Usage{InputTokens: 100, OutputTokens: 50}
-	if strings.Contains(system, "distilling observations") {
-		return m.learnResponse, usage, nil
-	}
-	return m.reflectResponse, usage, nil
-}
-
 func TestDreamPipeline(t *testing.T) {
-	store := newMockStore()
-	store.addSession("claude-code", "sess-1", time.Now(), []memory.Message{
+	store := testutil.NewMemoryStore()
+	store.AddSession("claude-code", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "use kebab-case for file names"},
 		{Role: "assistant", Content: "OK, I'll rename them."},
 		{Role: "user", Content: "also use lowercase"},
 		{Role: "assistant", Content: "Done."},
 	})
-	store.addSession("claude-code", "sess-2", time.Now(), []memory.Message{
+	store.AddSession("claude-code", "sess-2", time.Now(), []memory.Message{
 		{Role: "user", Content: "never use emojis in commit messages"},
 		{Role: "assistant", Content: "Understood."},
 		{Role: "user", Content: "and keep them short"},
 		{Role: "assistant", Content: "Will do."},
 	})
 
-	llm := &mockLLM{
-		reflectResponse: "- Prefers kebab-case file names\n- No emojis in commits",
-		learnResponse:   "## Naming\n\nI use kebab-case for file names.\n\n## Commits\n\nNo emojis. Keep them short.",
+	llm := &testutil.MockLLM{
+		ReflectResponse: "- Prefers kebab-case file names\n- No emojis in commits",
+		LearnResponse:   "## Naming\n\nI use kebab-case for file names.\n\n## Commits\n\nNo emojis. Keep them short.",
 	}
 
 	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
@@ -171,22 +48,22 @@ func TestDreamPipeline(t *testing.T) {
 	}
 
 	// Verify muse was written
-	if store.muse == "" {
+	if store.Muse == "" {
 		t.Error("muse not written to store")
 	}
-	if !strings.Contains(store.muse, "kebab-case") {
+	if !strings.Contains(store.Muse, "kebab-case") {
 		t.Error("muse missing expected content")
 	}
 
 	// Verify LLM was called: 2 sessions * 3 reflect steps (summarize + extract + refine) + 1 learn = 7 calls
-	if len(llm.calls) != 7 {
-		t.Errorf("LLM calls = %d, want 7", len(llm.calls))
+	if len(llm.Calls) != 7 {
+		t.Errorf("LLM calls = %d, want 7", len(llm.Calls))
 	}
 }
 
 func TestDreamPipelineNoMemories(t *testing.T) {
-	store := newMockStore()
-	llm := &mockLLM{}
+	store := testutil.NewMemoryStore()
+	llm := &testutil.MockLLM{}
 
 	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
 	if err != nil {
@@ -195,15 +72,15 @@ func TestDreamPipelineNoMemories(t *testing.T) {
 	if result.Processed != 0 {
 		t.Errorf("Processed = %d, want 0", result.Processed)
 	}
-	if len(llm.calls) != 0 {
-		t.Errorf("LLM calls = %d, want 0", len(llm.calls))
+	if len(llm.Calls) != 0 {
+		t.Errorf("LLM calls = %d, want 0", len(llm.Calls))
 	}
 }
 
 func TestDreamPipelineLimit(t *testing.T) {
-	store := newMockStore()
+	store := testutil.NewMemoryStore()
 	for i := 0; i < 5; i++ {
-		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
+		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -211,9 +88,9 @@ func TestDreamPipelineLimit(t *testing.T) {
 		})
 	}
 
-	llm := &mockLLM{
-		reflectResponse: "- observation",
-		learnResponse:   "## Test\n\nContent here.",
+	llm := &testutil.MockLLM{
+		ReflectResponse: "- observation",
+		LearnResponse:   "## Test\n\nContent here.",
 	}
 
 	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
@@ -227,15 +104,15 @@ func TestDreamPipelineLimit(t *testing.T) {
 		t.Errorf("Remaining = %d, want 3", result.Remaining)
 	}
 	// 2 sessions * 3 reflect steps + 1 learn = 7
-	if len(llm.calls) != 7 {
-		t.Errorf("LLM calls = %d, want 7 (2 sessions * 3 reflect steps + 1 learn)", len(llm.calls))
+	if len(llm.Calls) != 7 {
+		t.Errorf("LLM calls = %d, want 7 (2 sessions * 3 reflect steps + 1 learn)", len(llm.Calls))
 	}
 }
 
 func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
-	store := newMockStore()
+	store := testutil.NewMemoryStore()
 	for i := 0; i < 4; i++ {
-		store.addSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
+		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -243,9 +120,9 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 		})
 	}
 
-	llm := &mockLLM{
-		reflectResponse: "- observation",
-		learnResponse:   "## Test\n\nContent here.",
+	llm := &testutil.MockLLM{
+		ReflectResponse: "- observation",
+		LearnResponse:   "## Test\n\nContent here.",
 	}
 
 	// First run: limit to 2, should reflect 2 and learn from 2
@@ -259,13 +136,13 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	if result.Remaining != 2 {
 		t.Errorf("first run Remaining = %d, want 2", result.Remaining)
 	}
-	firstRunReflections := len(store.reflections)
+	firstRunReflections := len(store.Reflections)
 	if firstRunReflections != 2 {
 		t.Errorf("reflections after first run = %d, want 2", firstRunReflections)
 	}
 
 	// Second run: limit to 2 again, should reflect 2 more and learn from all 4
-	llm.calls = nil
+	llm.Calls = nil
 	result, err = dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
@@ -276,15 +153,15 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	if result.Remaining != 0 {
 		t.Errorf("second run Remaining = %d, want 0", result.Remaining)
 	}
-	if len(store.reflections) != 4 {
-		t.Errorf("reflections after second run = %d, want 4", len(store.reflections))
+	if len(store.Reflections) != 4 {
+		t.Errorf("reflections after second run = %d, want 4", len(store.Reflections))
 	}
 	// 2 sessions * 3 reflect steps + 1 learn = 7, and learn should have received all 4 reflections
-	if len(llm.calls) != 7 {
-		t.Errorf("second run LLM calls = %d, want 7", len(llm.calls))
+	if len(llm.Calls) != 7 {
+		t.Errorf("second run LLM calls = %d, want 7", len(llm.Calls))
 	}
 	// The learn call (last one) should contain all 4 observations joined by ---
-	learnInput := llm.calls[len(llm.calls)-1].user
+	learnInput := llm.Calls[len(llm.Calls)-1].User
 	separators := strings.Count(learnInput, "---")
 	// 4 observations joined by "---" = 3 separators (in the join delimiters)
 	if separators < 3 {
@@ -293,14 +170,14 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 }
 
 func TestDreamPipelineEmptyConversation(t *testing.T) {
-	store := newMockStore()
+	store := testutil.NewMemoryStore()
 	// Session with only empty messages produces no observations
-	store.addSession("test", "empty", time.Now(), []memory.Message{
+	store.AddSession("test", "empty", time.Now(), []memory.Message{
 		{Role: "user", Content: ""},
 		{Role: "assistant", Content: ""},
 	})
 
-	llm := &mockLLM{}
+	llm := &testutil.MockLLM{}
 
 	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
 	if err != nil {
@@ -313,17 +190,17 @@ func TestDreamPipelineEmptyConversation(t *testing.T) {
 }
 
 func TestDreamPipelineReflect(t *testing.T) {
-	store := newMockStore()
-	store.addSession("test", "sess-1", time.Now(), []memory.Message{
+	store := testutil.NewMemoryStore()
+	store.AddSession("test", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 		{Role: "user", Content: "one more thing"},
 		{Role: "assistant", Content: "sure"},
 	})
 
-	llm := &mockLLM{
-		reflectResponse: "- observation",
-		learnResponse:   "## Test\n\nContent.",
+	llm := &testutil.MockLLM{
+		ReflectResponse: "- observation",
+		LearnResponse:   "## Test\n\nContent.",
 	}
 
 	// First run
@@ -333,7 +210,7 @@ func TestDreamPipelineReflect(t *testing.T) {
 	}
 
 	// With Reprocess, it should process again even though state would normally prune it
-	llm.calls = nil
+	llm.Calls = nil
 	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Reflect: true})
 	if err != nil {
 		t.Fatalf("reprocess Run() error: %v", err)
