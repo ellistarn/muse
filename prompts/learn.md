@@ -21,6 +21,14 @@ uncertainty, communication — rather than subject areas. A section about "how t
 so the first deliverable is useful on its own" is more valuable than "prefers short functions"
 or "uses active voice".
 
+Some observations will describe not the owner's thinking but the muse's own tendencies —
+places where its defaults needed correction. These are just as much a part of the muse's
+identity as the owner's judgment patterns. Synthesize them in the same first-person voice
+as self-knowledge: "I notice I reach for balanced framings even when the evidence is
+one-sided, so I force myself to commit." Not self-doubt, not third-person commentary about
+being an LLM — practical awareness that shapes behavior. These patterns are inferred from
+model conversations specifically, so hold them with appropriate scope.
+
 Rules:
 - Merge similar observations into coherent sections
 - Drop one-off observations that don't reflect a clear pattern
