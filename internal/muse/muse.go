@@ -8,9 +8,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 
 	"github.com/ellistarn/muse/internal/bedrock"
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/log"
-	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/prompts"
 )
@@ -102,7 +102,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 		// New conversation
 		soul := m.soul
 		if soul == "" {
-			soul = "No muse available yet. Run 'muse distill' to generate one from memories."
+			soul = "No muse available yet. Run 'muse distill' to generate one from conversations."
 		}
 		session = &Session{
 			System: fmt.Sprintf(systemPrompt, soul),
@@ -156,15 +156,15 @@ func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	log.Println("Scanning local sessions...")
 	type result struct {
 		name     string
-		sessions []memory.Session
+		sessions []conversation.Session
 		err      error
 	}
-	providers := memory.Providers()
+	providers := conversation.Providers()
 	results := make([]result, len(providers))
 	var wg sync.WaitGroup
 	for i, provider := range providers {
 		wg.Add(1)
-		go func(i int, p memory.Provider) {
+		go func(i int, p conversation.Provider) {
 			defer wg.Done()
 			sessions, err := p.Sessions()
 			results[i] = result{name: p.Name(), sessions: sessions, err: err}
@@ -172,7 +172,7 @@ func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	}
 	wg.Wait()
 
-	var local []memory.Session
+	var local []conversation.Session
 	var warnings []string
 	for _, r := range results {
 		if r.err != nil {
@@ -188,7 +188,7 @@ func (m *Muse) Upload(ctx context.Context) (*UploadResult, error) {
 	var totalBytes int
 	for i := range local {
 		sess := &local[i]
-		key := fmt.Sprintf("memories/%s/%s.json", sess.Source, sess.SessionID)
+		key := fmt.Sprintf("conversations/%s/%s.json", sess.Source, sess.SessionID)
 		if entry, exists := remote[key]; exists {
 			if !sess.UpdatedAt.After(entry.LastModified) {
 				log.Printf("  skip (unchanged) %s\n", key)

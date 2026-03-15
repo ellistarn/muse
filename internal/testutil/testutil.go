@@ -8,71 +8,71 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/inference"
-	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
 // Compile-time interface checks.
 var (
-	_ storage.Store = (*MemoryStore)(nil)
+	_ storage.Store = (*ConversationStore)(nil)
 	_ distill.LLM   = (*MockLLM)(nil)
 )
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// ConversationStore
 // ---------------------------------------------------------------------------
 
-// MemoryStore is an in-memory implementation of storage.Store for tests.
-type MemoryStore struct {
+// ConversationStore is an in-memory implementation of storage.Store for tests.
+type ConversationStore struct {
 	Sessions    []storage.SessionEntry
-	Data        map[string]*memory.Session
+	Data        map[string]*conversation.Session
 	Muse        string
 	Reflections map[string]string
 	Deleted     []string
 	Muses       map[string]string // timestamp -> content
 }
 
-// NewMemoryStore returns a ready-to-use MemoryStore.
-func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
-		Data:        map[string]*memory.Session{},
+// NewConversationStore returns a ready-to-use ConversationStore.
+func NewConversationStore() *ConversationStore {
+	return &ConversationStore{
+		Data:        map[string]*conversation.Session{},
 		Reflections: map[string]string{},
 		Muses:       map[string]string{},
 	}
 }
 
 // AddSession is a helper that registers a session in the store.
-func (s *MemoryStore) AddSession(src, id string, modified time.Time, messages []memory.Message) {
-	key := fmt.Sprintf("memories/%s/%s.json", src, id)
+func (s *ConversationStore) AddSession(src, id string, modified time.Time, messages []conversation.Message) {
+	key := fmt.Sprintf("conversations/%s/%s.json", src, id)
 	s.Sessions = append(s.Sessions, storage.SessionEntry{
 		Source:       src,
 		SessionID:    id,
 		Key:          key,
 		LastModified: modified,
 	})
-	s.Data[src+"/"+id] = &memory.Session{
+	s.Data[src+"/"+id] = &conversation.Session{
 		Source:    src,
 		SessionID: id,
 		Messages:  messages,
 	}
 }
 
-func (s *MemoryStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
+func (s *ConversationStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
 	return s.Sessions, nil
 }
 
-func (s *MemoryStore) GetSession(_ context.Context, src, sessionID string) (*memory.Session, error) {
+func (s *ConversationStore) GetSession(_ context.Context, src, sessionID string) (*conversation.Session, error) {
 	sess, ok := s.Data[src+"/"+sessionID]
 	if !ok {
-		return nil, &storage.NotFoundError{Key: fmt.Sprintf("memories/%s/%s.json", src, sessionID)}
+		return nil, &storage.NotFoundError{Key: fmt.Sprintf("conversations/%s/%s.json", src, sessionID)}
 	}
 	return sess, nil
 }
 
-func (s *MemoryStore) PutSession(_ context.Context, session *memory.Session) (int, error) {
-	key := fmt.Sprintf("memories/%s/%s.json", session.Source, session.SessionID)
+func (s *ConversationStore) PutSession(_ context.Context, session *conversation.Session) (int, error) {
+	key := fmt.Sprintf("conversations/%s/%s.json", session.Source, session.SessionID)
 	s.Data[session.Source+"/"+session.SessionID] = session
 	s.Sessions = append(s.Sessions, storage.SessionEntry{
 		Source:       session.Source,
@@ -83,28 +83,28 @@ func (s *MemoryStore) PutSession(_ context.Context, session *memory.Session) (in
 	return 0, nil
 }
 
-func (s *MemoryStore) GetMuse(_ context.Context) (string, error) {
+func (s *ConversationStore) GetMuse(_ context.Context) (string, error) {
 	if s.Muse == "" {
 		return "", &storage.NotFoundError{Key: "muse.md"}
 	}
 	return s.Muse, nil
 }
 
-func (s *MemoryStore) PutMuse(_ context.Context, timestamp, content string) error {
+func (s *ConversationStore) PutMuse(_ context.Context, timestamp, content string) error {
 	s.Muses[timestamp] = content
 	s.Muse = content
 	return nil
 }
 
-func (s *MemoryStore) PutMuseDiff(_ context.Context, _, _ string) error {
+func (s *ConversationStore) PutMuseDiff(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (s *MemoryStore) GetMuseDiff(_ context.Context, _ string) (string, error) {
+func (s *ConversationStore) GetMuseDiff(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
 
-func (s *MemoryStore) ListMuses(_ context.Context) ([]string, error) {
+func (s *ConversationStore) ListMuses(_ context.Context) ([]string, error) {
 	timestamps := make([]string, 0, len(s.Muses))
 	for ts := range s.Muses {
 		timestamps = append(timestamps, ts)
@@ -113,7 +113,7 @@ func (s *MemoryStore) ListMuses(_ context.Context) ([]string, error) {
 	return timestamps, nil
 }
 
-func (s *MemoryStore) GetMuseVersion(_ context.Context, timestamp string) (string, error) {
+func (s *ConversationStore) GetMuseVersion(_ context.Context, timestamp string) (string, error) {
 	content, ok := s.Muses[timestamp]
 	if !ok {
 		return "", &storage.NotFoundError{Key: "muse/versions/" + timestamp}
@@ -121,7 +121,7 @@ func (s *MemoryStore) GetMuseVersion(_ context.Context, timestamp string) (strin
 	return content, nil
 }
 
-func (s *MemoryStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
+func (s *ConversationStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
 	result := map[string]time.Time{}
 	for key := range s.Reflections {
 		result[key] = time.Now()
@@ -129,20 +129,20 @@ func (s *MemoryStore) ListReflections(_ context.Context) (map[string]time.Time, 
 	return result, nil
 }
 
-func (s *MemoryStore) GetReflection(_ context.Context, memoryKey string) (string, error) {
-	content, ok := s.Reflections[memoryKey]
+func (s *ConversationStore) GetReflection(_ context.Context, conversationKey string) (string, error) {
+	content, ok := s.Reflections[conversationKey]
 	if !ok {
-		return "", &storage.NotFoundError{Key: memoryKey}
+		return "", &storage.NotFoundError{Key: conversationKey}
 	}
 	return content, nil
 }
 
-func (s *MemoryStore) PutReflection(_ context.Context, key, content string) error {
+func (s *ConversationStore) PutReflection(_ context.Context, key, content string) error {
 	s.Reflections[key] = content
 	return nil
 }
 
-func (s *MemoryStore) DeletePrefix(_ context.Context, prefix string) error {
+func (s *ConversationStore) DeletePrefix(_ context.Context, prefix string) error {
 	s.Deleted = append(s.Deleted, prefix)
 	if prefix == "reflections/" {
 		s.Reflections = map[string]string{}

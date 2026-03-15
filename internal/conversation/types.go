@@ -1,11 +1,11 @@
-package memory
+package conversation
 
 import (
 	"encoding/json"
 	"time"
 )
 
-// Provider is the interface for memory sources. Each provider knows how to
+// Provider is the interface for conversation sources. Each provider knows how to
 // discover and normalize sessions from a specific agent or platform.
 type Provider interface {
 	// Name returns a human-readable name for this source (e.g. "OpenCode").
@@ -15,7 +15,7 @@ type Provider interface {
 	Sessions() ([]Session, error)
 }
 
-// Providers returns the default set of memory providers.
+// Providers returns the default set of conversation providers.
 func Providers() []Provider {
 	return []Provider{
 		&OpenCode{},

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ellistarn/muse/internal/memory"
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -18,7 +18,7 @@ func TestLocalStore_SessionRoundTrip(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()
 
-	session := &memory.Session{
+	session := &conversation.Session{
 		SchemaVersion: 1,
 		Source:        "opencode",
 		SessionID:     "sess-001",
@@ -26,7 +26,7 @@ func TestLocalStore_SessionRoundTrip(t *testing.T) {
 		Title:         "Fix bug in parser",
 		CreatedAt:     time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC),
 		UpdatedAt:     time.Date(2025, 1, 1, 11, 0, 0, 0, time.UTC),
-		Messages: []memory.Message{
+		Messages: []conversation.Message{
 			{Role: "user", Content: "Fix the parser", Timestamp: time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)},
 			{Role: "assistant", Content: "Done.", Timestamp: time.Date(2025, 1, 1, 10, 1, 0, 0, time.UTC), Model: "claude-3"},
 		},
@@ -85,8 +85,8 @@ func TestLocalStore_SessionRoundTrip(t *testing.T) {
 	if entries[0].SessionID != "sess-001" {
 		t.Errorf("entry.SessionID = %q, want %q", entries[0].SessionID, "sess-001")
 	}
-	if entries[0].Key != "memories/opencode/sess-001.json" {
-		t.Errorf("entry.Key = %q, want %q", entries[0].Key, "memories/opencode/sess-001.json")
+	if entries[0].Key != "conversations/opencode/sess-001.json" {
+		t.Errorf("entry.Key = %q, want %q", entries[0].Key, "conversations/opencode/sess-001.json")
 	}
 }
 
@@ -200,7 +200,7 @@ func TestLocalStore_ReflectionRoundTrip(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()
 
-	memoryKey := "memories/opencode/sess-1.json"
+	memoryKey := "conversations/opencode/sess-1.json"
 	content := "## Observations\n- User prefers concise code."
 
 	if err := store.PutReflection(ctx, memoryKey, content); err != nil {
@@ -235,7 +235,7 @@ func TestLocalStore_ReflectionNotFound(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()
 
-	_, err := store.GetReflection(ctx, "memories/opencode/nonexistent.json")
+	_, err := store.GetReflection(ctx, "conversations/opencode/nonexistent.json")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -249,9 +249,9 @@ func TestLocalStore_DeletePrefix(t *testing.T) {
 	ctx := context.Background()
 
 	keys := []string{
-		"memories/opencode/sess-1.json",
-		"memories/opencode/sess-2.json",
-		"memories/claude/sess-3.json",
+		"conversations/opencode/sess-1.json",
+		"conversations/opencode/sess-2.json",
+		"conversations/claude/sess-3.json",
 	}
 	for _, key := range keys {
 		if err := store.PutReflection(ctx, key, "reflection for "+key); err != nil {

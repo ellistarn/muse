@@ -8,7 +8,7 @@ import (
 
 // Sync copies data from src to dst. It is additive — items in dst that don't
 // exist in src are left alone. If categories is empty, all categories are synced.
-// Valid categories: "memories", "reflections", "muse".
+// Valid categories: "conversations", "reflections", "muse".
 func Sync(ctx context.Context, src, dst Store, categories []string, w io.Writer) error {
 	all := len(categories) == 0
 	cats := map[string]bool{}
@@ -16,12 +16,12 @@ func Sync(ctx context.Context, src, dst Store, categories []string, w io.Writer)
 		cats[c] = true
 	}
 
-	if all || cats["memories"] {
-		n, err := syncMemories(ctx, src, dst)
+	if all || cats["conversations"] {
+		n, err := syncConversations(ctx, src, dst)
 		if err != nil {
-			return fmt.Errorf("sync memories: %w", err)
+			return fmt.Errorf("sync conversations: %w", err)
 		}
-		fmt.Fprintf(w, "Synced %d memories\n", n)
+		fmt.Fprintf(w, "Synced %d conversations\n", n)
 	}
 
 	if all || cats["reflections"] {
@@ -43,7 +43,7 @@ func Sync(ctx context.Context, src, dst Store, categories []string, w io.Writer)
 	return nil
 }
 
-func syncMemories(ctx context.Context, src, dst Store) (int, error) {
+func syncConversations(ctx context.Context, src, dst Store) (int, error) {
 	entries, err := src.ListSessions(ctx)
 	if err != nil {
 		return 0, err
@@ -68,13 +68,13 @@ func syncReflections(ctx context.Context, src, dst Store) (int, error) {
 		return 0, err
 	}
 	var count int
-	for memoryKey := range index {
-		content, err := src.GetReflection(ctx, memoryKey)
+	for conversationKey := range index {
+		content, err := src.GetReflection(ctx, conversationKey)
 		if err != nil {
-			return count, fmt.Errorf("get reflection %s: %w", memoryKey, err)
+			return count, fmt.Errorf("get reflection %s: %w", conversationKey, err)
 		}
-		if err := dst.PutReflection(ctx, memoryKey, content); err != nil {
-			return count, fmt.Errorf("put reflection %s: %w", memoryKey, err)
+		if err := dst.PutReflection(ctx, conversationKey, content); err != nil {
+			return count, fmt.Errorf("put reflection %s: %w", conversationKey, err)
 		}
 		count++
 	}

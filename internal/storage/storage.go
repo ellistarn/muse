@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ellistarn/muse/internal/memory"
+	"github.com/ellistarn/muse/internal/conversation"
 )
 
 // Store is the interface for all storage operations. Implementations include
@@ -13,15 +13,15 @@ import (
 //
 // Storage layout:
 //
-//	memories/{source}/{session_id}.json   — raw conversation sessions
-//	reflections/{source}/{session_id}.md  — per-session observation summaries
-//	muse/versions/{timestamp}/muse.md     — timestamped muse versions (latest = current)
-//	muse/versions/{timestamp}/diff.md     — what changed from the previous version
+//	conversations/{source}/{session_id}.json   — raw conversation sessions
+//	reflections/{source}/{session_id}.md       — per-session observation summaries
+//	muse/versions/{timestamp}/muse.md          — timestamped muse versions (latest = current)
+//	muse/versions/{timestamp}/diff.md          — what changed from the previous version
 type Store interface {
-	// Memories
+	// Conversations
 	ListSessions(ctx context.Context) ([]SessionEntry, error)
-	GetSession(ctx context.Context, src, sessionID string) (*memory.Session, error)
-	PutSession(ctx context.Context, session *memory.Session) (int, error)
+	GetSession(ctx context.Context, src, sessionID string) (*conversation.Session, error)
+	PutSession(ctx context.Context, session *conversation.Session) (int, error)
 
 	// Muses
 	GetMuse(ctx context.Context) (string, error)                          // latest version
@@ -33,7 +33,7 @@ type Store interface {
 
 	// Reflections
 	ListReflections(ctx context.Context) (map[string]time.Time, error)
-	GetReflection(ctx context.Context, memoryKey string) (string, error)
+	GetReflection(ctx context.Context, conversationKey string) (string, error)
 	PutReflection(ctx context.Context, key, content string) error
 
 	// Maintenance

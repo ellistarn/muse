@@ -16,7 +16,7 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/ellistarn/muse/internal/awsconfig"
-	"github.com/ellistarn/muse/internal/memory"
+	"github.com/ellistarn/muse/internal/conversation"
 )
 
 // S3Store implements Store backed by an S3 bucket.
@@ -44,7 +44,7 @@ func (c *S3Store) ListSessions(ctx context.Context) ([]SessionEntry, error) {
 	var entries []SessionEntry
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
 		Bucket: &c.bucket,
-		Prefix: aws.String("memories/"),
+		Prefix: aws.String("conversations/"),
 	})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -69,7 +69,7 @@ func (c *S3Store) ListSessions(ctx context.Context) ([]SessionEntry, error) {
 }
 
 // PutSession uploads a session as JSON and returns the number of bytes written.
-func (c *S3Store) PutSession(ctx context.Context, session *memory.Session) (int, error) {
+func (c *S3Store) PutSession(ctx context.Context, session *conversation.Session) (int, error) {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal session: %w", err)
@@ -89,7 +89,7 @@ func (c *S3Store) PutSession(ctx context.Context, session *memory.Session) (int,
 }
 
 // GetSession downloads and deserializes a session from S3.
-func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*memory.Session, error) {
+func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*conversation.Session, error) {
 	key := sessionKey(src, sessionID)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
@@ -103,7 +103,7 @@ func (c *S3Store) GetSession(ctx context.Context, src, sessionID string) (*memor
 	if err != nil {
 		return nil, fmt.Errorf("failed to read session %s: %w", sessionID, err)
 	}
-	var session memory.Session
+	var session conversation.Session
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session %s: %w", sessionID, err)
 	}
@@ -244,27 +244,27 @@ func (c *S3Store) ListReflections(ctx context.Context) (map[string]time.Time, er
 		}
 		for _, obj := range page.Contents {
 			key := aws.ToString(obj.Key)
-			memoryKey := reflectionKeyToMemoryKey(key)
-			reflections[memoryKey] = aws.ToTime(obj.LastModified)
+			conversationKey := reflectionKeyToConversationKey(key)
+			reflections[conversationKey] = aws.ToTime(obj.LastModified)
 		}
 	}
 	return reflections, nil
 }
 
 // GetReflection downloads a reflection's content from S3.
-func (c *S3Store) GetReflection(ctx context.Context, memoryKey string) (string, error) {
-	path := reflectionKey(memoryKey)
+func (c *S3Store) GetReflection(ctx context.Context, conversationKey string) (string, error) {
+	path := reflectionKey(conversationKey)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &path,
 	})
 	if err != nil {
-		return "", wrapS3NotFound(err, memoryKey)
+		return "", wrapS3NotFound(err, conversationKey)
 	}
 	defer out.Body.Close()
 	data, err := io.ReadAll(out.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read reflection for %s: %w", memoryKey, err)
+		return "", fmt.Errorf("failed to read reflection for %s: %w", conversationKey, err)
 	}
 	return string(data), nil
 }
@@ -303,12 +303,12 @@ func wrapS3NotFound(err error, key string) error {
 }
 
 func sessionKey(src, sessionID string) string {
-	return fmt.Sprintf("memories/%s/%s.json", src, sessionID)
+	return fmt.Sprintf("conversations/%s/%s.json", src, sessionID)
 }
 
-// parseSessionKey extracts source and session ID from a key like "memories/opencode/ses_abc.json".
+// parseSessionKey extracts source and session ID from a key like "conversations/opencode/ses_abc.json".
 func parseSessionKey(key string) (src, sessionID string) {
-	key = strings.TrimPrefix(key, "memories/")
+	key = strings.TrimPrefix(key, "conversations/")
 	parts := strings.SplitN(key, "/", 2)
 	if len(parts) != 2 {
 		return "", ""
@@ -329,15 +329,15 @@ func museDiffKey(timestamp string) string {
 	return fmt.Sprintf("muse/versions/%s/diff.md", timestamp)
 }
 
-// reflectionKey converts a memory key to its reflection storage key.
-// memories/opencode/ses_abc.json -> reflections/opencode/ses_abc.md
-func reflectionKey(memoryKey string) string {
-	return fmt.Sprintf("reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(memoryKey, ".json"), "memories/"))
+// reflectionKey converts a conversation key to its reflection storage key.
+// conversations/opencode/ses_abc.json -> reflections/opencode/ses_abc.md
+func reflectionKey(conversationKey string) string {
+	return fmt.Sprintf("reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(conversationKey, ".json"), "conversations/"))
 }
 
-// reflectionKeyToMemoryKey converts a reflection storage key back to a memory key.
-// reflections/opencode/ses_abc.md -> memories/opencode/ses_abc.json
-func reflectionKeyToMemoryKey(key string) string {
+// reflectionKeyToConversationKey converts a reflection storage key back to a conversation key.
+// reflections/opencode/ses_abc.md -> conversations/opencode/ses_abc.json
+func reflectionKeyToConversationKey(key string) string {
 	rel := strings.TrimPrefix(key, "reflections/")
-	return "memories/" + strings.TrimSuffix(rel, ".md") + ".json"
+	return "conversations/" + strings.TrimSuffix(rel, ".md") + ".json"
 }

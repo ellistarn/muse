@@ -7,20 +7,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/distill"
-	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/testutil"
 )
 
 func TestDistillPipeline(t *testing.T) {
-	store := testutil.NewMemoryStore()
-	store.AddSession("claude-code", "sess-1", time.Now(), []memory.Message{
+	store := testutil.NewConversationStore()
+	store.AddSession("claude-code", "sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "use kebab-case for file names"},
 		{Role: "assistant", Content: "OK, I'll rename them."},
 		{Role: "user", Content: "also use lowercase"},
 		{Role: "assistant", Content: "Done."},
 	})
-	store.AddSession("claude-code", "sess-2", time.Now(), []memory.Message{
+	store.AddSession("claude-code", "sess-2", time.Now(), []conversation.Message{
 		{Role: "user", Content: "never use emojis in commit messages"},
 		{Role: "assistant", Content: "Understood."},
 		{Role: "user", Content: "and keep them short"},
@@ -63,7 +63,7 @@ func TestDistillPipeline(t *testing.T) {
 }
 
 func TestDistillPipelineNoMemories(t *testing.T) {
-	store := testutil.NewMemoryStore()
+	store := testutil.NewConversationStore()
 	llm := &testutil.MockLLM{}
 
 	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
@@ -79,9 +79,9 @@ func TestDistillPipelineNoMemories(t *testing.T) {
 }
 
 func TestDistillPipelineLimit(t *testing.T) {
-	store := testutil.NewMemoryStore()
+	store := testutil.NewConversationStore()
 	for i := 0; i < 5; i++ {
-		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
+		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []conversation.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -111,9 +111,9 @@ func TestDistillPipelineLimit(t *testing.T) {
 }
 
 func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
-	store := testutil.NewMemoryStore()
+	store := testutil.NewConversationStore()
 	for i := 0; i < 4; i++ {
-		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
+		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []conversation.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -171,9 +171,9 @@ func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 }
 
 func TestDistillPipelineEmptyConversation(t *testing.T) {
-	store := testutil.NewMemoryStore()
+	store := testutil.NewConversationStore()
 	// Session with only empty messages produces no observations
-	store.AddSession("test", "empty", time.Now(), []memory.Message{
+	store.AddSession("test", "empty", time.Now(), []conversation.Message{
 		{Role: "user", Content: ""},
 		{Role: "assistant", Content: ""},
 	})
@@ -191,8 +191,8 @@ func TestDistillPipelineEmptyConversation(t *testing.T) {
 }
 
 func TestDistillPipelineReflect(t *testing.T) {
-	store := testutil.NewMemoryStore()
-	store.AddSession("test", "sess-1", time.Now(), []memory.Message{
+	store := testutil.NewConversationStore()
+	store.AddSession("test", "sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 		{Role: "user", Content: "one more thing"},

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ellistarn/muse/internal/memory"
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/internal/testutil"
 )
@@ -39,8 +39,8 @@ func TestRunDistill_PropagatesRunError(t *testing.T) {
 }
 
 func TestRunDistill_PropagatesLearnError(t *testing.T) {
-	store := testutil.NewMemoryStore()
-	store.Reflections["memories/test/sess-1.json"] = "- observation"
+	store := testutil.NewConversationStore()
+	store.Reflections["conversations/test/sess-1.json"] = "- observation"
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
@@ -54,8 +54,8 @@ func TestRunDistill_PropagatesLearnError(t *testing.T) {
 }
 
 func TestRunDistill_SuccessfulRun(t *testing.T) {
-	store := testutil.NewMemoryStore()
-	store.AddSession("test", "sess-1", time.Now(), []memory.Message{
+	store := testutil.NewConversationStore()
+	store.AddSession("test", "sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "use tabs"},
 		{Role: "assistant", Content: "ok"},
 		{Role: "user", Content: "also no emojis"},
@@ -73,8 +73,8 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Processed 1 memories") {
-		t.Errorf("expected 'Processed 1 memories', got: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "Processed 1 conversations") {
+		t.Errorf("expected 'Processed 1 conversations', got: %s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "Muse distilled") {
 		t.Errorf("expected 'Muse distilled', got: %s", stdout.String())
@@ -82,8 +82,8 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 }
 
 func TestRunDistill_SuccessfulLearn(t *testing.T) {
-	store := testutil.NewMemoryStore()
-	store.Reflections["memories/test/sess-1.json"] = "- observation"
+	store := testutil.NewConversationStore()
+	store.Reflections["conversations/test/sess-1.json"] = "- observation"
 	mockLLM := &testutil.MockLLM{
 		LearnResponse: "## Test\n\nContent.",
 	}
@@ -106,10 +106,10 @@ type failingStore struct{ err error }
 func (s *failingStore) ListSessions(_ context.Context) ([]storage.SessionEntry, error) {
 	return nil, s.err
 }
-func (s *failingStore) GetSession(_ context.Context, _, _ string) (*memory.Session, error) {
+func (s *failingStore) GetSession(_ context.Context, _, _ string) (*conversation.Session, error) {
 	return nil, s.err
 }
-func (s *failingStore) PutSession(_ context.Context, _ *memory.Session) (int, error) {
+func (s *failingStore) PutSession(_ context.Context, _ *conversation.Session) (int, error) {
 	return 0, s.err
 }
 func (s *failingStore) GetMuse(_ context.Context) (string, error)    { return "", s.err }

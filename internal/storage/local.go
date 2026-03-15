@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ellistarn/muse/internal/memory"
+	"github.com/ellistarn/muse/internal/conversation"
 )
 
 // LocalStore implements Store backed by the local filesystem, rooted at ~/.muse/.
@@ -40,11 +40,11 @@ func NewLocalStoreWithRoot(root string) *LocalStore {
 // Root returns the filesystem root directory for this store.
 func (l *LocalStore) Root() string { return l.root }
 
-// ListSessions returns all session entries under memories/.
+// ListSessions returns all session entries under conversations/.
 func (l *LocalStore) ListSessions(_ context.Context) ([]SessionEntry, error) {
-	memoriesDir := filepath.Join(l.root, "memories")
+	conversationsDir := filepath.Join(l.root, "conversations")
 	var entries []SessionEntry
-	err := filepath.WalkDir(memoriesDir, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(conversationsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return fs.SkipAll
@@ -54,7 +54,7 @@ func (l *LocalStore) ListSessions(_ context.Context) ([]SessionEntry, error) {
 		if d.IsDir() || !strings.HasSuffix(path, ".json") {
 			return nil
 		}
-		rel, err := filepath.Rel(memoriesDir, path)
+		rel, err := filepath.Rel(conversationsDir, path)
 		if err != nil {
 			return nil
 		}
@@ -71,7 +71,7 @@ func (l *LocalStore) ListSessions(_ context.Context) ([]SessionEntry, error) {
 		entries = append(entries, SessionEntry{
 			Source:       src,
 			SessionID:    sessionID,
-			Key:          "memories/" + filepath.ToSlash(rel),
+			Key:          "conversations/" + filepath.ToSlash(rel),
 			LastModified: info.ModTime(),
 		})
 		return nil
@@ -83,12 +83,12 @@ func (l *LocalStore) ListSessions(_ context.Context) ([]SessionEntry, error) {
 }
 
 // PutSession writes a session as JSON and returns the number of bytes written.
-func (l *LocalStore) PutSession(_ context.Context, session *memory.Session) (int, error) {
+func (l *LocalStore) PutSession(_ context.Context, session *conversation.Session) (int, error) {
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal session: %w", err)
 	}
-	path := filepath.Join(l.root, "memories", session.Source, session.SessionID+".json")
+	path := filepath.Join(l.root, "conversations", session.Source, session.SessionID+".json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -99,8 +99,8 @@ func (l *LocalStore) PutSession(_ context.Context, session *memory.Session) (int
 }
 
 // GetSession reads and deserializes a session from the filesystem.
-func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*memory.Session, error) {
-	path := filepath.Join(l.root, "memories", src, sessionID+".json")
+func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*conversation.Session, error) {
+	path := filepath.Join(l.root, "conversations", src, sessionID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -108,7 +108,7 @@ func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*memo
 		}
 		return nil, fmt.Errorf("failed to read session %s: %w", sessionID, err)
 	}
-	var session memory.Session
+	var session conversation.Session
 	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal session %s: %w", sessionID, err)
 	}
@@ -219,12 +219,12 @@ func (l *LocalStore) ListReflections(_ context.Context) (map[string]time.Time, e
 		if err != nil {
 			return nil
 		}
-		memoryKey := "memories/" + strings.TrimSuffix(filepath.ToSlash(rel), ".md") + ".json"
+		conversationKey := "conversations/" + strings.TrimSuffix(filepath.ToSlash(rel), ".md") + ".json"
 		info, err := d.Info()
 		if err != nil {
 			return nil
 		}
-		reflections[memoryKey] = info.ModTime()
+		reflections[conversationKey] = info.ModTime()
 		return nil
 	})
 	if err != nil {
@@ -234,13 +234,13 @@ func (l *LocalStore) ListReflections(_ context.Context) (map[string]time.Time, e
 }
 
 // GetReflection reads a reflection's content.
-func (l *LocalStore) GetReflection(_ context.Context, memoryKey string) (string, error) {
-	relPath := reflectionKey(memoryKey)
+func (l *LocalStore) GetReflection(_ context.Context, conversationKey string) (string, error) {
+	relPath := reflectionKey(conversationKey)
 	path := filepath.Join(l.root, filepath.FromSlash(relPath))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", &NotFoundError{Key: memoryKey}
+			return "", &NotFoundError{Key: conversationKey}
 		}
 		return "", fmt.Errorf("failed to read reflection: %w", err)
 	}

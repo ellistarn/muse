@@ -17,7 +17,7 @@ Currently there is zero programmatic PII filtering. The only protection is promp
 
 New package: `internal/scrub/scrub.go`
 
-A deterministic text sanitizer that runs regex-based replacement on conversation text before it hits the LLM during the reflect phase. Raw memories stay in S3 (so you can re-reflect with different scrub rules later), but the LLM never sees unscrubbed data.
+A deterministic text sanitizer that runs regex-based replacement on conversation text before it hits the LLM during the reflect phase. Raw conversations stay in S3 (so you can re-reflect with different scrub rules later), but the LLM never sees unscrubbed data.
 
 What it catches:
 
@@ -63,7 +63,7 @@ In `Ask()`, scrub the LLM response before returning it. Last line of defense. If
 
 ### Layer 5: Storage hygiene
 
-After a successful distill, purge processed memories from S3. Raw conversations are only needed until they're reflected on. Skills are the durable artifact. Add `PurgeProcessedMemories` to the storage client.
+After a successful distill, purge processed conversations from S3. Raw conversations are only needed until they're reflected on. Add `PurgeProcessedConversations` to the storage client.
 
 Also: S3 bucket should have server-side encryption enabled and public access blocked.
 
@@ -90,7 +90,7 @@ The scrubber loads these at initialization and adds them to the pattern list. Th
 | `internal/scrub/scrub_test.go` (new) | Table-driven tests for every pattern |
 | `internal/distill/distill.go` | Scrub conversation before reflect, scrub skills after learn |
 | `internal/muse/muse.go` | Scrub response in `Ask()` |
-| `internal/storage/s3.go` | Add `PurgeProcessedMemories()` |
+| `internal/storage/s3.go` | Add `PurgeProcessedConversations()` |
 
 ## Implementation order
 
@@ -99,10 +99,10 @@ The scrubber loads these at initialization and adds them to the pattern list. Th
 3. **Layer 1** (pre-reflect scrub) -- immediate risk reduction, hooks into existing reflect call.
 4. **Layer 3** (post-skill scrub) -- cheap deterministic pass on output.
 5. **Layer 4** (serving-time scrub) -- another cheap pass.
-6. **Layer 5** (memory purge) -- reduce exposure window for raw data at rest.
+6. **Layer 5** (conversation purge) -- reduce exposure window for raw data at rest.
 
 ## What this does NOT include
 
-- **No summarization gate.** An LLM-based summarization step before reflect would double LLM cost per memory. Start with deterministic scrubbing and see if it's sufficient. Add the summarization layer later if residual PII risk warrants the cost.
-- **No client-side encryption.** Raw memories transit the network over HTTPS (SDK default). If the threat model grows, add client-side encryption later.
+- **No summarization gate.** An LLM-based summarization step before reflect would double LLM cost per conversation. Start with deterministic scrubbing and see if it's sufficient. Add the summarization layer later if residual PII risk warrants the cost.
+- **No client-side encryption.** Raw conversations transit the network over HTTPS (SDK default). If the threat model grows, add client-side encryption later.
 - **Regex will have false positives.** A 12-digit number that isn't an AWS account ID will get redacted. This is the correct tradeoff: false positives lose signal, false negatives leak data.

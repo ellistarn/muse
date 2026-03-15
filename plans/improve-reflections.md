@@ -80,7 +80,7 @@ Change: if a message role is `tool` or the content is a tool result, skip it or 
 
 ## How to validate
 
-Run `muse distill --reflect` on existing memories and diff the old vs new reflections. Look for:
+Run `muse distill --reflect` on existing conversations and diff the old vs new reflections. Look for:
 
 - More `NO_OBSERVATIONS` outputs (good -- means it's not inventing signal)
 - Observations that include reasoning ("because...") rather than just preferences

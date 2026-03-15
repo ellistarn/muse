@@ -39,7 +39,7 @@ Use --diff to print the changelog from the latest distill.`,
 				if !storage.IsNotFound(err) {
 					return fmt.Errorf("failed to load muse: %w", err)
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from memories.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from conversations.")
 				return nil
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(soul))
@@ -58,7 +58,7 @@ func runShowDiff(cmd *cobra.Command, store storage.Store) error {
 		return fmt.Errorf("failed to list muse history: %w", err)
 	}
 	if len(muses) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from memories.")
+		fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from conversations.")
 		return nil
 	}
 	latest := muses[len(muses)-1]

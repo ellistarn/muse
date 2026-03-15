@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/log"
-	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/prompts"
 )
@@ -25,7 +25,7 @@ type LLM interface {
 type Result struct {
 	Processed int
 	Pruned    int
-	Remaining int // memories still pending reflection
+	Remaining int // conversations still pending reflection
 	Usage     inference.Usage
 	Muse      string // the distilled muse.md
 	Diff      string // what changed from the previous muse version
@@ -34,24 +34,24 @@ type Result struct {
 
 // Options configures a distill run.
 type Options struct {
-	// Reflect ignores persisted reflections and re-reflects all memories.
+	// Reflect ignores persisted reflections and re-reflects all conversations.
 	Reflect bool
-	// Limit caps how many memories to process (0 means no limit).
+	// Limit caps how many conversations to process (0 means no limit).
 	Limit int
 }
 
 // estimateTokens is a convenience alias for inference.EstimateTokens.
 var estimateTokens = inference.EstimateTokens
 
-// Run executes the distill pipeline: reflect on new memories, then learn a muse
+// Run executes the distill pipeline: reflect on new conversations, then learn a muse
 // from all reflections. Reflections are the source of truth for what has been
 // processed; there is no separate state file.
 func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opts Options) (*Result, error) {
-	// List all memories and existing reflections
-	log.Println("Listing memories...")
+	// List all conversations and existing reflections
+	log.Println("Listing conversations...")
 	entries, err := store.ListSessions(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list memories: %w", err)
+		return nil, fmt.Errorf("failed to list conversations: %w", err)
 	}
 
 	reflections, err := store.ListReflections(ctx)
@@ -61,14 +61,14 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 
 	// If reprocessing, clear all existing reflections
 	if opts.Reflect {
-		log.Println("Re-reflecting all memories (clearing existing reflections)")
+		log.Println("Re-reflecting all conversations (clearing existing reflections)")
 		if err := store.DeletePrefix(ctx, "reflections/"); err != nil {
 			return nil, fmt.Errorf("failed to clear reflections: %w", err)
 		}
 		reflections = map[string]time.Time{}
 	}
 
-	// Diff: memories without a corresponding reflection (or stale ones) are pending
+	// Diff: conversations without a corresponding reflection (or stale ones) are pending
 	var pending []storage.SessionEntry
 	var pruned int
 	for _, e := range entries {
@@ -78,21 +78,21 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 		}
 		pending = append(pending, e)
 	}
-	// Sort newest first so the limit keeps the most recent memories.
+	// Sort newest first so the limit keeps the most recent conversations.
 	sort.Slice(pending, func(i, j int) bool {
 		return pending[i].LastModified.After(pending[j].LastModified)
 	})
 	totalPending := len(pending)
 	if opts.Limit > 0 && len(pending) > opts.Limit {
-		log.Printf("Found %d new memories, limiting to %d\n", len(pending), opts.Limit)
+		log.Printf("Found %d new conversations, limiting to %d\n", len(pending), opts.Limit)
 		pending = pending[:opts.Limit]
 	}
-	log.Printf("Found %d memories (%d new, %d already reflected)\n", len(entries), totalPending, pruned)
+	log.Printf("Found %d conversations (%d new, %d already reflected)\n", len(entries), totalPending, pruned)
 
 	var warnings []string
 	var reflectUsage inference.Usage
 
-	// Reflect on pending memories in parallel
+	// Reflect on pending conversations in parallel
 	if len(pending) > 0 {
 		log.Println("Estimating token usage...")
 		var totalEstimate int
@@ -111,7 +111,7 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 		}
 		log.Printf("Estimated ~%dk input tokens for reflect phase\n", totalEstimate/1000)
 
-		log.Printf("Reflecting on %d memories...\n", len(pending))
+		log.Printf("Reflecting on %d conversations...\n", len(pending))
 		type mapResult struct {
 			key          string
 			observations string
@@ -161,12 +161,12 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 				warnings = append(warnings, fmt.Sprintf("failed to save reflection for %s: %v", r.key, err))
 			}
 		}
-		log.Printf("Reflected on %d memories ($%.4f)\n", len(pending)-len(warnings), reflectUsage.Cost())
+		log.Printf("Reflected on %d conversations ($%.4f)\n", len(pending)-len(warnings), reflectUsage.Cost())
 	}
 
 	remaining := totalPending - len(pending)
 	if remaining > 0 {
-		log.Printf("%d memories still pending reflection (run distill again to continue)\n", remaining)
+		log.Printf("%d conversations still pending reflection (run distill again to continue)\n", remaining)
 	}
 
 	// Learn from ALL reflections (not just new ones)
@@ -250,8 +250,8 @@ func loadAllReflections(ctx context.Context, store storage.Store) ([]string, err
 		return nil, err
 	}
 	var reflections []string
-	for memoryKey := range index {
-		content, err := store.GetReflection(ctx, memoryKey)
+	for conversationKey := range index {
+		content, err := store.GetReflection(ctx, conversationKey)
 		if err != nil {
 			continue
 		}
@@ -268,7 +268,7 @@ type turn struct {
 	humanContent     string // human's message
 }
 
-func reflectOnSession(ctx context.Context, client LLM, session *memory.Session) (string, inference.Usage, error) {
+func reflectOnSession(ctx context.Context, client LLM, session *conversation.Session) (string, inference.Usage, error) {
 	turns := extractTurns(session)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
@@ -424,7 +424,7 @@ const maxChunkChars = 200_000
 // the assistant message that preceded a human response with that human message.
 // Sessions with fewer than 2 human turns are skipped (no corrections or
 // preferences were expressed).
-func extractTurns(session *memory.Session) []turn {
+func extractTurns(session *conversation.Session) []turn {
 	var userTurns int
 	for _, msg := range session.Messages {
 		if msg.Role == "user" && len(msg.Content) > 0 {
