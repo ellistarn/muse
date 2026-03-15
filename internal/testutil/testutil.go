@@ -96,6 +96,14 @@ func (s *MemoryStore) PutMuse(_ context.Context, timestamp, content string) erro
 	return nil
 }
 
+func (s *MemoryStore) PutMuseDiff(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (s *MemoryStore) GetMuseDiff(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
 func (s *MemoryStore) ListMuses(_ context.Context) ([]string, error) {
 	timestamps := make([]string, 0, len(s.Muses))
 	for ts := range s.Muses {

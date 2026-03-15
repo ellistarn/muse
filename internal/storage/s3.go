@@ -138,6 +138,40 @@ func (c *S3Store) PutMuse(ctx context.Context, timestamp, content string) error 
 	return nil
 }
 
+// PutMuseDiff writes a diff summary at the given timestamp.
+func (c *S3Store) PutMuseDiff(ctx context.Context, timestamp, content string) error {
+	key := museDiffKey(timestamp)
+	contentType := "text/markdown"
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      &c.bucket,
+		Key:         &key,
+		Body:        bytes.NewReader([]byte(content)),
+		ContentType: &contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to put muse diff: %w", err)
+	}
+	return nil
+}
+
+// GetMuseDiff reads the diff summary for the given timestamp.
+func (c *S3Store) GetMuseDiff(ctx context.Context, timestamp string) (string, error) {
+	key := museDiffKey(timestamp)
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &c.bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return "", wrapS3NotFound(err, key)
+	}
+	defer out.Body.Close()
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read muse diff %s: %w", timestamp, err)
+	}
+	return string(data), nil
+}
+
 // ListMuses returns timestamps of all muse versions, sorted ascending.
 func (c *S3Store) ListMuses(ctx context.Context) ([]string, error) {
 	prefix := "muse/versions/"
@@ -289,6 +323,10 @@ func parseSessionKey(key string) (src, sessionID string) {
 
 func museVersionKey(timestamp string) string {
 	return fmt.Sprintf("muse/versions/%s/muse.md", timestamp)
+}
+
+func museDiffKey(timestamp string) string {
+	return fmt.Sprintf("muse/versions/%s/diff.md", timestamp)
 }
 
 // reflectionKey converts a memory key to its reflection storage key.

@@ -56,6 +56,7 @@ func TestDistillPipeline(t *testing.T) {
 	}
 
 	// Verify LLM was called: 2 sessions * 3 reflect steps (summarize + extract + refine) + 1 learn = 7 calls
+	// No diff call on first run (no previous muse to compare against).
 	if len(llm.Calls) != 7 {
 		t.Errorf("LLM calls = %d, want 7", len(llm.Calls))
 	}
@@ -103,7 +104,7 @@ func TestDistillPipelineLimit(t *testing.T) {
 	if result.Remaining != 3 {
 		t.Errorf("Remaining = %d, want 3", result.Remaining)
 	}
-	// 2 sessions * 3 reflect steps + 1 learn = 7
+	// 2 sessions * 3 reflect steps + 1 learn = 7 (no diff on first run)
 	if len(llm.Calls) != 7 {
 		t.Errorf("LLM calls = %d, want 7 (2 sessions * 3 reflect steps + 1 learn)", len(llm.Calls))
 	}
@@ -156,12 +157,12 @@ func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	if len(store.Reflections) != 4 {
 		t.Errorf("reflections after second run = %d, want 4", len(store.Reflections))
 	}
-	// 2 sessions * 3 reflect steps + 1 learn = 7, and learn should have received all 4 reflections
-	if len(llm.Calls) != 7 {
-		t.Errorf("second run LLM calls = %d, want 7", len(llm.Calls))
+	// 2 sessions * 3 reflect steps + 1 learn + 1 diff = 8 (diff runs because previous muse exists)
+	if len(llm.Calls) != 8 {
+		t.Errorf("second run LLM calls = %d, want 8", len(llm.Calls))
 	}
-	// The learn call (last one) should contain all 4 observations joined by ---
-	learnInput := llm.Calls[len(llm.Calls)-1].User
+	// The learn call (second-to-last, before diff) should contain all 4 observations joined by ---
+	learnInput := llm.Calls[len(llm.Calls)-2].User
 	separators := strings.Count(learnInput, "---")
 	// 4 observations joined by "---" = 3 separators (in the join delimiters)
 	if separators < 3 {

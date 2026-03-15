@@ -136,6 +136,28 @@ func (l *LocalStore) PutMuse(_ context.Context, timestamp, content string) error
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
+// PutMuseDiff writes a diff summary at the given timestamp.
+func (l *LocalStore) PutMuseDiff(_ context.Context, timestamp, content string) error {
+	path := filepath.Join(l.root, "muse", "versions", timestamp, "diff.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// GetMuseDiff reads the diff summary for the given timestamp.
+func (l *LocalStore) GetMuseDiff(_ context.Context, timestamp string) (string, error) {
+	path := filepath.Join(l.root, "muse", "versions", timestamp, "diff.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", &NotFoundError{Key: museDiffKey(timestamp)}
+		}
+		return "", fmt.Errorf("failed to read muse diff %s: %w", timestamp, err)
+	}
+	return string(data), nil
+}
+
 // ListMuses returns timestamps of all muse versions, sorted ascending.
 func (l *LocalStore) ListMuses(_ context.Context) ([]string, error) {
 	musesDir := filepath.Join(l.root, "muse", "versions")

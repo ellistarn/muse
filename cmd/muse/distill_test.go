@@ -29,7 +29,7 @@ func TestRunDistill_PropagatesRunError(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDistill(ctx, &stdout, &stderr, store, &testutil.MockLLM{}, &testutil.MockLLM{}, false, false, 100)
+	err := runDistill(ctx, &stdout, &stderr, store, &testutil.MockLLM{}, &testutil.MockLLM{}, &testutil.MockLLM{}, false, false, 100)
 	if err == nil {
 		t.Fatal("expected error from failing store, got nil")
 	}
@@ -44,7 +44,7 @@ func TestRunDistill_PropagatesLearnError(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDistill(ctx, &stdout, &stderr, store, nil, &testutil.MockLLM{Err: fmt.Errorf("learn failed")}, true, false, 0)
+	err := runDistill(ctx, &stdout, &stderr, store, nil, &testutil.MockLLM{Err: fmt.Errorf("learn failed")}, &testutil.MockLLM{}, true, false, 0)
 	if err == nil {
 		t.Fatal("expected error from failing LLM, got nil")
 	}
@@ -69,7 +69,7 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDistill(ctx, &stdout, &stderr, store, mockLLM, mockLLM, false, false, 100)
+	err := runDistill(ctx, &stdout, &stderr, store, mockLLM, mockLLM, mockLLM, false, false, 100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestRunDistill_SuccessfulLearn(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDistill(ctx, &stdout, &stderr, store, nil, mockLLM, true, false, 0)
+	err := runDistill(ctx, &stdout, &stderr, store, nil, mockLLM, mockLLM, true, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,6 +114,10 @@ func (s *failingStore) PutSession(_ context.Context, _ *memory.Session) (int, er
 }
 func (s *failingStore) GetMuse(_ context.Context) (string, error)    { return "", s.err }
 func (s *failingStore) PutMuse(_ context.Context, _, _ string) error { return s.err }
+func (s *failingStore) GetMuseDiff(_ context.Context, _ string) (string, error) {
+	return "", s.err
+}
+func (s *failingStore) PutMuseDiff(_ context.Context, _, _ string) error { return s.err }
 func (s *failingStore) ListMuses(_ context.Context) ([]string, error) {
 	return nil, s.err
 }

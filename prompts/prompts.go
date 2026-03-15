@@ -14,6 +14,9 @@ var ReflectRefine string
 //go:embed learn.md
 var Learn string
 
+//go:embed diff.md
+var Diff string
+
 //go:embed muse.md
 var Muse string
 

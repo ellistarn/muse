@@ -65,12 +65,16 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 			}
 
 			if learn {
-				client, cerr := bedrock.NewClient(ctx, bedrock.ModelOpus)
+				learnClient, cerr := bedrock.NewClient(ctx, bedrock.ModelOpus)
 				if cerr != nil {
 					return cerr
 				}
-				log.Printf("Learning with %s\n", client.Model())
-				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, client, true, false, 0)
+				diffClient, cerr := bedrock.NewClient(ctx, bedrock.ModelSonnet)
+				if cerr != nil {
+					return cerr
+				}
+				log.Printf("Learning with %s\n", learnClient.Model())
+				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, learnClient, diffClient, true, false, 0)
 			}
 			reflectClient, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 			if err != nil {
@@ -81,7 +85,7 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 				return err
 			}
 			log.Printf("Reflecting with %s, learning with %s\n", reflectClient.Model(), learnClient.Model())
-			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, false, reflect, limit)
+			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, nil, false, reflect, limit)
 		},
 	}
 	cmd.Flags().BoolVar(&reflect, "reflect", false, "re-reflect on all memories from scratch")
@@ -92,13 +96,13 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 
 // runDistill executes the distill pipeline and prints results. Extracted from the
 // command handler so it can be tested with mock dependencies.
-func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, reflectLLM, learnLLM distill.LLM, learn, reflect bool, limit int) error {
+func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, reflectLLM, learnLLM, diffLLM distill.LLM, learn, reflect bool, limit int) error {
 	var (
 		result *distill.Result
 		err    error
 	)
 	if learn {
-		result, err = distill.LearnOnly(ctx, store, learnLLM)
+		result, err = distill.LearnOnly(ctx, store, learnLLM, diffLLM)
 	} else {
 		result, err = distill.Run(ctx, store, reflectLLM, learnLLM, distill.Options{Reflect: reflect, Limit: limit})
 	}
@@ -118,6 +122,9 @@ func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 		result.Usage.InputTokens/1000, result.Usage.OutputTokens/1000, result.Usage.Cost())
 	if result.Muse != "" {
 		fmt.Fprintf(stdout, "muse.md: ~%d tokens\n", inference.EstimateTokens(result.Muse))
+	}
+	if result.Diff != "" {
+		fmt.Fprintf(stdout, "\n%s\n", result.Diff)
 	}
 	return nil
 }

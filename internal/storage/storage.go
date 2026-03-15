@@ -16,6 +16,7 @@ import (
 //	memories/{source}/{session_id}.json   — raw conversation sessions
 //	reflections/{source}/{session_id}.md  — per-session observation summaries
 //	muse/versions/{timestamp}/muse.md     — timestamped muse versions (latest = current)
+//	muse/versions/{timestamp}/diff.md     — what changed from the previous version
 type Store interface {
 	// Memories
 	ListSessions(ctx context.Context) ([]SessionEntry, error)
@@ -24,7 +25,9 @@ type Store interface {
 
 	// Muses
 	GetMuse(ctx context.Context) (string, error)                          // latest version
-	PutMuse(ctx context.Context, timestamp, content string) error         // write at timestamp
+	PutMuse(ctx context.Context, timestamp, content string) error         // write muse.md at timestamp
+	GetMuseDiff(ctx context.Context, timestamp string) (string, error)    // read diff.md at timestamp
+	PutMuseDiff(ctx context.Context, timestamp, content string) error     // write diff.md at timestamp
 	ListMuses(ctx context.Context) ([]string, error)                      // all timestamps, sorted asc
 	GetMuseVersion(ctx context.Context, timestamp string) (string, error) // specific version
 
