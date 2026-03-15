@@ -1,7 +1,8 @@
 # Muse
 
-A muse reflects on memories of your conversations, distills them into a document
-(muse.md), and embodies your unique thought processes when asked questions.
+An AI advisor that thinks like you. It learns from your conversation history
+across Claude Code, Kiro, and OpenCode — so your agents can consult your
+perspective without pulling you into the loop.
 
 ## Install
 
