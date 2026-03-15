@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ellistarn/muse/internal/dream"
+	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/storage"
@@ -17,7 +17,7 @@ import (
 // Compile-time interface checks.
 var (
 	_ storage.Store = (*MemoryStore)(nil)
-	_ dream.LLM     = (*MockLLM)(nil)
+	_ distill.LLM   = (*MockLLM)(nil)
 )
 
 // ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ type LLMCall struct {
 	User   string
 }
 
-// MockLLM is a test double for dream.LLM that returns canned responses.
+// MockLLM is a test double for distill.LLM that returns canned responses.
 // It dispatches based on whether the system prompt contains
 // "distilling observations" (learn phase) or not (reflect phase).
 type MockLLM struct {

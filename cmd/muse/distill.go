@@ -8,19 +8,19 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/bedrock"
-	"github.com/ellistarn/muse/internal/dream"
+	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/log"
 	"github.com/ellistarn/muse/internal/muse"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-func newDreamCmd() *cobra.Command {
+func newDistillCmd() *cobra.Command {
 	var reflect bool
 	var learn bool
 	var limit int
 	cmd := &cobra.Command{
-		Use:   "dream",
+		Use:   "distill",
 		Short: "Distill a muse from memories",
 		Long: `Discovers new memories, reflects on them, and distills a muse.md
 that captures how you think. Safe to run repeatedly — only new
@@ -32,10 +32,10 @@ then learn reduces all observations into a single muse.md.
 
 Use --learn to re-distill the muse from existing reflections without
 reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
-		Example: `  muse dream              # discover memories, reflect, and distill muse
-  muse dream --learn      # re-distill muse from existing reflections
-  muse dream --reflect    # re-reflect on all memories from scratch
-  muse dream --limit 50   # process at most 50 memories`,
+		Example: `  muse distill              # discover memories, reflect, and distill muse
+  muse distill --learn      # re-distill muse from existing reflections
+  muse distill --reflect    # re-reflect on all memories from scratch
+  muse distill --limit 50   # process at most 50 memories`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			store, err := newStore(ctx)
@@ -70,7 +70,7 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 					return cerr
 				}
 				log.Printf("Learning with %s\n", client.Model())
-				return runDream(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, client, true, false, 0)
+				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, client, true, false, 0)
 			}
 			reflectClient, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 			if err != nil {
@@ -81,7 +81,7 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 				return err
 			}
 			log.Printf("Reflecting with %s, learning with %s\n", reflectClient.Model(), learnClient.Model())
-			return runDream(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, false, reflect, limit)
+			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, false, reflect, limit)
 		},
 	}
 	cmd.Flags().BoolVar(&reflect, "reflect", false, "re-reflect on all memories from scratch")
@@ -90,17 +90,17 @@ reprocessing memories. Use --reflect to reprocess all memories from scratch.`,
 	return cmd
 }
 
-// runDream executes the dream pipeline and prints results. Extracted from the
+// runDistill executes the distill pipeline and prints results. Extracted from the
 // command handler so it can be tested with mock dependencies.
-func runDream(ctx context.Context, stdout, stderr io.Writer, store storage.Store, reflectLLM, learnLLM dream.LLM, learn, reflect bool, limit int) error {
+func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, reflectLLM, learnLLM distill.LLM, learn, reflect bool, limit int) error {
 	var (
-		result *dream.Result
+		result *distill.Result
 		err    error
 	)
 	if learn {
-		result, err = dream.LearnOnly(ctx, store, learnLLM)
+		result, err = distill.LearnOnly(ctx, store, learnLLM)
 	} else {
-		result, err = dream.Run(ctx, store, reflectLLM, learnLLM, dream.Options{Reflect: reflect, Limit: limit})
+		result, err = distill.Run(ctx, store, reflectLLM, learnLLM, distill.Options{Reflect: reflect, Limit: limit})
 	}
 	if err != nil {
 		return err
@@ -111,7 +111,7 @@ func runDream(ctx context.Context, stdout, stderr io.Writer, store storage.Store
 	if !learn {
 		fmt.Fprintf(stdout, "Processed %d memories (%d pruned)\n", result.Processed, result.Pruned)
 		if result.Remaining > 0 {
-			fmt.Fprintf(stdout, "%d memories still pending reflection (run dream again)\n", result.Remaining)
+			fmt.Fprintf(stdout, "%d memories still pending reflection (run distill again)\n", result.Remaining)
 		}
 	}
 	fmt.Fprintf(stdout, "Muse distilled (%dk input, %dk output tokens, $%.2f)\n",

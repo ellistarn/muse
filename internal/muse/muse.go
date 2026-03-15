@@ -56,12 +56,12 @@ func New(ctx context.Context, store storage.Store) (*Muse, error) {
 		if !storage.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to load muse: %w", err)
 		}
-		soul = "" // no muse yet — first run before any dreams
+		soul = "" // no muse yet — first run before any distills
 	}
 	if soul != "" {
 		log.Printf("Loaded muse (%d bytes)\n", len(soul))
 	} else {
-		log.Println("No muse found (run 'muse dream' to generate one)")
+		log.Println("No muse found (run 'muse distill' to generate one)")
 	}
 	return &Muse{
 		storage:  store,
@@ -102,7 +102,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 		// New conversation
 		soul := m.soul
 		if soul == "" {
-			soul = "No muse available yet. Run 'muse dream' to generate one from memories."
+			soul = "No muse available yet. Run 'muse distill' to generate one from memories."
 		}
 		session = &Session{
 			System: fmt.Sprintf(systemPrompt, soul),

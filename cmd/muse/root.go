@@ -21,14 +21,14 @@ muse.md, and embodies your unique thought processes when asked questions.
 
 Workflow:
 
-  1. muse dream      Discover memories, reflect, and distill muse.md
+  1. muse distill    Discover memories, reflect, and distill muse.md
   2. muse show       Print muse.md
   3. muse ask        Ask your muse a question (stateless, one-shot)
   4. muse listen     Start an MCP server so agents can ask your muse
 
 Getting started:
 
-  muse dream && muse show
+  muse distill && muse show
 
 Data is stored locally at ~/.muse/ by default. Set MUSE_BUCKET to use S3 instead.
 
@@ -37,7 +37,7 @@ Run "muse listen --help" for MCP server configuration.`,
 		SilenceUsage:  true,
 	}
 	cmd.PersistentFlags().StringVar(&bucket, "bucket", os.Getenv("MUSE_BUCKET"), "S3 bucket name (or set MUSE_BUCKET)")
-	cmd.AddCommand(newDreamCmd())
+	cmd.AddCommand(newDistillCmd())
 	cmd.AddCommand(newShowCmd())
 	cmd.AddCommand(newListenCmd())
 	cmd.AddCommand(newAskCmd())

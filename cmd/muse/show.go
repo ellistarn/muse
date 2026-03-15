@@ -18,11 +18,11 @@ func newShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Print muse.md",
 		Long: `Prints your current muse.md to stdout. If no muse exists yet, prompts
-you to run 'muse dream'.
+you to run 'muse distill'.
 
-Use --diff to summarize what changed since the last dream.`,
+Use --diff to summarize what changed since the last distill.`,
 		Example: `  muse show          # print the muse
-  muse show --diff   # summarize what changed since the last dream`,
+  muse show --diff   # summarize what changed since the last distill`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			store, err := newStore(ctx)
@@ -40,7 +40,7 @@ Use --diff to summarize what changed since the last dream.`,
 				if !storage.IsNotFound(err) {
 					return fmt.Errorf("failed to load muse: %w", err)
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse dream' to generate one from memories.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from memories.")
 				return nil
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(soul))
@@ -48,7 +48,7 @@ Use --diff to summarize what changed since the last dream.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&diff, "diff", false, "summarize what changed since the last dream")
+	cmd.Flags().BoolVar(&diff, "diff", false, "summarize what changed since the last distill")
 	return cmd
 }
 

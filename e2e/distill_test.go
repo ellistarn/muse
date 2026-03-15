@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ellistarn/muse/internal/dream"
+	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/memory"
 	"github.com/ellistarn/muse/internal/testutil"
 )
 
-func TestDreamPipeline(t *testing.T) {
+func TestDistillPipeline(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	store.AddSession("claude-code", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "use kebab-case for file names"},
@@ -32,7 +32,7 @@ func TestDreamPipeline(t *testing.T) {
 		LearnResponse:   "## Naming\n\nI use kebab-case for file names.\n\n## Commits\n\nNo emojis. Keep them short.",
 	}
 
-	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -61,11 +61,11 @@ func TestDreamPipeline(t *testing.T) {
 	}
 }
 
-func TestDreamPipelineNoMemories(t *testing.T) {
+func TestDistillPipelineNoMemories(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	llm := &testutil.MockLLM{}
 
-	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestDreamPipelineNoMemories(t *testing.T) {
 	}
 }
 
-func TestDreamPipelineLimit(t *testing.T) {
+func TestDistillPipelineLimit(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	for i := 0; i < 5; i++ {
 		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
@@ -93,7 +93,7 @@ func TestDreamPipelineLimit(t *testing.T) {
 		LearnResponse:   "## Test\n\nContent here.",
 	}
 
-	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{Limit: 2})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestDreamPipelineLimit(t *testing.T) {
 	}
 }
 
-func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
+func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	for i := 0; i < 4; i++ {
 		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []memory.Message{
@@ -126,7 +126,7 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	}
 
 	// First run: limit to 2, should reflect 2 and learn from 2
-	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{Limit: 2})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 
 	// Second run: limit to 2 again, should reflect 2 more and learn from all 4
 	llm.Calls = nil
-	result, err = dream.Run(context.Background(), store, llm, llm, dream.Options{Limit: 2})
+	result, err = distill.Run(context.Background(), store, llm, llm, distill.Options{Limit: 2})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDreamPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	}
 }
 
-func TestDreamPipelineEmptyConversation(t *testing.T) {
+func TestDistillPipelineEmptyConversation(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	// Session with only empty messages produces no observations
 	store.AddSession("test", "empty", time.Now(), []memory.Message{
@@ -179,7 +179,7 @@ func TestDreamPipelineEmptyConversation(t *testing.T) {
 
 	llm := &testutil.MockLLM{}
 
-	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestDreamPipelineEmptyConversation(t *testing.T) {
 	}
 }
 
-func TestDreamPipelineReflect(t *testing.T) {
+func TestDistillPipelineReflect(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	store.AddSession("test", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "hello"},
@@ -204,14 +204,14 @@ func TestDreamPipelineReflect(t *testing.T) {
 	}
 
 	// First run
-	_, err := dream.Run(context.Background(), store, llm, llm, dream.Options{})
+	_, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
 	}
 
 	// With Reprocess, it should process again even though state would normally prune it
 	llm.Calls = nil
-	result, err := dream.Run(context.Background(), store, llm, llm, dream.Options{Reflect: true})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{Reflect: true})
 	if err != nil {
 		t.Fatalf("reprocess Run() error: %v", err)
 	}

@@ -13,23 +13,23 @@ import (
 	"github.com/ellistarn/muse/internal/testutil"
 )
 
-func TestDreamCmd_NoStore(t *testing.T) {
+func TestDistillCmd_NoStore(t *testing.T) {
 	// When no bucket is set, local store is used — this test just validates
 	// the command doesn't panic. It will fail at bedrock client creation
 	// which is expected.
 	t.Setenv("MUSE_BUCKET", "")
 }
 
-func TestDreamCmd_LearnNoStore(t *testing.T) {
+func TestDistillCmd_LearnNoStore(t *testing.T) {
 	t.Setenv("MUSE_BUCKET", "")
 }
 
-func TestRunDream_PropagatesRunError(t *testing.T) {
+func TestRunDistill_PropagatesRunError(t *testing.T) {
 	store := &failingStore{err: fmt.Errorf("storage unavailable")}
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDream(ctx, &stdout, &stderr, store, &testutil.MockLLM{}, &testutil.MockLLM{}, false, false, 100)
+	err := runDistill(ctx, &stdout, &stderr, store, &testutil.MockLLM{}, &testutil.MockLLM{}, false, false, 100)
 	if err == nil {
 		t.Fatal("expected error from failing store, got nil")
 	}
@@ -38,13 +38,13 @@ func TestRunDream_PropagatesRunError(t *testing.T) {
 	}
 }
 
-func TestRunDream_PropagatesLearnError(t *testing.T) {
+func TestRunDistill_PropagatesLearnError(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	store.Reflections["memories/test/sess-1.json"] = "- observation"
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDream(ctx, &stdout, &stderr, store, nil, &testutil.MockLLM{Err: fmt.Errorf("learn failed")}, true, false, 0)
+	err := runDistill(ctx, &stdout, &stderr, store, nil, &testutil.MockLLM{Err: fmt.Errorf("learn failed")}, true, false, 0)
 	if err == nil {
 		t.Fatal("expected error from failing LLM, got nil")
 	}
@@ -53,7 +53,7 @@ func TestRunDream_PropagatesLearnError(t *testing.T) {
 	}
 }
 
-func TestRunDream_SuccessfulRun(t *testing.T) {
+func TestRunDistill_SuccessfulRun(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	store.AddSession("test", "sess-1", time.Now(), []memory.Message{
 		{Role: "user", Content: "use tabs"},
@@ -69,7 +69,7 @@ func TestRunDream_SuccessfulRun(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDream(ctx, &stdout, &stderr, store, mockLLM, mockLLM, false, false, 100)
+	err := runDistill(ctx, &stdout, &stderr, store, mockLLM, mockLLM, false, false, 100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRunDream_SuccessfulRun(t *testing.T) {
 	}
 }
 
-func TestRunDream_SuccessfulLearn(t *testing.T) {
+func TestRunDistill_SuccessfulLearn(t *testing.T) {
 	store := testutil.NewMemoryStore()
 	store.Reflections["memories/test/sess-1.json"] = "- observation"
 	mockLLM := &testutil.MockLLM{
@@ -91,7 +91,7 @@ func TestRunDream_SuccessfulLearn(t *testing.T) {
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
-	err := runDream(ctx, &stdout, &stderr, store, nil, mockLLM, true, false, 0)
+	err := runDistill(ctx, &stdout, &stderr, store, nil, mockLLM, true, false, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

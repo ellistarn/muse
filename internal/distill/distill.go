@@ -1,4 +1,4 @@
-package dream
+package distill
 
 import (
 	"context"
@@ -16,12 +16,12 @@ import (
 	"github.com/ellistarn/muse/prompts"
 )
 
-// LLM is the subset of an LLM client used by the dream pipeline.
+// LLM is the subset of an LLM client used by the distill pipeline.
 type LLM interface {
 	Converse(ctx context.Context, system, user string, opts ...inference.ConverseOption) (string, inference.Usage, error)
 }
 
-// Result summarizes a dream run.
+// Result summarizes a distill run.
 type Result struct {
 	Processed int
 	Pruned    int
@@ -31,7 +31,7 @@ type Result struct {
 	Warnings  []string
 }
 
-// Options configures a dream run.
+// Options configures a distill run.
 type Options struct {
 	// Reflect ignores persisted reflections and re-reflects all memories.
 	Reflect bool
@@ -42,7 +42,7 @@ type Options struct {
 // estimateTokens is a convenience alias for inference.EstimateTokens.
 var estimateTokens = inference.EstimateTokens
 
-// Run executes the dream pipeline: reflect on new memories, then learn a muse
+// Run executes the distill pipeline: reflect on new memories, then learn a muse
 // from all reflections. Reflections are the source of truth for what has been
 // processed; there is no separate state file.
 func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opts Options) (*Result, error) {
@@ -165,7 +165,7 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 
 	remaining := totalPending - len(pending)
 	if remaining > 0 {
-		log.Printf("%d memories still pending reflection (run dream again to continue)\n", remaining)
+		log.Printf("%d memories still pending reflection (run distill again to continue)\n", remaining)
 	}
 
 	// Learn from ALL reflections (not just new ones)
