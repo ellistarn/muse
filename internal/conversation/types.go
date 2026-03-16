@@ -21,6 +21,7 @@ func Providers() []Provider {
 		&OpenCode{},
 		&ClaudeCode{},
 		&Kiro{},
+		&KiroCLI{},
 	}
 }
 
