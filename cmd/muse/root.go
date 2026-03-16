@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -49,13 +48,11 @@ Run "muse listen --help" for MCP server configuration.`,
 // otherwise a local filesystem store rooted at ~/.muse/.
 func newStore(ctx context.Context) (storage.Store, error) {
 	if bucket != "" {
-		fmt.Fprintf(os.Stderr, "Using S3 storage (bucket: %s)\n", bucket)
 		return storage.NewS3Store(ctx, bucket)
 	}
 	store, err := storage.NewLocalStore()
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(os.Stderr, "Using local storage at %s\n", store.Root())
 	return store, nil
 }

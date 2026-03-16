@@ -86,7 +86,6 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 				if cerr != nil {
 					return cerr
 				}
-				fmt.Fprintf(os.Stderr, "Learning with %s\n", learnClient.Model())
 				opts.Learn = true
 				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, learnClient, diffClient, opts)
 			}
@@ -98,7 +97,6 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "Reflecting with %s, learning with %s\n", reflectClient.Model(), learnClient.Model())
 			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, nil, opts)
 		},
 	}

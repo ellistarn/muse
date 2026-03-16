@@ -128,7 +128,6 @@ func resolveModel(ctx context.Context, cfg aws.Config, family string) (string, e
 		return "", fmt.Errorf("no US inference profile found for %q", family)
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(candidates)))
-	fmt.Fprintf(os.Stderr, "discovered model %s -> %s\n", family, candidates[0])
 	return candidates[0], nil
 }
 

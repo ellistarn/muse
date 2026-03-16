@@ -58,11 +58,6 @@ func New(ctx context.Context, store storage.Store) (*Muse, error) {
 		}
 		soul = "" // no muse yet — first run before any distills
 	}
-	if soul != "" {
-		fmt.Fprintf(os.Stderr, "Loaded muse (%d bytes)\n", len(soul))
-	} else {
-		fmt.Fprintln(os.Stderr, "No muse found (run 'muse distill' to generate one)")
-	}
 	return &Muse{
 		storage:  store,
 		bedrock:  bedrockClient,
@@ -143,18 +138,15 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 // Upload scans local sources, diffs against storage, and uploads changed sessions.
 // If sources are specified, only those providers are scanned.
 func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, error) {
-	fmt.Fprintln(os.Stderr, "Listing remote sessions...")
 	existing, err := m.storage.ListSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list remote sessions: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Found %d remote sessions\n", len(existing))
 	remote := map[string]storage.SessionEntry{}
 	for _, e := range existing {
 		remote[e.Key] = e
 	}
 
-	fmt.Fprintln(os.Stderr, "Scanning local sessions...")
 	type result struct {
 		name     string
 		sessions []conversation.Session
@@ -180,11 +172,9 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 			warnings = append(warnings, fmt.Sprintf("failed to read %s sessions: %v", r.name, r.err))
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "Found %d %s sessions\n", len(r.sessions), r.name)
 		local = append(local, r.sessions...)
 	}
 
-	fmt.Fprintf(os.Stderr, "Diffing %d local sessions against remote...\n", len(local))
 	// Filter by source if specified.
 	if len(sources) > 0 {
 		allowed := make(map[string]bool, len(sources))
@@ -198,7 +188,6 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 			}
 		}
 		local = filtered
-		fmt.Fprintf(os.Stderr, "Filtered to %d sessions from %v\n", len(local), sources)
 	}
 	var uploaded, skipped int
 	var totalBytes int
@@ -207,7 +196,6 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 		key := fmt.Sprintf("conversations/%s/%s.json", sess.Source, sess.SessionID)
 		if entry, exists := remote[key]; exists {
 			if !sess.UpdatedAt.After(entry.LastModified) {
-				fmt.Fprintf(os.Stderr, "  skip (unchanged) %s\n", key)
 				skipped++
 				continue
 			}
