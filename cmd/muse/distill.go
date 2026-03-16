@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/bedrock"
 	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/inference"
-	"github.com/ellistarn/muse/internal/log"
 	"github.com/ellistarn/muse/internal/muse"
 	"github.com/ellistarn/muse/internal/storage"
 )
@@ -62,7 +62,7 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 					return err
 				}
 				for _, w := range result.Warnings {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+					fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 				}
 				if result.Uploaded > 0 {
 					fmt.Fprintf(cmd.OutOrStdout(), "Discovered %d new conversations (%s)\n", result.Uploaded, muse.FormatBytes(result.Bytes))
@@ -86,7 +86,7 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 				if cerr != nil {
 					return cerr
 				}
-				log.Printf("Learning with %s\n", learnClient.Model())
+				fmt.Fprintf(os.Stderr, "Learning with %s\n", learnClient.Model())
 				opts.Learn = true
 				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, learnClient, diffClient, opts)
 			}
@@ -98,7 +98,7 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 			if err != nil {
 				return err
 			}
-			log.Printf("Reflecting with %s, learning with %s\n", reflectClient.Model(), learnClient.Model())
+			fmt.Fprintf(os.Stderr, "Reflecting with %s, learning with %s\n", reflectClient.Model(), learnClient.Model())
 			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, nil, opts)
 		},
 	}
@@ -124,7 +124,7 @@ func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 		return err
 	}
 	for _, w := range result.Warnings {
-		fmt.Fprintf(stderr, "warning: %s\n", w)
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
 	if !opts.Learn {
 		fmt.Fprintf(stdout, "Processed %d conversations (%d pruned)\n", result.Processed, result.Pruned)
