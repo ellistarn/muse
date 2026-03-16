@@ -123,6 +123,7 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 	}
 	log.Printf("Found %d conversations (%d new, %d already reflected)\n", len(entries), totalPending, pruned)
 
+	var mu sync.Mutex
 	var warnings []string
 	var reflectUsage inference.Usage
 
@@ -146,55 +147,50 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 		log.Printf("Estimated ~%dk input tokens for reflect phase\n", totalEstimate/1000)
 
 		log.Printf("Reflecting on %d conversations...\n", len(pending))
-		type mapResult struct {
-			key          string
-			observations string
-			usage        inference.Usage
-			err          error
-		}
-		results := make([]mapResult, len(pending))
 		var completed atomic.Int32
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, 8)
-		for i, entry := range pending {
+		for _, entry := range pending {
 			wg.Add(1)
-			go func(i int, entry storage.SessionEntry) {
+			go func(entry storage.SessionEntry) {
 				defer wg.Done()
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
 				session, err := store.GetSession(ctx, entry.Source, entry.SessionID)
 				if err != nil {
-					results[i] = mapResult{key: entry.Key, err: err}
 					n := completed.Add(1)
 					log.Printf("  [%d/%d] (error) %s\n", n, len(pending), entry.Key)
+					mu.Lock()
+					warnings = append(warnings, fmt.Sprintf("failed to process %s: %v", entry.Key, err))
+					mu.Unlock()
 					return
 				}
 				msgs := len(session.Messages)
 				obs, usage, err := reflectOnSession(ctx, reflectLLM, session)
-				results[i] = mapResult{key: entry.Key, observations: obs, usage: usage, err: err}
 				n := completed.Add(1)
 				if err != nil {
 					log.Printf("  [%d/%d] (%d msgs) error: %v %s\n", n, len(pending), msgs, err, entry.Key)
-				} else {
-					log.Printf("  [%d/%d] (%d msgs, %d in / %d out tokens, $%.4f) %s\n",
-						n, len(pending), msgs, usage.InputTokens, usage.OutputTokens, usage.Cost(), entry.Key)
+					mu.Lock()
+					warnings = append(warnings, fmt.Sprintf("failed to process %s: %v", entry.Key, err))
+					mu.Unlock()
+					return
 				}
-			}(i, entry)
+				log.Printf("  [%d/%d] (%d msgs, %d in / %d out tokens, $%.4f) %s\n",
+					n, len(pending), msgs, usage.InputTokens, usage.OutputTokens, usage.Cost(), entry.Key)
+				// Persist immediately so progress survives cancellation
+				if err := store.PutReflection(ctx, entry.Key, obs); err != nil {
+					mu.Lock()
+					warnings = append(warnings, fmt.Sprintf("failed to save reflection for %s: %v", entry.Key, err))
+					mu.Unlock()
+					return
+				}
+				mu.Lock()
+				reflectUsage = reflectUsage.Add(usage)
+				mu.Unlock()
+			}(entry)
 		}
 		wg.Wait()
-
-		// Persist reflections and collect warnings
-		for _, r := range results {
-			if r.err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to process %s: %v", r.key, r.err))
-				continue
-			}
-			reflectUsage = reflectUsage.Add(r.usage)
-			if err := store.PutReflection(ctx, r.key, r.observations); err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to save reflection for %s: %v", r.key, err))
-			}
-		}
 		log.Printf("Reflected on %d conversations ($%.4f)\n", len(pending)-len(warnings), reflectUsage.Cost())
 	}
 
