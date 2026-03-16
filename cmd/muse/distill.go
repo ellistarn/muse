@@ -30,7 +30,7 @@ muse is always re-distilled.
 The pipeline is a map-reduce: reflect maps each conversation into observations,
 then learn reduces all observations into a single muse.md.
 
-Optionally pass one or more source names (kiro, kiro-cli, claude-code, opencode) to limit
+Optionally pass one or more source names (kiro, kiro-cli, claude-code, opencode, muse) to limit
 discovery and reflection to those sources. The learn phase always uses all reflections.
 
 Use --learn to re-distill the muse from existing reflections without
