@@ -147,6 +147,33 @@ func TestLocalStore_MuseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLocalStore_GetMuse_SkipsDiffOnly(t *testing.T) {
+	store := newTestLocalStore(t)
+	ctx := context.Background()
+
+	// Write a real muse at ts1
+	ts1 := "2025-01-01T10-00-00"
+	content1 := "# Muse v1"
+	if err := store.PutMuse(ctx, ts1, content1); err != nil {
+		t.Fatalf("PutMuse: %v", err)
+	}
+
+	// Write only a diff at ts2 (simulating the old bug where timestamps diverged)
+	ts2 := "2025-01-02T10-00-00"
+	if err := store.PutMuseDiff(ctx, ts2, "some diff"); err != nil {
+		t.Fatalf("PutMuseDiff: %v", err)
+	}
+
+	// GetMuse should skip ts2 (no muse.md) and return ts1's content
+	got, err := store.GetMuse(ctx)
+	if err != nil {
+		t.Fatalf("GetMuse: %v", err)
+	}
+	if got != content1 {
+		t.Errorf("GetMuse = %q, want %q", got, content1)
+	}
+}
+
 func TestLocalStore_ListMuses(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()

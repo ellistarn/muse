@@ -115,16 +115,21 @@ func (l *LocalStore) GetSession(_ context.Context, src, sessionID string) (*conv
 	return &session, nil
 }
 
-// GetMuse returns the latest muse version by finding the most recent timestamp.
+// GetMuse returns the latest muse version by finding the most recent timestamp
+// that contains a muse.md file. Directories with only a diff.md are skipped.
 func (l *LocalStore) GetMuse(_ context.Context) (string, error) {
 	timestamps, err := l.ListMuses(context.Background())
 	if err != nil {
 		return "", err
 	}
-	if len(timestamps) == 0 {
-		return "", &NotFoundError{Key: "muse/versions/"}
+	// Walk backwards to find the latest timestamp that has a muse.md
+	for i := len(timestamps) - 1; i >= 0; i-- {
+		content, err := l.GetMuseVersion(context.Background(), timestamps[i])
+		if err == nil {
+			return content, nil
+		}
 	}
-	return l.GetMuseVersion(context.Background(), timestamps[len(timestamps)-1])
+	return "", &NotFoundError{Key: "muse/versions/"}
 }
 
 // PutMuse writes a muse version at the given timestamp.

@@ -116,10 +116,14 @@ func (c *S3Store) GetMuse(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(timestamps) == 0 {
-		return "", &NotFoundError{Key: "muse/versions/"}
+	// Walk backwards to find the latest timestamp that has a muse.md
+	for i := len(timestamps) - 1; i >= 0; i-- {
+		content, err := c.GetMuseVersion(ctx, timestamps[i])
+		if err == nil {
+			return content, nil
+		}
 	}
-	return c.GetMuseVersion(ctx, timestamps[len(timestamps)-1])
+	return "", &NotFoundError{Key: "muse/versions/"}
 }
 
 // PutMuse writes a muse version at the given timestamp.
