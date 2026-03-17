@@ -214,11 +214,3 @@ Adding one conversation can reorganize clusters entirely. Whether that's accepta
 the muse is consumed. Stable cluster identity would add complexity (tracking cluster lineage,
 merging incrementally) for a problem that isn't yet real. **Revisit when:** cluster instability
 causes user-visible problems.
-
-## Evaluation
-
-Clustering is validated when the muse output captures themes that map-reduce flattens and preserves
-distinctive observations that map-reduce averages out. The test is qualitative: read both outputs
-side by side. The clustering version should surface rare-but-defining patterns (security instincts,
-naming precision, scope reduction) that get drowned out by high-frequency patterns (general
-architecture, code style) in map-reduce.
