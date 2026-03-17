@@ -115,13 +115,31 @@ and reflects the EWMA principle: recent observations matter most.
 
 `muse distill --rebuild` re-bootstraps from recent observations. This is disaster recovery.
 
+## Cost
+
+The observe step is shared across all approaches. Post-observe cost per sync (3 new conversations,
+~15 new observations):
+
+| | Map-reduce | Clustered | Incremental |
+|---|---|---|---|
+| Classify | — | 15 Sonnet calls | — |
+| Embed | — | 15 Titan calls | — |
+| Synthesize | — | ~20 Sonnet calls | — |
+| Learn/Merge/Update | 1 Opus, ~300k tokens | 1 Opus, ~20k tokens | 1 Opus, ~7k tokens |
+
+Map-reduce's Opus input grows linearly with total observations and eventually overflows. Clustered
+stays bounded but requires ~35 Sonnet + 15 Titan calls per sync. Incremental is one small Opus call.
+
+At 10k total observations, map-reduce is broken (~3M input tokens). Clustered's synthesize step
+grows with cluster count. Incremental's update is still ~7k tokens — the muse plus the new batch.
+
 ## Decisions
 
 ### Why incremental over clustered?
 
 Both solve context overflow. Clustering groups and summarizes before merging — six stages, four
 API calls, an embedding model, a custom clustering algorithm. Incremental updates never look at all
-observations at once — two stages, two API calls.
+observations at once — two stages, one API call.
 
 Clustering gives thematic organization within each run. Incremental updates rely on the muse
 accumulating structure over time. The clustered merge prompt says "don't preserve cluster boundaries
