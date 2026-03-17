@@ -41,7 +41,7 @@ func TestRunDistill_PropagatesRunError(t *testing.T) {
 
 func TestRunDistill_PropagatesLearnError(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.Reflections["conversations/test/sess-1.json"] = "- observation"
+	store.Observations["conversations/test/sess-1.json"] = "- observation"
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
@@ -63,7 +63,7 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 		{Role: "assistant", Content: "sure"},
 	})
 	mockLLM := &testutil.MockLLM{
-		ReflectResponse: "- Uses tabs\n- No emojis",
+		ObserveResponse: "- Uses tabs\n- No emojis",
 		LearnResponse:   "## Style\n\nUse tabs. No emojis.",
 	}
 
@@ -84,7 +84,7 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 
 func TestRunDistill_SuccessfulLearn(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.Reflections["conversations/test/sess-1.json"] = "- observation"
+	store.Observations["conversations/test/sess-1.json"] = "- observation"
 	mockLLM := &testutil.MockLLM{
 		LearnResponse: "## Test\n\nContent.",
 	}
@@ -125,11 +125,11 @@ func (s *failingStore) ListMuses(_ context.Context) ([]string, error) {
 func (s *failingStore) GetMuseVersion(_ context.Context, _ string) (string, error) {
 	return "", s.err
 }
-func (s *failingStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
+func (s *failingStore) ListObservations(_ context.Context) (map[string]time.Time, error) {
 	return nil, s.err
 }
-func (s *failingStore) GetReflection(_ context.Context, _ string) (string, error) {
+func (s *failingStore) GetObservation(_ context.Context, _ string) (string, error) {
 	return "", s.err
 }
-func (s *failingStore) PutReflection(_ context.Context, _, _ string) error { return s.err }
-func (s *failingStore) DeletePrefix(_ context.Context, _ string) error     { return s.err }
+func (s *failingStore) PutObservation(_ context.Context, _, _ string) error { return s.err }
+func (s *failingStore) DeletePrefix(_ context.Context, _ string) error      { return s.err }

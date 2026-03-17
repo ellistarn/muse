@@ -12,7 +12,7 @@ import (
 
 var validCategories = map[string]bool{
 	"conversations": true,
-	"reflections":   true,
+	"observations":  true,
 	"muse":          true,
 }
 
@@ -26,7 +26,7 @@ deleted. Items already present are skipped.
 
 The typical workflow is pull from S3 on a new machine, push to S3 to back up.
 By default all data is synced. You can limit to a category (conversations,
-reflections, muse) but you rarely need to.`,
+observations, muse) but you rarely need to.`,
 		Example: `  muse sync s3 local                  # pull from S3 to local
   muse sync local s3                  # push from local to S3
   muse sync s3 local conversations    # pull only conversations`,
@@ -38,7 +38,7 @@ reflections, muse) but you rarely need to.`,
 
 			for _, c := range categories {
 				if !validCategories[c] {
-					return fmt.Errorf("unknown category %q (valid: conversations, reflections, muse)", c)
+					return fmt.Errorf("unknown category %q (valid: conversations, observations, muse)", c)
 				}
 			}
 

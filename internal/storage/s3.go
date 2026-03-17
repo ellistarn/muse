@@ -218,9 +218,9 @@ func (c *S3Store) GetMuseVersion(ctx context.Context, timestamp string) (string,
 	return string(data), nil
 }
 
-// PutReflection writes a reflection to S3 under reflections/{source}/{session}.md.
-func (c *S3Store) PutReflection(ctx context.Context, key, content string) error {
-	path := reflectionKey(key)
+// PutObservation writes observations to S3 under observations/{source}/{session}.md.
+func (c *S3Store) PutObservation(ctx context.Context, key, content string) error {
+	path := observationKey(key)
 	contentType := "text/markdown"
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &c.bucket,
@@ -229,35 +229,35 @@ func (c *S3Store) PutReflection(ctx context.Context, key, content string) error 
 		ContentType: &contentType,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to put reflection for %s: %w", key, err)
+		return fmt.Errorf("failed to put observation for %s: %w", key, err)
 	}
 	return nil
 }
 
-// ListReflections returns the keys of all persisted reflections under reflections/.
-func (c *S3Store) ListReflections(ctx context.Context) (map[string]time.Time, error) {
-	reflections := map[string]time.Time{}
+// ListObservations returns the keys of all persisted observations under observations/.
+func (c *S3Store) ListObservations(ctx context.Context) (map[string]time.Time, error) {
+	observations := map[string]time.Time{}
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
 		Bucket: &c.bucket,
-		Prefix: aws.String("reflections/"),
+		Prefix: aws.String("observations/"),
 	})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list reflections: %w", err)
+			return nil, fmt.Errorf("failed to list observations: %w", err)
 		}
 		for _, obj := range page.Contents {
 			key := aws.ToString(obj.Key)
-			conversationKey := reflectionKeyToConversationKey(key)
-			reflections[conversationKey] = aws.ToTime(obj.LastModified)
+			conversationKey := observationKeyToConversationKey(key)
+			observations[conversationKey] = aws.ToTime(obj.LastModified)
 		}
 	}
-	return reflections, nil
+	return observations, nil
 }
 
-// GetReflection downloads a reflection's content from S3.
-func (c *S3Store) GetReflection(ctx context.Context, conversationKey string) (string, error) {
-	path := reflectionKey(conversationKey)
+// GetObservation downloads an observation's content from S3.
+func (c *S3Store) GetObservation(ctx context.Context, conversationKey string) (string, error) {
+	path := observationKey(conversationKey)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &path,
@@ -268,7 +268,7 @@ func (c *S3Store) GetReflection(ctx context.Context, conversationKey string) (st
 	defer out.Body.Close()
 	data, err := io.ReadAll(out.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read reflection for %s: %w", conversationKey, err)
+		return "", fmt.Errorf("failed to read observation for %s: %w", conversationKey, err)
 	}
 	return string(data), nil
 }
@@ -333,15 +333,15 @@ func museDiffKey(timestamp string) string {
 	return fmt.Sprintf("muse/versions/%s/diff.md", timestamp)
 }
 
-// reflectionKey converts a conversation key to its reflection storage key.
-// conversations/opencode/ses_abc.json -> reflections/opencode/ses_abc.md
-func reflectionKey(conversationKey string) string {
-	return fmt.Sprintf("reflections/%s.md", strings.TrimPrefix(strings.TrimSuffix(conversationKey, ".json"), "conversations/"))
+// observationKey converts a conversation key to its observation storage key.
+// conversations/opencode/ses_abc.json -> observations/opencode/ses_abc.md
+func observationKey(conversationKey string) string {
+	return fmt.Sprintf("observations/%s.md", strings.TrimPrefix(strings.TrimSuffix(conversationKey, ".json"), "conversations/"))
 }
 
-// reflectionKeyToConversationKey converts a reflection storage key back to a conversation key.
-// reflections/opencode/ses_abc.md -> conversations/opencode/ses_abc.json
-func reflectionKeyToConversationKey(key string) string {
-	rel := strings.TrimPrefix(key, "reflections/")
+// observationKeyToConversationKey converts an observation storage key back to a conversation key.
+// observations/opencode/ses_abc.md -> conversations/opencode/ses_abc.json
+func observationKeyToConversationKey(key string) string {
+	rel := strings.TrimPrefix(key, "observations/")
 	return "conversations/" + strings.TrimSuffix(rel, ".md") + ".json"
 }

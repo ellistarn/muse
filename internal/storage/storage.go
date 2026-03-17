@@ -14,7 +14,7 @@ import (
 // Storage layout:
 //
 //	conversations/{source}/{session_id}.json   — raw conversation sessions
-//	reflections/{source}/{session_id}.md       — per-session observation summaries
+//	observations/{source}/{session_id}.md      — per-session observations
 //	muse/versions/{timestamp}/muse.md          — timestamped muse versions (latest = current)
 //	muse/versions/{timestamp}/diff.md          — what changed from the previous version
 type Store interface {
@@ -31,10 +31,10 @@ type Store interface {
 	ListMuses(ctx context.Context) ([]string, error)                      // all timestamps, sorted asc
 	GetMuseVersion(ctx context.Context, timestamp string) (string, error) // specific version
 
-	// Reflections
-	ListReflections(ctx context.Context) (map[string]time.Time, error)
-	GetReflection(ctx context.Context, conversationKey string) (string, error)
-	PutReflection(ctx context.Context, key, content string) error
+	// Observations
+	ListObservations(ctx context.Context) (map[string]time.Time, error)
+	GetObservation(ctx context.Context, conversationKey string) (string, error)
+	PutObservation(ctx context.Context, key, content string) error
 
 	// Maintenance
 	DeletePrefix(ctx context.Context, prefix string) error

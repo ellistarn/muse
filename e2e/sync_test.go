@@ -27,9 +27,9 @@ func TestSyncAll(t *testing.T) {
 		{Role: "assistant", Content: "see ya"},
 	})
 
-	// 2 reflections
-	src.Reflections["conversations/test/sess-1.json"] = "observation 1"
-	src.Reflections["conversations/test/sess-2.json"] = "observation 2"
+	// 2 observations
+	src.Observations["conversations/test/sess-1.json"] = "observation 1"
+	src.Observations["conversations/test/sess-2.json"] = "observation 2"
 
 	// 1 muse version
 	src.Muses["2024-01-15T10:00:00Z"] = "# My Muse\ncontent"
@@ -48,12 +48,12 @@ func TestSyncAll(t *testing.T) {
 		t.Errorf("dst sessions = %d, want 2", len(sessions))
 	}
 
-	// Verify reflections
-	if dst.Reflections["conversations/test/sess-1.json"] != "observation 1" {
-		t.Errorf("dst reflection 1 = %q, want %q", dst.Reflections["conversations/test/sess-1.json"], "observation 1")
+	// Verify observations
+	if dst.Observations["conversations/test/sess-1.json"] != "observation 1" {
+		t.Errorf("dst observation 1 = %q, want %q", dst.Observations["conversations/test/sess-1.json"], "observation 1")
 	}
-	if dst.Reflections["conversations/test/sess-2.json"] != "observation 2" {
-		t.Errorf("dst reflection 2 = %q, want %q", dst.Reflections["conversations/test/sess-2.json"], "observation 2")
+	if dst.Observations["conversations/test/sess-2.json"] != "observation 2" {
+		t.Errorf("dst observation 2 = %q, want %q", dst.Observations["conversations/test/sess-2.json"], "observation 2")
 	}
 
 	// Verify muse version
@@ -68,10 +68,10 @@ func TestSyncAll(t *testing.T) {
 	// Verify output
 	output := buf.String()
 	if !strings.Contains(output, "Synced 2 conversations") {
-		t.Errorf("output missing 'Synced 2 memories', got: %s", output)
+		t.Errorf("output missing 'Synced 2 conversations', got: %s", output)
 	}
-	if !strings.Contains(output, "Synced 2 reflections") {
-		t.Errorf("output missing 'Synced 2 reflections', got: %s", output)
+	if !strings.Contains(output, "Synced 2 observations") {
+		t.Errorf("output missing 'Synced 2 observations', got: %s", output)
 	}
 	if !strings.Contains(output, "Synced 1 muse versions") {
 		t.Errorf("output missing 'Synced 1 muse versions', got: %s", output)
@@ -87,7 +87,7 @@ func TestSyncSelectiveCategories(t *testing.T) {
 	src.AddSession("test", "sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
 	})
-	src.Reflections["conversations/test/sess-1.json"] = "observation 1"
+	src.Observations["conversations/test/sess-1.json"] = "observation 1"
 	src.Muses["2024-01-15T10:00:00Z"] = "# Muse"
 
 	var buf bytes.Buffer
@@ -104,9 +104,9 @@ func TestSyncSelectiveCategories(t *testing.T) {
 		t.Errorf("dst sessions = %d, want 1", len(sessions))
 	}
 
-	// Verify reflections NOT synced
-	if len(dst.Reflections) != 0 {
-		t.Errorf("dst reflections = %d, want 0", len(dst.Reflections))
+	// Verify observations NOT synced
+	if len(dst.Observations) != 0 {
+		t.Errorf("dst observations = %d, want 0", len(dst.Observations))
 	}
 
 	// Verify muse NOT synced
@@ -123,7 +123,7 @@ func TestSyncIdempotent(t *testing.T) {
 	src.AddSession("test", "sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
 	})
-	src.Reflections["conversations/test/sess-1.json"] = "observation 1"
+	src.Observations["conversations/test/sess-1.json"] = "observation 1"
 	src.Muses["2024-01-15T10:00:00Z"] = "# Muse"
 
 	// First sync
@@ -139,8 +139,8 @@ func TestSyncIdempotent(t *testing.T) {
 	}
 
 	// Verify dst still has correct data
-	if dst.Reflections["conversations/test/sess-1.json"] != "observation 1" {
-		t.Errorf("reflection = %q, want %q", dst.Reflections["conversations/test/sess-1.json"], "observation 1")
+	if dst.Observations["conversations/test/sess-1.json"] != "observation 1" {
+		t.Errorf("observation = %q, want %q", dst.Observations["conversations/test/sess-1.json"], "observation 1")
 	}
 	content, err := dst.GetMuseVersion(ctx, "2024-01-15T10:00:00Z")
 	if err != nil {
@@ -169,8 +169,8 @@ func TestSyncEmptySource(t *testing.T) {
 	if len(sessions) != 0 {
 		t.Errorf("dst sessions = %d, want 0", len(sessions))
 	}
-	if len(dst.Reflections) != 0 {
-		t.Errorf("dst reflections = %d, want 0", len(dst.Reflections))
+	if len(dst.Observations) != 0 {
+		t.Errorf("dst observations = %d, want 0", len(dst.Observations))
 	}
 	if len(dst.Muses) != 0 {
 		t.Errorf("dst muses = %d, want 0", len(dst.Muses))
@@ -179,10 +179,10 @@ func TestSyncEmptySource(t *testing.T) {
 	// Verify output
 	output := buf.String()
 	if !strings.Contains(output, "Synced 0 conversations") {
-		t.Errorf("output missing 'Synced 0 memories', got: %s", output)
+		t.Errorf("output missing 'Synced 0 conversations', got: %s", output)
 	}
-	if !strings.Contains(output, "Synced 0 reflections") {
-		t.Errorf("output missing 'Synced 0 reflections', got: %s", output)
+	if !strings.Contains(output, "Synced 0 observations") {
+		t.Errorf("output missing 'Synced 0 observations', got: %s", output)
 	}
 	if !strings.Contains(output, "Synced 0 muse versions") {
 		t.Errorf("output missing 'Synced 0 muse versions', got: %s", output)
@@ -198,14 +198,14 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	dst.AddSession("existing", "dst-sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "existing message"},
 	})
-	dst.Reflections["conversations/existing/dst-sess-1.json"] = "existing observation"
+	dst.Observations["conversations/existing/dst-sess-1.json"] = "existing observation"
 	dst.Muses["2024-01-01T00:00:00Z"] = "# Existing Muse"
 
 	// Populate src with different data
 	src.AddSession("test", "src-sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "new message"},
 	})
-	src.Reflections["conversations/test/src-sess-1.json"] = "new observation"
+	src.Observations["conversations/test/src-sess-1.json"] = "new observation"
 	src.Muses["2024-02-01T00:00:00Z"] = "# New Muse"
 
 	var buf bytes.Buffer
@@ -223,8 +223,8 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	}
 
 	// Verify original dst data preserved
-	if dst.Reflections["conversations/existing/dst-sess-1.json"] != "existing observation" {
-		t.Errorf("existing reflection lost")
+	if dst.Observations["conversations/existing/dst-sess-1.json"] != "existing observation" {
+		t.Errorf("existing observation lost")
 	}
 	existingMuse, err := dst.GetMuseVersion(ctx, "2024-01-01T00:00:00Z")
 	if err != nil {
@@ -235,8 +235,8 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	}
 
 	// Verify new synced data present
-	if dst.Reflections["conversations/test/src-sess-1.json"] != "new observation" {
-		t.Errorf("synced reflection missing")
+	if dst.Observations["conversations/test/src-sess-1.json"] != "new observation" {
+		t.Errorf("synced observation missing")
 	}
 	newMuse, err := dst.GetMuseVersion(ctx, "2024-02-01T00:00:00Z")
 	if err != nil {

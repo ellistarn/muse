@@ -30,7 +30,7 @@ func TestDistillPipeline(t *testing.T) {
 	})
 
 	llm := &testutil.MockLLM{
-		ReflectResponse: "- Prefers kebab-case file names\n- No emojis in commits",
+		ObserveResponse: "- Prefers kebab-case file names\n- No emojis in commits",
 		LearnResponse:   "## Naming\n\nI use kebab-case for file names.\n\n## Commits\n\nNo emojis. Keep them short.",
 	}
 
@@ -57,7 +57,7 @@ func TestDistillPipeline(t *testing.T) {
 		t.Error("muse missing expected content")
 	}
 
-	// Verify LLM was called: 2 sessions * 3 reflect steps (summarize + extract + refine) + 1 learn = 7 calls
+	// Verify LLM was called: 2 sessions * 3 observe steps (summarize + extract + refine) + 1 learn = 7 calls
 	// No diff call on first run (no previous muse to compare against).
 	if len(llm.Calls) != 7 {
 		t.Errorf("LLM calls = %d, want 7", len(llm.Calls))
@@ -92,7 +92,7 @@ func TestDistillPipelineLimit(t *testing.T) {
 	}
 
 	llm := &testutil.MockLLM{
-		ReflectResponse: "- observation",
+		ObserveResponse: "- observation",
 		LearnResponse:   "## Test\n\nContent here.",
 	}
 
@@ -106,13 +106,13 @@ func TestDistillPipelineLimit(t *testing.T) {
 	if result.Remaining != 3 {
 		t.Errorf("Remaining = %d, want 3", result.Remaining)
 	}
-	// 2 sessions * 3 reflect steps + 1 learn = 7 (no diff on first run)
+	// 2 sessions * 3 observe steps + 1 learn = 7 (no diff on first run)
 	if len(llm.Calls) != 7 {
-		t.Errorf("LLM calls = %d, want 7 (2 sessions * 3 reflect steps + 1 learn)", len(llm.Calls))
+		t.Errorf("LLM calls = %d, want 7 (2 sessions * 3 observe steps + 1 learn)", len(llm.Calls))
 	}
 }
 
-func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
+func TestDistillPipelineLimitIncludesPreviousObservations(t *testing.T) {
 	store := testutil.NewConversationStore()
 	for i := 0; i < 4; i++ {
 		store.AddSession("test", fmt.Sprintf("sess-%d", i), time.Now(), []conversation.Message{
@@ -124,11 +124,11 @@ func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	}
 
 	llm := &testutil.MockLLM{
-		ReflectResponse: "- observation",
+		ObserveResponse: "- observation",
 		LearnResponse:   "## Test\n\nContent here.",
 	}
 
-	// First run: limit to 2, should reflect 2 and learn from 2
+	// First run: limit to 2, should observe 2 and learn from 2
 	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{Limit: 2})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
@@ -139,12 +139,12 @@ func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	if result.Remaining != 2 {
 		t.Errorf("first run Remaining = %d, want 2", result.Remaining)
 	}
-	firstRunReflections := len(store.Reflections)
-	if firstRunReflections != 2 {
-		t.Errorf("reflections after first run = %d, want 2", firstRunReflections)
+	firstRunObservations := len(store.Observations)
+	if firstRunObservations != 2 {
+		t.Errorf("observations after first run = %d, want 2", firstRunObservations)
 	}
 
-	// Second run: limit to 2 again, should reflect 2 more and learn from all 4
+	// Second run: limit to 2 again, should observe 2 more and learn from all 4
 	llm.Calls = nil
 	result, err = distill.Run(context.Background(), store, llm, llm, distill.Options{Limit: 2})
 	if err != nil {
@@ -156,10 +156,10 @@ func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	if result.Remaining != 0 {
 		t.Errorf("second run Remaining = %d, want 0", result.Remaining)
 	}
-	if len(store.Reflections) != 4 {
-		t.Errorf("reflections after second run = %d, want 4", len(store.Reflections))
+	if len(store.Observations) != 4 {
+		t.Errorf("observations after second run = %d, want 4", len(store.Observations))
 	}
-	// 2 sessions * 3 reflect steps + 1 learn + 1 diff = 8 (diff runs because previous muse exists)
+	// 2 sessions * 3 observe steps + 1 learn + 1 diff = 8 (diff runs because previous muse exists)
 	if len(llm.Calls) != 8 {
 		t.Errorf("second run LLM calls = %d, want 8", len(llm.Calls))
 	}
@@ -168,7 +168,7 @@ func TestDistillPipelineLimitIncludesPreviousReflections(t *testing.T) {
 	separators := strings.Count(learnInput, "---")
 	// 4 observations joined by "---" = 3 separators (in the join delimiters)
 	if separators < 3 {
-		t.Errorf("learn input has %d separators, want at least 3 (all 4 reflections)", separators)
+		t.Errorf("learn input has %d separators, want at least 3 (all 4 observations)", separators)
 	}
 }
 
@@ -186,15 +186,15 @@ func TestDistillPipelineEmptyConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	// Empty conversation produces no reflect call, but still shows up in pending
+	// Empty conversation produces no observe call, but still shows up in pending
 	if result.Processed != 0 {
 		t.Errorf("Processed = %d, want 0", result.Processed)
 	}
 }
 
 func TestDistillPipelineIncrementalPersist(t *testing.T) {
-	// Verify that successful reflections are persisted even when other sessions
-	// fail during the reflect phase. Before incremental persist, all reflections
+	// Verify that successful observations are persisted even when other sessions
+	// fail during the observe phase. Before incremental persist, all observations
 	// were batched after wg.Wait(), so a cancelled context would lose everything.
 	store := testutil.NewConversationStore()
 	store.AddSession("test", "good-1", time.Now(), []conversation.Message{
@@ -211,7 +211,7 @@ func TestDistillPipelineIncrementalPersist(t *testing.T) {
 	})
 
 	llm := &testutil.MockLLM{
-		ReflectResponse: "- observation",
+		ObserveResponse: "- observation",
 		LearnResponse:   "## Test\n\nContent.",
 	}
 
@@ -222,19 +222,19 @@ func TestDistillPipelineIncrementalPersist(t *testing.T) {
 	if result.Processed != 2 {
 		t.Errorf("Processed = %d, want 2", result.Processed)
 	}
-	// Both reflections should be persisted individually
-	if len(store.Reflections) != 2 {
-		t.Errorf("Reflections = %d, want 2", len(store.Reflections))
+	// Both observations should be persisted individually
+	if len(store.Observations) != 2 {
+		t.Errorf("Observations = %d, want 2", len(store.Observations))
 	}
-	for key, content := range store.Reflections {
+	for key, content := range store.Observations {
 		if content == "" {
-			t.Errorf("Reflection %s is empty", key)
+			t.Errorf("Observation %s is empty", key)
 		}
 	}
 }
 
 func TestDistillPipelinePartialFailurePersistsSuccesses(t *testing.T) {
-	// When the LLM fails for one session, already-completed reflections should
+	// When the LLM fails for one session, already-completed observations should
 	// still be persisted (not lost due to batching).
 	store := testutil.NewConversationStore()
 	store.AddSession("test", "good", time.Now(), []conversation.Message{
@@ -253,7 +253,7 @@ func TestDistillPipelinePartialFailurePersistsSuccesses(t *testing.T) {
 	// Use an LLM that fails when processing the "bad" session.
 	llm := &contentFailLLM{
 		failOn:          "use spaces",
-		reflectResponse: "- observation from good session",
+		observeResponse: "- observation from good session",
 		learnResponse:   "## Muse\n\nContent.",
 	}
 
@@ -268,14 +268,14 @@ func TestDistillPipelinePartialFailurePersistsSuccesses(t *testing.T) {
 	if len(result.Warnings) != 1 {
 		t.Errorf("Warnings = %d, want 1", len(result.Warnings))
 	}
-	// The successful session's reflection should be persisted
-	if len(store.Reflections) != 1 {
-		t.Errorf("Reflections = %d, want 1", len(store.Reflections))
+	// The successful session's observation should be persisted
+	if len(store.Observations) != 1 {
+		t.Errorf("Observations = %d, want 1", len(store.Observations))
 	}
 }
 
 func TestDistillPipelineCancelPreservesCompleted(t *testing.T) {
-	// Verify that reflections completed before context cancellation are persisted.
+	// Verify that observations completed before context cancellation are persisted.
 	store := testutil.NewConversationStore()
 	store.AddSession("test", "fast", time.Now().Add(-time.Second), []conversation.Message{
 		{Role: "user", Content: "use tabs"},
@@ -290,11 +290,11 @@ func TestDistillPipelineCancelPreservesCompleted(t *testing.T) {
 		{Role: "assistant", Content: "sure"},
 	})
 
-	// LLM that cancels context once the first session is fully reflected
+	// LLM that cancels context once the first session is fully observed
 	ctx, cancel := context.WithCancel(context.Background())
-	llm := &cancelAfterNReflectLLM{
+	llm := &cancelAfterNObserveLLM{
 		succeedN:        3, // let first session complete (summarize + extract + refine)
-		reflectResponse: "- observation",
+		observeResponse: "- observation",
 		learnResponse:   "## Muse",
 		cancel:          cancel,
 	}
@@ -302,9 +302,9 @@ func TestDistillPipelineCancelPreservesCompleted(t *testing.T) {
 	// Run will likely error because context is cancelled during second session
 	result, _ := distill.Run(ctx, store, llm, llm, distill.Options{})
 
-	// The first session's reflection should be persisted even though context was cancelled
-	if len(store.Reflections) < 1 {
-		t.Errorf("Reflections = %d, want at least 1 (completed before cancel)", len(store.Reflections))
+	// The first session's observation should be persisted even though context was cancelled
+	if len(store.Observations) < 1 {
+		t.Errorf("Observations = %d, want at least 1 (completed before cancel)", len(store.Observations))
 	}
 	// Should have at least some warnings from the cancelled session
 	if result != nil && result.Processed < 1 {
@@ -312,10 +312,10 @@ func TestDistillPipelineCancelPreservesCompleted(t *testing.T) {
 	}
 }
 
-// contentFailLLM fails reflect calls when the user content contains failOn.
+// contentFailLLM fails observe calls when the user content contains failOn.
 type contentFailLLM struct {
 	failOn          string
-	reflectResponse string
+	observeResponse string
 	learnResponse   string
 }
 
@@ -327,36 +327,36 @@ func (m *contentFailLLM) Converse(_ context.Context, system, user string, _ ...i
 	if strings.Contains(user, m.failOn) {
 		return "", inference.Usage{}, fmt.Errorf("simulated LLM failure")
 	}
-	return m.reflectResponse, usage, nil
+	return m.observeResponse, usage, nil
 }
 
-// cancelAfterNReflectLLM succeeds for the first N reflect calls, then cancels context.
-type cancelAfterNReflectLLM struct {
+// cancelAfterNObserveLLM succeeds for the first N observe calls, then cancels context.
+type cancelAfterNObserveLLM struct {
 	succeedN        int
-	reflectResponse string
+	observeResponse string
 	learnResponse   string
 	cancel          context.CancelFunc
 	mu              sync.Mutex
-	reflectCalls    int
+	observeCalls    int
 }
 
-func (m *cancelAfterNReflectLLM) Converse(ctx context.Context, system, user string, _ ...inference.ConverseOption) (string, inference.Usage, error) {
+func (m *cancelAfterNObserveLLM) Converse(ctx context.Context, system, user string, _ ...inference.ConverseOption) (string, inference.Usage, error) {
 	usage := inference.Usage{InputTokens: 100, OutputTokens: 50}
 	if strings.Contains(system, "distilling observations") {
 		return m.learnResponse, usage, nil
 	}
 	m.mu.Lock()
-	m.reflectCalls++
-	n := m.reflectCalls
+	m.observeCalls++
+	n := m.observeCalls
 	m.mu.Unlock()
 	if n > m.succeedN {
 		m.cancel()
 		return "", inference.Usage{}, ctx.Err()
 	}
-	return m.reflectResponse, usage, nil
+	return m.observeResponse, usage, nil
 }
 
-func TestDistillPipelineReflect(t *testing.T) {
+func TestDistillPipelineReobserve(t *testing.T) {
 	store := testutil.NewConversationStore()
 	store.AddSession("test", "sess-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
@@ -366,7 +366,7 @@ func TestDistillPipelineReflect(t *testing.T) {
 	})
 
 	llm := &testutil.MockLLM{
-		ReflectResponse: "- observation",
+		ObserveResponse: "- observation",
 		LearnResponse:   "## Test\n\nContent.",
 	}
 
@@ -376,9 +376,9 @@ func TestDistillPipelineReflect(t *testing.T) {
 		t.Fatalf("first Run() error: %v", err)
 	}
 
-	// With Reprocess, it should process again even though state would normally prune it
+	// With Reobserve, it should process again even though state would normally prune it
 	llm.Calls = nil
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{Reflect: true})
+	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{Reobserve: true})
 	if err != nil {
 		t.Fatalf("reprocess Run() error: %v", err)
 	}

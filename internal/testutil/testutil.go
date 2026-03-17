@@ -26,20 +26,20 @@ var (
 
 // ConversationStore is an in-memory implementation of storage.Store for tests.
 type ConversationStore struct {
-	Sessions    []storage.SessionEntry
-	Data        map[string]*conversation.Session
-	Muse        string
-	Reflections map[string]string
-	Deleted     []string
-	Muses       map[string]string // timestamp -> content
+	Sessions     []storage.SessionEntry
+	Data         map[string]*conversation.Session
+	Muse         string
+	Observations map[string]string
+	Deleted      []string
+	Muses        map[string]string // timestamp -> content
 }
 
 // NewConversationStore returns a ready-to-use ConversationStore.
 func NewConversationStore() *ConversationStore {
 	return &ConversationStore{
-		Data:        map[string]*conversation.Session{},
-		Reflections: map[string]string{},
-		Muses:       map[string]string{},
+		Data:         map[string]*conversation.Session{},
+		Observations: map[string]string{},
+		Muses:        map[string]string{},
 	}
 }
 
@@ -121,31 +121,31 @@ func (s *ConversationStore) GetMuseVersion(_ context.Context, timestamp string) 
 	return content, nil
 }
 
-func (s *ConversationStore) ListReflections(_ context.Context) (map[string]time.Time, error) {
+func (s *ConversationStore) ListObservations(_ context.Context) (map[string]time.Time, error) {
 	result := map[string]time.Time{}
-	for key := range s.Reflections {
+	for key := range s.Observations {
 		result[key] = time.Now()
 	}
 	return result, nil
 }
 
-func (s *ConversationStore) GetReflection(_ context.Context, conversationKey string) (string, error) {
-	content, ok := s.Reflections[conversationKey]
+func (s *ConversationStore) GetObservation(_ context.Context, conversationKey string) (string, error) {
+	content, ok := s.Observations[conversationKey]
 	if !ok {
 		return "", &storage.NotFoundError{Key: conversationKey}
 	}
 	return content, nil
 }
 
-func (s *ConversationStore) PutReflection(_ context.Context, key, content string) error {
-	s.Reflections[key] = content
+func (s *ConversationStore) PutObservation(_ context.Context, key, content string) error {
+	s.Observations[key] = content
 	return nil
 }
 
 func (s *ConversationStore) DeletePrefix(_ context.Context, prefix string) error {
 	s.Deleted = append(s.Deleted, prefix)
-	if prefix == "reflections/" {
-		s.Reflections = map[string]string{}
+	if prefix == "observations/" {
+		s.Observations = map[string]string{}
 	}
 	return nil
 }
@@ -162,9 +162,9 @@ type LLMCall struct {
 
 // MockLLM is a test double for distill.LLM that returns canned responses.
 // It dispatches based on whether the system prompt contains
-// "distilling observations" (learn phase) or not (reflect phase).
+// "distilling observations" (learn phase) or not (observe phase).
 type MockLLM struct {
-	ReflectResponse string
+	ObserveResponse string
 	LearnResponse   string
 	Err             error
 	Calls           []LLMCall
@@ -179,5 +179,5 @@ func (m *MockLLM) Converse(_ context.Context, system, user string, _ ...inferenc
 	if strings.Contains(system, "distilling observations") {
 		return m.LearnResponse, usage, nil
 	}
-	return m.ReflectResponse, usage, nil
+	return m.ObserveResponse, usage, nil
 }

@@ -25,7 +25,7 @@ type LLM interface {
 type Result struct {
 	Processed int
 	Pruned    int
-	Remaining int // conversations still pending reflection
+	Remaining int // conversations still pending observation
 	Usage     inference.Usage
 	Muse      string // the distilled muse.md
 	Diff      string // what changed from the previous muse version
@@ -34,9 +34,9 @@ type Result struct {
 
 // Options configures a distill run.
 type Options struct {
-	// Reflect ignores persisted reflections and re-reflects all conversations.
-	Reflect bool
-	// Learn skips reflect and only re-distills from existing reflections.
+	// Reobserve ignores persisted observations and re-observes all conversations.
+	Reobserve bool
+	// Learn skips observe and only re-distills from existing observations.
 	Learn bool
 	// Limit caps how many conversations to process (0 means no limit).
 	Limit int
@@ -45,41 +45,41 @@ type Options struct {
 	Sources []string
 }
 
-// Run executes the distill pipeline: reflect on new conversations, then learn a muse
-// from all reflections. Reflections are the source of truth for what has been
+// Run executes the distill pipeline: observe new conversations, then learn a muse
+// from all observations. Observations are the source of truth for what has been
 // processed; there is no separate state file.
-func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opts Options) (*Result, error) {
-	// List all conversations and existing reflections
+func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opts Options) (*Result, error) {
+	// List all conversations and existing observations
 	entries, err := store.ListSessions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list conversations: %w", err)
 	}
 
-	reflections, err := store.ListReflections(ctx)
+	observations, err := store.ListObservations(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list reflections: %w", err)
+		return nil, fmt.Errorf("failed to list observations: %w", err)
 	}
 
-	// If reprocessing, clear existing reflections (scoped to sources if set)
-	if opts.Reflect {
+	// If reprocessing, clear existing observations (scoped to sources if set)
+	if opts.Reobserve {
 		if len(opts.Sources) > 0 {
 			for _, src := range opts.Sources {
-				prefix := "reflections/" + src + "/"
+				prefix := "observations/" + src + "/"
 				if err := store.DeletePrefix(ctx, prefix); err != nil {
-					return nil, fmt.Errorf("failed to clear reflections: %w", err)
+					return nil, fmt.Errorf("failed to clear observations: %w", err)
 				}
 				fmt.Fprintf(os.Stderr, "Cleared %s\n", prefix)
 			}
 		} else {
-			if err := store.DeletePrefix(ctx, "reflections/"); err != nil {
-				return nil, fmt.Errorf("failed to clear reflections: %w", err)
+			if err := store.DeletePrefix(ctx, "observations/"); err != nil {
+				return nil, fmt.Errorf("failed to clear observations: %w", err)
 			}
-			fmt.Fprintln(os.Stderr, "Cleared reflections/")
+			fmt.Fprintln(os.Stderr, "Cleared observations/")
 		}
-		// Rebuild reflections map after deletion
-		reflections, err = store.ListReflections(ctx)
+		// Rebuild observations map after deletion
+		observations, err = store.ListObservations(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to re-list reflections: %w", err)
+			return nil, fmt.Errorf("failed to re-list observations: %w", err)
 		}
 	}
 
@@ -98,11 +98,11 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 		entries = filtered
 	}
 
-	// Diff: conversations without a corresponding reflection (or stale ones) are pending
+	// Diff: conversations without corresponding observations (or stale ones) are pending
 	var pending []storage.SessionEntry
 	var pruned int
 	for _, e := range entries {
-		if reflected, ok := reflections[e.Key]; ok && !e.LastModified.After(reflected) {
+		if observed, ok := observations[e.Key]; ok && !e.LastModified.After(observed) {
 			pruned++
 			continue
 		}
@@ -119,11 +119,11 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 
 	var mu sync.Mutex
 	var warnings []string
-	var reflectUsage inference.Usage
+	var observeUsage inference.Usage
 
-	// Reflect on pending conversations in parallel
+	// Observe pending conversations in parallel
 	if len(pending) > 0 {
-		reflectStart := time.Now()
+		observeStart := time.Now()
 		var completed atomic.Int32
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, 8)
@@ -143,7 +143,7 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 					return
 				}
 				start := time.Now()
-				obs, usage, err := reflectOnSession(ctx, reflectLLM, session)
+				obs, usage, err := observeSession(ctx, observeLLM, session)
 				n := completed.Add(1)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] error: %v %s\n", n, len(pending), err, entry.Key)
@@ -154,32 +154,32 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 				}
 
 				// Persist immediately so progress survives cancellation
-				if err := store.PutReflection(ctx, entry.Key, obs); err != nil {
+				if err := store.PutObservation(ctx, entry.Key, obs); err != nil {
 					mu.Lock()
-					warnings = append(warnings, fmt.Sprintf("failed to save reflection for %s: %v", entry.Key, err))
+					warnings = append(warnings, fmt.Sprintf("failed to save observation for %s: %v", entry.Key, err))
 					mu.Unlock()
 					return
 				}
-				fmt.Fprintf(os.Stderr, "  [%d/%d] Reflected %s (%s, $%.4f)\n",
+				fmt.Fprintf(os.Stderr, "  [%d/%d] Observed %s (%s, $%.4f)\n",
 					n, len(pending), entry.Key, time.Since(start).Round(time.Millisecond), usage.Cost())
 				mu.Lock()
-				reflectUsage = reflectUsage.Add(usage)
+				observeUsage = observeUsage.Add(usage)
 				mu.Unlock()
 			}(entry)
 		}
 		wg.Wait()
-		fmt.Fprintf(os.Stderr, "Reflected on %d conversations (%s, $%.4f)\n",
-			len(pending)-len(warnings), time.Since(reflectStart).Round(time.Millisecond), reflectUsage.Cost())
+		fmt.Fprintf(os.Stderr, "Observed %d conversations (%s, $%.4f)\n",
+			len(pending)-len(warnings), time.Since(observeStart).Round(time.Millisecond), observeUsage.Cost())
 	}
 
 	remaining := totalPending - len(pending)
 
-	// Learn from ALL reflections (not just new ones)
-	allReflections, err := loadAllReflections(ctx, store)
+	// Learn from ALL observations (not just new ones)
+	allObservations, err := loadAllObservations(ctx, store)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load reflections: %w", err)
+		return nil, fmt.Errorf("failed to load observations: %w", err)
 	}
-	if len(allReflections) == 0 {
+	if len(allObservations) == 0 {
 		return &Result{Pruned: pruned, Remaining: remaining, Warnings: warnings}, nil
 	}
 
@@ -187,14 +187,14 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 	previousMuse, _ := store.GetMuse(ctx) // ok if not found (first run)
 
 	learnStart := time.Now()
-	muse, timestamp, learnUsage, err := learn(ctx, learnLLM, store, allReflections)
+	muse, timestamp, learnUsage, err := learn(ctx, learnLLM, store, allObservations)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Muse distilled (%s, $%.4f)\n", time.Since(learnStart).Round(time.Millisecond), learnUsage.Cost())
 
 	// Diff is a post-processing step, not part of learning.
-	d, diffUsage, derr := computeDiff(ctx, reflectLLM, store, timestamp, previousMuse, muse)
+	d, diffUsage, derr := computeDiff(ctx, observeLLM, store, timestamp, previousMuse, muse)
 	if derr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to compute diff: %v\n", derr)
 	}
@@ -207,21 +207,21 @@ func Run(ctx context.Context, store storage.Store, reflectLLM, learnLLM LLM, opt
 		Processed: processed,
 		Pruned:    pruned,
 		Remaining: remaining,
-		Usage:     reflectUsage.Add(learnUsage).Add(diffUsage),
+		Usage:     observeUsage.Add(learnUsage).Add(diffUsage),
 		Muse:      muse,
 		Diff:      d,
 		Warnings:  warnings,
 	}, nil
 }
 
-// LearnOnly re-runs only the learn phase using persisted reflections.
-// Use this to re-synthesize the muse with improved techniques without re-reflecting.
+// LearnOnly re-runs only the learn phase using persisted observations.
+// Use this to re-synthesize the muse with improved techniques without re-observing.
 func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) (*Result, error) {
-	allReflections, err := loadAllReflections(ctx, store)
+	allObservations, err := loadAllObservations(ctx, store)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load reflections: %w", err)
+		return nil, fmt.Errorf("failed to load observations: %w", err)
 	}
-	if len(allReflections) == 0 {
+	if len(allObservations) == 0 {
 		return &Result{}, nil
 	}
 
@@ -229,7 +229,7 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) 
 	previousMuse, _ := store.GetMuse(ctx)
 
 	start := time.Now()
-	muse, timestamp, usage, err := learn(ctx, learnLLM, store, allReflections)
+	muse, timestamp, usage, err := learn(ctx, learnLLM, store, allObservations)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
@@ -248,23 +248,23 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) 
 	}, nil
 }
 
-// loadAllReflections fetches every persisted reflection from storage.
-func loadAllReflections(ctx context.Context, store storage.Store) ([]string, error) {
-	index, err := store.ListReflections(ctx)
+// loadAllObservations fetches every persisted observation from storage.
+func loadAllObservations(ctx context.Context, store storage.Store) ([]string, error) {
+	index, err := store.ListObservations(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var reflections []string
+	var observations []string
 	for conversationKey := range index {
-		content, err := store.GetReflection(ctx, conversationKey)
+		content, err := store.GetObservation(ctx, conversationKey)
 		if err != nil {
 			continue
 		}
 		if content != "" {
-			reflections = append(reflections, content)
+			observations = append(observations, content)
 		}
 	}
-	return reflections, nil
+	return observations, nil
 }
 
 // turn represents a human message paired with the assistant message that preceded it.
@@ -273,7 +273,7 @@ type turn struct {
 	humanContent     string // human's message
 }
 
-func reflectOnSession(ctx context.Context, client LLM, session *conversation.Session) (string, inference.Usage, error) {
+func observeSession(ctx context.Context, client LLM, session *conversation.Session) (string, inference.Usage, error) {
 	turns := extractTurns(session)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
@@ -294,7 +294,7 @@ func reflectOnSession(ctx context.Context, client LLM, session *conversation.Ses
 	// Step 2: Extract candidate observations (Pass 1)
 	var allCandidates []string
 	for _, chunk := range chunks {
-		obs, usage, err := client.Converse(ctx, prompts.ReflectExtract, chunk, inference.WithMaxTokens(4096))
+		obs, usage, err := client.Converse(ctx, prompts.ObserveExtract, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if err != nil && obs == "" {
 			return "", totalUsage, err
@@ -309,7 +309,7 @@ func reflectOnSession(ctx context.Context, client LLM, session *conversation.Ses
 
 	// Step 3: Refine observations (Pass 2)
 	candidates := strings.Join(allCandidates, "\n\n")
-	refined, usage, err := client.Converse(ctx, prompts.ReflectRefine, candidates, inference.WithMaxTokens(4096))
+	refined, usage, err := client.Converse(ctx, prompts.ObserveRefine, candidates, inference.WithMaxTokens(4096))
 	totalUsage = totalUsage.Add(usage)
 	if err != nil {
 		return "", totalUsage, err
@@ -336,7 +336,7 @@ func buildHumanFocusedView(ctx context.Context, client LLM, turns []turn) ([]str
 		// Summarize the assistant's message into 1-2 structural sentences
 		var contextLine string
 		if t.assistantContent != "" {
-			summary, usage, err := client.Converse(ctx, prompts.ReflectSummarize, t.assistantContent, inference.WithMaxTokens(256))
+			summary, usage, err := client.Converse(ctx, prompts.ObserveSummarize, t.assistantContent, inference.WithMaxTokens(256))
 			totalUsage = totalUsage.Add(usage)
 			if err != nil {
 				// On error, fall back to a generic context marker

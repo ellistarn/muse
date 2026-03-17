@@ -2,14 +2,14 @@ package prompts
 
 import _ "embed"
 
-//go:embed reflect-extract.md
-var ReflectExtract string
+//go:embed observe-extract.md
+var ObserveExtract string
 
-//go:embed reflect-summarize.md
-var ReflectSummarize string
+//go:embed observe-summarize.md
+var ObserveSummarize string
 
-//go:embed reflect-refine.md
-var ReflectRefine string
+//go:embed observe-refine.md
+var ObserveRefine string
 
 //go:embed learn.md
 var Learn string

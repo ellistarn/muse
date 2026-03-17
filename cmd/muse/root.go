@@ -20,7 +20,7 @@ muse.md, and embodies your unique thought processes when asked questions.
 
 Workflow:
 
-  1. muse distill    Discover conversations, reflect, and distill muse.md
+  1. muse distill    Discover conversations, observe, and distill muse.md
   2. muse show       Print muse.md
   3. muse ask        Ask your muse a question (stateless, one-shot)
   4. muse listen     Start an MCP server so agents can ask your muse

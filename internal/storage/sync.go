@@ -8,7 +8,7 @@ import (
 
 // Sync copies data from src to dst. It is additive — items in dst that don't
 // exist in src are left alone. If categories is empty, all categories are synced.
-// Valid categories: "conversations", "reflections", "muse".
+// Valid categories: "conversations", "observations", "muse".
 func Sync(ctx context.Context, src, dst Store, categories []string, w io.Writer) error {
 	all := len(categories) == 0
 	cats := map[string]bool{}
@@ -24,12 +24,12 @@ func Sync(ctx context.Context, src, dst Store, categories []string, w io.Writer)
 		fmt.Fprintf(w, "Synced %d conversations\n", n)
 	}
 
-	if all || cats["reflections"] {
-		n, err := syncReflections(ctx, src, dst)
+	if all || cats["observations"] {
+		n, err := syncObservations(ctx, src, dst)
 		if err != nil {
-			return fmt.Errorf("sync reflections: %w", err)
+			return fmt.Errorf("sync observations: %w", err)
 		}
-		fmt.Fprintf(w, "Synced %d reflections\n", n)
+		fmt.Fprintf(w, "Synced %d observations\n", n)
 	}
 
 	if all || cats["muse"] {
@@ -62,19 +62,19 @@ func syncConversations(ctx context.Context, src, dst Store) (int, error) {
 	return count, nil
 }
 
-func syncReflections(ctx context.Context, src, dst Store) (int, error) {
-	index, err := src.ListReflections(ctx)
+func syncObservations(ctx context.Context, src, dst Store) (int, error) {
+	index, err := src.ListObservations(ctx)
 	if err != nil {
 		return 0, err
 	}
 	var count int
 	for conversationKey := range index {
-		content, err := src.GetReflection(ctx, conversationKey)
+		content, err := src.GetObservation(ctx, conversationKey)
 		if err != nil {
-			return count, fmt.Errorf("get reflection %s: %w", conversationKey, err)
+			return count, fmt.Errorf("get observation %s: %w", conversationKey, err)
 		}
-		if err := dst.PutReflection(ctx, conversationKey, content); err != nil {
-			return count, fmt.Errorf("put reflection %s: %w", conversationKey, err)
+		if err := dst.PutObservation(ctx, conversationKey, content); err != nil {
+			return count, fmt.Errorf("put observation %s: %w", conversationKey, err)
 		}
 		count++
 	}

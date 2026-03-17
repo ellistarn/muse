@@ -16,30 +16,30 @@ import (
 )
 
 func newDistillCmd() *cobra.Command {
-	var reflect bool
+	var reobserve bool
 	var learn bool
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "distill [source...]",
 		Short: "Distill a muse from conversations",
-		Long: `Discovers new conversations, reflects on them, and distills a muse.md
+		Long: `Discovers new conversations, observes them, and distills a muse.md
 that captures how you think. Safe to run repeatedly — only new
-conversations are discovered and only unreflected conversations are processed. The
+conversations are discovered and only unobserved conversations are processed. The
 muse is always re-distilled.
 
-The pipeline is a map-reduce: reflect maps each conversation into observations,
+The pipeline is a map-reduce: observe maps each conversation into observations,
 then learn reduces all observations into a single muse.md.
 
 Optionally pass one or more source names (kiro, kiro-cli, claude-code, opencode) to limit
-discovery and reflection to those sources. The learn phase always uses all reflections.
+discovery and observation to those sources. The learn phase always uses all observations.
 
-Use --learn to re-distill the muse from existing reflections without
-reprocessing conversations. Use --reflect to reprocess conversations from scratch.`,
+Use --learn to re-distill the muse from existing observations without
+reprocessing conversations. Use --reobserve to reprocess conversations from scratch.`,
 		Example: `  muse distill                        # all sources
   muse distill kiro                   # only kiro conversations
   muse distill kiro opencode          # kiro and opencode
-  muse distill kiro --reflect         # re-reflect kiro from scratch
-  muse distill --learn                # re-distill muse from existing reflections
+  muse distill kiro --reobserve       # re-observe kiro from scratch
+  muse distill --learn                # re-distill muse from existing observations
   muse distill --limit 50             # process at most 50 conversations`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -51,7 +51,7 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 			}
 
 			// Discover and store new conversations (skip for --learn since it
-			// only re-distills from existing reflections)
+			// only re-distills from existing observations)
 			if !learn {
 				m, err := muse.New(ctx, store)
 				if err != nil {
@@ -72,9 +72,9 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 			}
 
 			opts := distill.Options{
-				Reflect: reflect,
-				Limit:   limit,
-				Sources: sources,
+				Reobserve: reobserve,
+				Limit:     limit,
+				Sources:   sources,
 			}
 
 			if learn {
@@ -89,7 +89,7 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 				opts.Learn = true
 				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, learnClient, diffClient, opts)
 			}
-			reflectClient, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
+			observeClient, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 			if err != nil {
 				return err
 			}
@@ -97,18 +97,18 @@ reprocessing conversations. Use --reflect to reprocess conversations from scratc
 			if err != nil {
 				return err
 			}
-			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, reflectClient, learnClient, nil, opts)
+			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, observeClient, learnClient, nil, opts)
 		},
 	}
-	cmd.Flags().BoolVar(&reflect, "reflect", false, "re-reflect on all conversations from scratch")
-	cmd.Flags().BoolVar(&learn, "learn", false, "skip reflect, re-distill muse from existing reflections")
+	cmd.Flags().BoolVar(&reobserve, "reobserve", false, "re-observe all conversations from scratch")
+	cmd.Flags().BoolVar(&learn, "learn", false, "skip observe, re-distill muse from existing observations")
 	cmd.Flags().IntVar(&limit, "limit", 100, "max conversations to process (0 = no limit)")
 	return cmd
 }
 
 // runDistill executes the distill pipeline and prints results. Extracted from the
 // command handler so it can be tested with mock dependencies.
-func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, reflectLLM, learnLLM, diffLLM distill.LLM, opts distill.Options) error {
+func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM, diffLLM distill.LLM, opts distill.Options) error {
 	var (
 		result *distill.Result
 		err    error
@@ -116,7 +116,7 @@ func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 	if opts.Learn {
 		result, err = distill.LearnOnly(ctx, store, learnLLM, diffLLM)
 	} else {
-		result, err = distill.Run(ctx, store, reflectLLM, learnLLM, opts)
+		result, err = distill.Run(ctx, store, observeLLM, learnLLM, opts)
 	}
 	if err != nil {
 		return err
@@ -127,7 +127,7 @@ func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 	if !opts.Learn {
 		fmt.Fprintf(stdout, "Processed %d conversations (%d pruned)\n", result.Processed, result.Pruned)
 		if result.Remaining > 0 {
-			fmt.Fprintf(stdout, "%d conversations still pending reflection (run distill again)\n", result.Remaining)
+			fmt.Fprintf(stdout, "%d conversations still pending observation (run distill again)\n", result.Remaining)
 		}
 	}
 	fmt.Fprintf(stdout, "Muse distilled (%dk input, %dk output tokens, $%.2f)\n",

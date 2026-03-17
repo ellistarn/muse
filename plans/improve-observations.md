@@ -1,10 +1,10 @@
-# Plan: Improve Reflections
+# Plan: Improve Observations
 
-The reflect step is the atomic unit of the distill pipeline: one conversation in, observations out. Even as the pipeline around it evolves, reflect stays. Getting it right is the highest-leverage move.
+The observe step is the atomic unit of the distill pipeline: one conversation in, observations out. Even as the pipeline around it evolves, observe stays. Getting it right is the highest-leverage move.
 
 Three changes, all in `internal/distill/`. No new packages.
 
-## 1. Rewrite `reflectPrompt` in `prompts.go`
+## 1. Rewrite `observePrompt` in `prompts.go`
 
 The current prompt has the right categories (corrections, reinforcements, opinions, expertise) but three problems:
 
@@ -53,7 +53,7 @@ Key differences from current:
 - **Concrete good/bad example** shows the LLM the quality bar without imposing rigid structure.
 - **"Generic good practices that any senior engineer would agree with"** is an explicit ignore category.
 
-## 2. Update `skills/reflect/SKILL.md` to match
+## 2. Update `skills/observe/SKILL.md` to match
 
 The SKILL.md is the human-readable source of truth. The prompt is its operational form. Keep them in sync. Same changes: default to "produce nothing," emphasize reasoning over surface patterns, add the good/bad example.
 
@@ -67,20 +67,20 @@ Change: if a message role is `tool` or the content is a tool result, skip it or 
 
 | File | Change |
 |------|--------|
-| `internal/distill/prompts.go:6-21` | Rewrite `reflectPrompt` |
-| `skills/reflect/SKILL.md` | Update to match new prompt |
+| `internal/distill/prompts.go:6-21` | Rewrite `observePrompt` |
+| `skills/observe/SKILL.md` | Update to match new prompt |
 | `internal/distill/distill.go:284-293` | Strip tool payloads in `formatSession` |
 
 ## What this does NOT include
 
 - **No `internal/scrub` package yet.** That's a separate effort for regex-based PII scrubbing. The tool-data stripping is the highest-value subset of that work and doesn't need a new package.
-- **No changes to `learnPrompt`.** We're focusing on reflection quality. Learn consumes whatever reflect produces.
+- **No changes to `learnPrompt`.** We're focusing on observation quality. Learn consumes whatever observe produces.
 - **No structured observation format.** Freeform text, LLM-consumed.
-- **No pipeline architecture changes.** Reflect stays as a single LLM call per conversation.
+- **No pipeline architecture changes.** Observe stays as a single LLM call per conversation.
 
 ## How to validate
 
-Run `muse distill --reflect` on existing conversations and diff the old vs new reflections. Look for:
+Run `muse distill --reobserve` on existing conversations and diff the old vs new observations. Look for:
 
 - More `NO_OBSERVATIONS` outputs (good -- means it's not inventing signal)
 - Observations that include reasoning ("because...") rather than just preferences
