@@ -22,3 +22,12 @@ var Muse string
 
 //go:embed tool.md
 var Tool string
+
+//go:embed classify.md
+var Classify string
+
+//go:embed synthesize.md
+var Synthesize string
+
+//go:embed merge.md
+var Merge string
