@@ -50,7 +50,7 @@ Sends a question to the muse. Stateless, one-shot. The muse is loaded as the sys
 Interactive, human-in-the-loop. The muse reads the imported content, cross-references with what it
 already knows about the owner, and asks targeted questions:
 
-- "You mentioned Ellis's API proposal. You usually push back on premature abstractions — did you here?"
+- "You mentioned the API proposal. What was your reaction to the interface design?"
 - "There's a cost/quality tradeoff in this design. Where did you land?"
 - "You didn't comment on the testing strategy. Was that agreement or did you not get to it?"
 
