@@ -12,11 +12,11 @@ frequently-observed patterns at the expense of rare but defining ones.
 ### Pipeline
 
 Each conversation is sent raw to an extraction LLM that identifies what the human's messages reveal
-about how they think — corrections, course changes, reasoning, deliberate choices. When a
-conversation exceeds the context window, assistant messages are mechanically compressed (strip code
-blocks, collapse tool output to markers, truncate long messages). A refine step filters candidates
-to only those that would change how the muse behaves, and a deterministic relevance filter drops
-non-observations (empty output, placeholder tokens, LLM meta-commentary).
+about how they think — corrections, course changes, reasoning, deliberate choices. Assistant messages
+are mechanically compressed (strip code blocks, collapse tool output to markers, truncate long
+messages) to keep input focused on signal — extraction accuracy degrades with input size. A refine
+step filters candidates to only those that would change how the muse behaves, and a deterministic
+relevance filter drops non-observations (empty output, placeholder tokens, LLM meta-commentary).
 
 The surviving observations are classified, embedded, and grouped into thematic clusters. Each cluster
 is synthesized independently, then merged with unclustered noise observations into the final muse.md.
@@ -118,19 +118,16 @@ partitions. This also normalizes for frequency: a pattern that dominates by volu
 one cluster with the same token budget as a smaller cluster, preventing it from drowning out rarer
 themes.
 
-### Why send raw conversation to extract?
+### Why compress assistant messages?
 
 Summarizing assistant messages before extraction would reduce token count but costs an LLM call per
-turn and is lossy — the extract model needs enough context to understand what the human was reacting
-to, and a compressed summary may omit the detail that provoked a correction. The extraction prompt
-focuses on the human's voice regardless of how much assistant content surrounds it.
-
-Most conversations fit within the context window without any processing. For the ones that don't,
+turn and is lossy — a compressed summary may omit the detail that provoked a correction. Instead,
 mechanical compression strips code blocks, collapses tool output to markers like `[tool: file_edit]`,
 and truncates long assistant messages. This targets the main token bloat — assistant code and tool
-output carry zero signal about how the owner thinks. If compression alone isn't sufficient, chunking
-at turn boundaries is the natural next step, but the expectation is that compression handles
-effectively all oversize conversations.
+output carry zero signal about how the owner thinks — while preserving enough context for the
+extraction model to understand what the human was reacting to. Keeping input small improves
+extraction accuracy; attention dilutes over long inputs even when they technically fit in the context
+window.
 
 ### Why a deterministic relevance filter?
 
