@@ -11,12 +11,10 @@ frequently-observed patterns at the expense of rare but defining ones.
 
 ### Pipeline
 
-Each conversation is sent raw to an extraction LLM that identifies what the human's messages reveal
-about how they think — corrections, course changes, reasoning, deliberate choices. Assistant messages
-are mechanically compressed (strip code blocks, collapse tool output to markers, truncate long
-messages) to keep input focused on signal — extraction accuracy degrades with input size. A refine
-step filters candidates to only those that would change how the muse behaves, and a deterministic
-relevance filter drops non-observations (empty output, placeholder tokens, LLM meta-commentary).
+Each conversation is mechanically compressed (strip code blocks, collapse tool output to markers,
+truncate long assistant messages) and sent to an extraction LLM that identifies what the human's
+messages reveal about how they think. A refine step filters candidates to only those that would
+change how the muse behaves, and a relevance filter drops non-observations.
 
 The surviving observations are classified, embedded, and grouped into thematic clusters. Each cluster
 is synthesized independently, then merged with unclustered noise observations into the final muse.md.
