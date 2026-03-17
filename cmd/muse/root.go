@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ellistarn/muse/internal/runlog"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -41,6 +43,7 @@ Run "muse listen --help" for MCP server configuration.`,
 	cmd.AddCommand(newListenCmd())
 	cmd.AddCommand(newAskCmd())
 	cmd.AddCommand(newSyncCmd())
+	cmd.AddCommand(newUsageCmd())
 	return cmd
 }
 
@@ -55,4 +58,23 @@ func newStore(ctx context.Context) (storage.Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+// newRunLog returns a Logger that writes to ~/.muse/runs.jsonl.
+// Returns nil (no-op logger) if the home directory can't be determined.
+func newRunLog() *runlog.Logger {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return runlog.New(filepath.Join(home, ".muse", "runs.jsonl"))
+}
+
+// museDir returns the local muse data directory (~/.muse).
+func museDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".muse")
 }

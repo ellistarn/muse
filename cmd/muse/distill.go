@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/muse"
+	"github.com/ellistarn/muse/internal/runlog"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -50,6 +52,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				return err
 			}
 
+			var discovered int
 			// Discover and store new conversations (skip for --learn since it
 			// only re-distills from existing observations)
 			if !learn {
@@ -64,6 +67,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				for _, w := range result.Warnings {
 					fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 				}
+				discovered = result.Uploaded
 				if result.Uploaded > 0 {
 					fmt.Fprintf(cmd.OutOrStdout(), "Discovered %d new conversations (%s)\n", result.Uploaded, muse.FormatBytes(result.Bytes))
 				} else {
@@ -77,6 +81,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				Sources:   sources,
 			}
 
+			var result *distill.Result
 			if learn {
 				learnClient, cerr := bedrock.NewClient(ctx, bedrock.ModelOpus)
 				if cerr != nil {
@@ -87,17 +92,37 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 					return cerr
 				}
 				opts.Learn = true
-				return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, learnClient, diffClient, opts)
+				result, err = runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, nil, learnClient, diffClient, opts)
+			} else {
+				observeClient, err2 := bedrock.NewClient(ctx, bedrock.ModelSonnet)
+				if err2 != nil {
+					return err2
+				}
+				learnClient, err2 := bedrock.NewClient(ctx, bedrock.ModelOpus)
+				if err2 != nil {
+					return err2
+				}
+				result, err = runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, observeClient, learnClient, nil, opts)
 			}
-			observeClient, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 			if err != nil {
 				return err
 			}
-			learnClient, err := bedrock.NewClient(ctx, bedrock.ModelOpus)
-			if err != nil {
-				return err
+
+			// Write run record (best-effort, don't fail the command)
+			rl := newRunLog()
+			if err := rl.Log(runlog.Record{
+				Timestamp:    time.Now().UTC(),
+				Command:      "distill",
+				InputTokens:  result.Usage.InputTokens,
+				OutputTokens: result.Usage.OutputTokens,
+				Cost:         result.Usage.Cost(),
+				Discovered:   discovered,
+				Observed:     result.Processed,
+				Pruned:       result.Pruned,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to record usage: %v\n", err)
 			}
-			return runDistill(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), store, observeClient, learnClient, nil, opts)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&reobserve, "reobserve", false, "re-observe all conversations from scratch")
@@ -108,7 +133,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 
 // runDistill executes the distill pipeline and prints results. Extracted from the
 // command handler so it can be tested with mock dependencies.
-func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM, diffLLM distill.LLM, opts distill.Options) error {
+func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM, diffLLM distill.LLM, opts distill.Options) (*distill.Result, error) {
 	var (
 		result *distill.Result
 		err    error
@@ -119,7 +144,7 @@ func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 		result, err = distill.Run(ctx, store, observeLLM, learnLLM, opts)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, w := range result.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
@@ -138,5 +163,5 @@ func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 	if result.Diff != "" {
 		fmt.Fprintf(stdout, "\n%s\n", result.Diff)
 	}
-	return nil
+	return result, nil
 }

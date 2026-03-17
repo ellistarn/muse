@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/bedrock"
 	"github.com/ellistarn/muse/internal/muse"
+	"github.com/ellistarn/muse/internal/runlog"
 )
 
 func newAskCmd() *cobra.Command {
@@ -33,7 +35,7 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 			}
 			question := strings.Join(args, " ")
 			var wroteOutput bool
-			_, err = m.Ask(ctx, muse.AskInput{
+			result, err := m.Ask(ctx, muse.AskInput{
 				Question: question,
 				StreamFunc: bedrock.StreamFunc(func(delta string) {
 					fmt.Fprint(os.Stdout, delta)
@@ -43,7 +45,22 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 			if wroteOutput {
 				fmt.Fprintln(os.Stdout) // trailing newline after stream completes
 			}
-			return err
+			if err != nil {
+				return err
+			}
+
+			// Write run record (best-effort, don't fail the command)
+			rl := newRunLog()
+			if err := rl.Log(runlog.Record{
+				Timestamp:    time.Now().UTC(),
+				Command:      "ask",
+				InputTokens:  result.Usage.InputTokens,
+				OutputTokens: result.Usage.OutputTokens,
+				Cost:         result.Usage.Cost(),
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to record usage: %v\n", err)
+			}
+			return nil
 		},
 	}
 }
