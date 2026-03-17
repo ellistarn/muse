@@ -11,47 +11,24 @@ frequently-observed patterns at the expense of rare but defining ones.
 
 ### Pipeline
 
+Each conversation is sent raw to an extraction LLM that identifies what the human's messages reveal
+about how they think — corrections, course changes, reasoning, deliberate choices. When a
+conversation exceeds the context window, assistant messages are mechanically compressed (strip code
+blocks, collapse tool output to markers, truncate long messages). A refine step filters candidates
+to only those that would change how the muse behaves, and a deterministic relevance filter drops
+non-observations (empty output, placeholder tokens, LLM meta-commentary).
+
+The surviving observations are classified, embedded, and grouped into thematic clusters. Each cluster
+is synthesized independently, then merged with unclustered noise observations into the final muse.md.
+When the observation count is too small for clustering to add value, the pipeline falls back to
+single-pass compose.
+
 ```
-conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► SYNTHESIZE ─► MERGE ─► muse.md
+conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► COMPOSE ─► muse.md
 
-                ┌───────────────────────────────────────────────────────┐
- OBSERVE        │  Per-conversation LLM call (parallel)                │
-                │  "What does this reveal about how this person thinks?"│
-                │  → zero or more observations per conversation         │
-                └───────────────────────────────────────────────────────┘
-
-                ┌───────────────────────────────────────────────────────┐
- CLUSTER        │                                                       │
-                │  CLASSIFY   Per-observation LLM call (parallel)       │
-                │             "What pattern of thinking or working is   │
-                │              this an instance of?"                    │
-                │             → classification                          │
-                │                                                       │
-                │  EMBED      Bedrock embeddings on classifications     │
-                │             → vectors                                 │
-                │                                                       │
-                │  GROUP      HDBSCAN (min_cluster_size=3)              │
-                │             → N clusters + noise                      │
-                │                                                       │
-                │  SAMPLE     Per-cluster random token-bounded           │
-                │             selection (~10k tokens)                    │
-                │                                                       │
-                └───────────────────────────────────────────────────────┘
-
-                ┌───────────────────────────────────────────────────────┐
- SYNTHESIZE     │  Per-cluster LLM call (parallel)                     │
-                │  sampled observations + cluster name → cluster summary│
-                └───────────────────────────────────────────────────────┘
-
-                ┌───────────────────────────────────────────────────────┐
- MERGE          │  Single LLM call over all cluster summaries          │
-                │  + raw noise observations                            │
-                │  Organize, don't filter → muse.md                    │
-                │                                                       │
-                │  Noise framing: "These observations didn't fit any    │
-                │  theme. Preserve what's distinctive, ignore what's    │
-                │  redundant with the cluster summaries."               │
-                └───────────────────────────────────────────────────────┘
+OBSERVE    raw conversation → [compress if needed] → extract → refine → relevance filter
+CLUSTER    classify → embed → group (HDBSCAN) → sample
+COMPOSE    per-cluster synthesis → merge with noise
 ```
 
 ### Strategies
@@ -90,9 +67,8 @@ Fingerprints per layer:
 Grouping, sampling, synthesis, and merge are recomputed each run — they're cheap relative to the
 cached stages.
 
-`--reobserve` and `--reclassify` exist as explicit force-refresh flags but correctness never depends
-on them. Synced artifacts are validated by fingerprint on read, so stale data from another machine is
-automatically recomputed.
+`--reobserve` and `--reclassify` force recomputation unconditionally, skipping fingerprint comparison.
+These are debugging tools for prompt iteration — correctness never depends on them.
 
 ### Storage
 
@@ -111,9 +87,9 @@ distillation system, nested under `distill/`.
 ├── muse/versions/{timestamp}/diff.md                     # output, syncable
 ```
 
-Observations are a JSON array of discrete strings per conversation (not a markdown blob). Each
-observation gets its own classification and embedding. Classifications and embeddings are stored
-one file per conversation containing all per-observation entries:
+Observations are a JSON array of discrete strings per conversation — each observation gets its own
+classification and embedding. Classifications and embeddings are stored one file per conversation
+containing all per-observation entries:
 
 ```json
 // distill/observations/{source}/{session_id}.json
@@ -142,6 +118,33 @@ partitions. This also normalizes for frequency: a pattern that dominates by volu
 one cluster with the same token budget as a smaller cluster, preventing it from drowning out rarer
 themes.
 
+### Why send raw conversation to extract?
+
+Summarizing assistant messages before extraction would reduce token count but costs an LLM call per
+turn and is lossy — the extract model needs enough context to understand what the human was reacting
+to, and a compressed summary may omit the detail that provoked a correction. The extraction prompt
+focuses on the human's voice regardless of how much assistant content surrounds it.
+
+Most conversations fit within the context window without any processing. For the ones that don't,
+mechanical compression strips code blocks, collapses tool output to markers like `[tool: file_edit]`,
+and truncates long assistant messages. This targets the main token bloat — assistant code and tool
+output carry zero signal about how the owner thinks. If compression alone isn't sufficient, chunking
+at turn boundaries is the natural next step, but the expectation is that compression handles
+effectively all oversize conversations.
+
+### Why a deterministic relevance filter?
+
+LLMs can't reliably produce empty output. The extract and refine prompts instruct the model to
+return nothing when a conversation has no signal, but the model sometimes produces meta-commentary
+instead ("I don't see any candidate observations"). This is a property of the technology, not a
+prompt problem — generating tokens that mean "I have no tokens to generate" is adversarial to how
+token prediction works.
+
+The relevance filter is a mechanical backstop: pattern matching on known non-observation output
+(empty strings, placeholder tokens, meta-commentary prefixes). It catches pipeline defects, not
+borderline observations. Any string that passes pattern matching is a genuine attempt at an
+observation.
+
 ### Why classify before embedding?
 
 We could embed raw observations and let clustering discover structure unsupervised. Instead,
@@ -149,10 +152,6 @@ classification situates each observation — describing _what pattern of thinkin
 instance of_ — so similar observations land near each other in embedding space even when they use
 different language. This is distinct from OBSERVE, which asks "what's here." CLASSIFY asks "what is
 this an instance of."
-
-Classification also serves a dual purpose: it improves embedding quality for clustering, and
-provides a reusable classification that future knowledge-level features will consume independently.
-The two uses need to be distinct — classification is not just a clustering preprocessing step.
 
 Classification should not project onto predefined axes (e.g. "wisdom vs knowledge"). That constrains
 what clusters can emerge. Let the clusters discover the natural axes.
@@ -169,9 +168,9 @@ HDBSCAN noise means "doesn't fit a group," not "worthless." Observations that do
 the most distinctive — patterns expressed once or twice that make the muse sound like you rather
 than like generic advice. Filtering noise early discards it based on no contextual information.
 
-Instead, noise flows through clustering and is passed as raw observations to MERGE alongside the
-cluster syntheses. MERGE is already the judgment step — it decides what to organize, preserve, or
-let go. Framing tells MERGE to preserve what's distinctive and ignore what's redundant with the
+Instead, noise flows through clustering and is passed as raw observations to COMPOSE alongside the
+cluster syntheses. COMPOSE is already the judgment step — it decides what to organize, preserve, or
+let go. Framing tells COMPOSE to preserve what's distinctive and ignore what's redundant with the
 clusters. Don't make a mechanical decision where the right answer requires contextual judgment.
 
 ### Why sample rather than summarize per-cluster?
@@ -179,9 +178,9 @@ clusters. Don't make a mechanical decision where the right answer requires conte
 We could summarize each cluster's full content before synthesis. Instead, we select representative
 examples and pass raw observations. This preserves voice and specificity that summaries flatten.
 
-### Why two-pass output (synthesize then merge)?
+### Why two-pass compose (synthesize then merge)?
 
-SYNTHESIZE compresses each cluster independently (parallel), then MERGE organizes across cluster
+Synthesis compresses each cluster independently (parallel), then merge organizes across cluster
 summaries. Single-pass would be simpler but forces one LLM call to both synthesize and organize. Two
 passes keep each call focused and produce debuggable intermediate artifacts.
 
@@ -215,3 +214,11 @@ Adding one conversation can reorganize clusters entirely. Whether that's accepta
 the muse is consumed. Stable cluster identity would add complexity (tracking cluster lineage,
 merging incrementally) for a problem that isn't yet real. **Revisit when:** cluster instability
 causes user-visible problems.
+
+## Evaluation
+
+Clustering is validated when the muse output captures themes that map-reduce flattens and preserves
+distinctive observations that map-reduce averages out. The test is qualitative: read both outputs
+side by side. The clustering version should surface rare-but-defining patterns (security instincts,
+naming precision, scope reduction) that get drowned out by high-frequency patterns (general
+architecture, code style) in map-reduce.
