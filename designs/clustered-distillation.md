@@ -11,21 +11,23 @@ frequently-observed patterns at the expense of rare but defining ones.
 
 ### Pipeline
 
-Each conversation is mechanically compressed (strip code blocks, collapse tool output to markers,
-truncate long assistant messages) and sent to an extraction LLM that identifies what the human's
-messages reveal about how they think. A refine step filters candidates to only those that would
-change how the muse behaves, and a relevance filter drops non-observations.
+Conversations are mechanically compressed (code blocks stripped, tool output collapsed to markers,
+long assistant messages truncated) and sent to an extraction LLM that identifies what the human's
+messages reveal about how they think. The extract prompt requires a structured `Observation:` prefix
+on each output line — lines without the prefix are discarded at parse time. A refine step filters
+candidates to only those that would change how the muse behaves.
 
-The surviving observations are classified, embedded, and grouped into thematic clusters. Each cluster
-is synthesized independently, then merged with unclustered noise observations into the final muse.md.
-When the observation count is too small for clustering to add value, the pipeline falls back to
-single-pass compose.
+The surviving observations are classified into short thematic labels and grouped into clusters.
+Grouping is by exact label match — the classifier is given existing labels and converges on a shared
+vocabulary, so observations on the same theme get the same label. Labels with 3+ observations form
+clusters; the rest flow through as noise. Each cluster is synthesized independently, then merged with
+noise observations into the final muse.md.
 
 ```
 conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► COMPOSE ─► muse.md
 
-OBSERVE    raw conversation → [compress if needed] → extract → refine → relevance filter
-CLUSTER    classify → embed → group (HDBSCAN) → sample
+OBSERVE    compress → extract (Observation: prefix) → refine → parse
+CLUSTER    classify (label convergence) → group (label match) → sample
 COMPOSE    per-cluster synthesis → merge with noise
 ```
 
@@ -49,18 +51,15 @@ correctness; the dependency chain self-invalidates:
 ```
 conversation → (observe prompt) → observations
 observation → (classify prompt) → classification
-classification → (embedding model) → embedding
 ```
 
-Change a conversation and its observations invalidate, which invalidates classifications, which
-invalidates embeddings. Change the classify prompt and all classifications invalidate, cascading to
-embeddings. Correctness is structural, not procedural.
+Change a conversation and its observations invalidate, which invalidates classifications. Change the
+classify prompt and all classifications invalidate. Correctness is structural, not procedural.
 
 Fingerprints per layer:
 
 - **Observation**: `hash(conversation.UpdatedAt, observePromptHash)`
 - **Classification**: `hash(observationContent, classifyPromptHash)`
-- **Embedding**: `hash(classificationContent, embeddingModel)`
 
 Grouping, sampling, synthesis, and merge are recomputed each run — they're cheap relative to the
 cached stages.
@@ -79,15 +78,14 @@ distillation system, nested under `distill/`.
 ├── distill/
 │   ├── observations/{source}/{session_id}.json           # syncable
 │   ├── classifications/{source}/{session_id}.json        # syncable
-│   ├── embeddings/{source}/{session_id}.json             # syncable
 │   └── clusters/{id}.json                                # ephemeral, not synced, overwritten each run
 ├── muse/versions/{timestamp}/muse.md                     # output, syncable
 ├── muse/versions/{timestamp}/diff.md                     # output, syncable
 ```
 
 Observations are a JSON array of discrete strings per conversation — each observation gets its own
-classification and embedding. Classifications and embeddings are stored one file per conversation
-containing all per-observation entries:
+classification. Classifications are stored one file per conversation containing all per-observation
+entries:
 
 ```json
 // distill/observations/{source}/{session_id}.json
@@ -95,14 +93,8 @@ containing all per-observation entries:
 
 // distill/classifications/{source}/{session_id}.json
 {"fingerprint": "def456", "items": [
-  {"observation": "obs1", "classification": "..."},
-  {"observation": "obs2", "classification": "..."}
-]}
-
-// distill/embeddings/{source}/{session_id}.json
-{"fingerprint": "ghi789", "items": [
-  {"classification": "...", "vector": [0.1, 0.2, ...]},
-  {"classification": "...", "vector": [0.3, 0.4, ...]}
+  {"observation": "obs1", "classification": "root cause over symptom fixing"},
+  {"observation": "obs2", "classification": "abstraction must earn its cost"}
 ]}
 ```
 
@@ -116,62 +108,62 @@ partitions. This also normalizes for frequency: a pattern that dominates by volu
 one cluster with the same token budget as a smaller cluster, preventing it from drowning out rarer
 themes.
 
-### Why mechanical compression over summarization?
+### Why mechanical compression over raw or LLM-summarized input?
 
-Summarizing assistant messages before extraction would reduce token count but costs an LLM call per
-turn and is lossy — a compressed summary may omit the detail that provoked a correction. Instead,
-mechanical compression strips code blocks, collapses tool output to markers like `[tool: file_edit]`,
-and truncates long assistant messages. This targets the main token bloat — assistant code and tool
-output carry zero signal about how the owner thinks — while preserving enough context for the
-extraction model to understand what the human was reacting to. Keeping input small improves
-extraction accuracy; attention dilutes over long inputs even when they technically fit in the context
-window.
+The extract model needs enough context to understand what the human was reacting to, but assistant
+messages are mostly code blocks, tool output, and verbose explanations — none of which carry signal
+about how the owner thinks. Mechanical compression (strip code fences, collapse tool calls to
+`[tool: name]`, truncate long assistant messages to 500 chars) removes the bloat while preserving
+human messages in full. This is cheaper and faster than LLM summarization and doesn't risk losing
+the detail that provoked a correction.
 
-### Why a deterministic relevance filter?
+### Why a structured prefix over empty-output instructions?
 
-LLMs can't reliably produce empty output. The extract and refine prompts instruct the model to
-return nothing when a conversation has no signal, but the model sometimes produces meta-commentary
-instead ("I don't see any candidate observations"). This is a property of the technology, not a
-prompt problem — generating tokens that mean "I have no tokens to generate" is adversarial to how
-token prediction works.
+LLMs can't reliably produce empty output. Instructing the model to "return nothing" when a
+conversation has no signal is adversarial to how token prediction works — the model wants to emit
+tokens. Instead of hoping for absence, we require structure: each observation must start with
+`Observation:`. Lines without the prefix are discarded at parse time. This converts a semantic
+judgment ("is this nothing?") into a structural parse rule ("does this line start with the prefix?").
 
-The relevance filter is a mechanical backstop: pattern matching on known non-observation output
-(empty strings, placeholder tokens, meta-commentary prefixes). It catches pipeline defects, not
-borderline observations. Any string that passes pattern matching is a genuine attempt at an
-observation.
+The `Observation:` prefix also anchors the model's generation — it's harder to drift into
+conversational meta-commentary when the required output format is explicit. A secondary relevance
+filter catches any well-formed-but-vacuous observations that slip through (e.g. parenthesized
+meta-commentary).
 
-### Why classify before embedding?
+### Why label convergence in classification?
 
-We could embed raw observations and let clustering discover structure unsupervised. Instead,
-classification situates each observation — describing _what pattern of thinking or working it's an
-instance of_ — so similar observations land near each other in embedding space even when they use
-different language. This is distinct from OBSERVE, which asks "what's here." CLASSIFY asks "what is
-this an instance of."
+The classifier receives observations in batches (up to 10 per call) and assigns each a short
+thematic label (3-8 words) naming the thinking pattern it's an instance of. Critically, the
+classifier also receives the list of labels already assigned to other observations and is instructed
+to reuse an existing label when one fits. Sessions are processed sequentially so each batch sees the
+full label vocabulary from prior sessions, preserving convergence.
 
-Classification should not project onto predefined axes (e.g. "wisdom vs knowledge"). That constrains
-what clusters can emerge. Let the clusters discover the natural axes.
+Without label convergence, each observation gets a unique paraphrase ("abstraction must earn its
+cost" vs. "abstraction must earn its keep") and grouping becomes impossible — everything is
+equidistant. With convergence, the classifier maps both to the same label, and grouping becomes
+trivial: exact string match.
 
-### Why HDBSCAN over k-means?
+### Why label-match only?
 
-HDBSCAN discovers cluster count automatically and explicitly labels noise. k-means forces every
-observation into a cluster and requires choosing k upfront. The noise-handling property is
-load-bearing — outliers that don't cluster yet may emerge as themes with more data.
+Grouping is exact label match — observations with the same classification label form a cluster. This
+works because label convergence produces a shared vocabulary with ~60% reuse.
+
+We initially designed a two-phase approach (label-match followed by HDBSCAN over embeddings for the
+ungrouped residual) but found that classification convergence eliminates the sub-cluster variation
+HDBSCAN was meant to capture. With 168 observations, median cosine distance was 0.92 — the embedding
+space was flat because labels were paraphrasing, not categorizing. Fixing classification upstream
+made the downstream algorithm irrelevant.
+
+Observations whose labels appear fewer than 3 times flow through as noise rather than forming
+micro-clusters. This threshold prevents synthesis from operating on groups too small to have a
+meaningful pattern.
 
 ### Why preserve noise?
 
-HDBSCAN noise means "doesn't fit a group," not "worthless." Observations that don't cluster may be
-the most distinctive — patterns expressed once or twice that make the muse sound like you rather
-than like generic advice. Filtering noise early discards it based on no contextual information.
-
-Instead, noise flows through clustering and is passed as raw observations to COMPOSE alongside the
-cluster syntheses. COMPOSE is already the judgment step — it decides what to organize, preserve, or
-let go. Framing tells COMPOSE to preserve what's distinctive and ignore what's redundant with the
-clusters. Don't make a mechanical decision where the right answer requires contextual judgment.
-
-### Why sample rather than summarize per-cluster?
-
-We could summarize each cluster's full content before synthesis. Instead, we select representative
-examples and pass raw observations. This preserves voice and specificity that summaries flatten.
+Noise means "doesn't fit a group," not "worthless." Observations that don't cluster may be the most
+distinctive — patterns expressed once or twice that make the muse sound like you rather than like
+generic advice. Noise flows through to COMPOSE alongside cluster syntheses. COMPOSE is already the
+judgment step — it decides what to organize, preserve, or let go.
 
 ### Why two-pass compose (synthesize then merge)?
 
@@ -180,28 +172,6 @@ summaries. Single-pass would be simpler but forces one LLM call to both synthesi
 passes keep each call focused and produce debuggable intermediate artifacts.
 
 ## Deferred
-
-Intentional simplifications for the first implementation. Each names what's deferred, why it's
-acceptable now, and what would trigger revisiting.
-
-### Why random sampling over centroid-nearest + edges?
-
-Centroid-nearest + edge sampling is cheap to compute once you have embeddings and cluster
-assignments, and it's meaningfully better than random for thematic representation — centroid-nearest
-captures the cluster's core, edges capture its boundaries with neighboring clusters. But it's a
-sampling refinement layered on top of clustering. The goal of the first implementation is to validate
-whether clustering itself improves muse quality over map-reduce. If clustering doesn't help, better
-sampling wouldn't have saved it — the problem would be upstream. If clustering does help, sampling
-sophistication is the obvious next lever. **Revisit when:** clustering is validated and output
-quality plateaus.
-
-### Why token budgets over concept weighting?
-
-Fixed token budgets per cluster are predictable and debuggable. Concept weighting (having the model
-assess which observations carry more weight and sampling proportionally) adds an LLM call per
-observation and introduces a subjective scoring dimension that's hard to evaluate. Building two
-novel things at once with no way to attribute quality differences to either one is a bad experiment.
-**Revisit when:** clustering is validated and sampling is the bottleneck for output quality.
 
 ### Why not stabilize clusters across runs?
 

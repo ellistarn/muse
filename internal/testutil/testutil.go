@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ellistarn/muse/internal/conversation"
@@ -32,6 +33,7 @@ type ConversationStore struct {
 	Observations map[string]string
 	Deleted      []string
 	Muses        map[string]string // timestamp -> content
+	mu           sync.Mutex
 }
 
 // NewConversationStore returns a ready-to-use ConversationStore.
@@ -130,6 +132,8 @@ func (s *ConversationStore) ListObservations(_ context.Context) (map[string]time
 }
 
 func (s *ConversationStore) GetObservation(_ context.Context, conversationKey string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	content, ok := s.Observations[conversationKey]
 	if !ok {
 		return "", &storage.NotFoundError{Key: conversationKey}
@@ -138,11 +142,15 @@ func (s *ConversationStore) GetObservation(_ context.Context, conversationKey st
 }
 
 func (s *ConversationStore) PutObservation(_ context.Context, key, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Observations[key] = content
 	return nil
 }
 
 func (s *ConversationStore) DeletePrefix(_ context.Context, prefix string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Deleted = append(s.Deleted, prefix)
 	if prefix == "observations/" {
 		s.Observations = map[string]string{}
@@ -167,11 +175,14 @@ type MockLLM struct {
 	ObserveResponse string
 	LearnResponse   string
 	Err             error
+	mu              sync.Mutex
 	Calls           []LLMCall
 }
 
 func (m *MockLLM) Converse(_ context.Context, system, user string, _ ...inference.ConverseOption) (string, inference.Usage, error) {
+	m.mu.Lock()
 	m.Calls = append(m.Calls, LLMCall{System: system, User: user})
+	m.mu.Unlock()
 	if m.Err != nil {
 		return "", inference.Usage{}, m.Err
 	}
@@ -180,4 +191,14 @@ func (m *MockLLM) Converse(_ context.Context, system, user string, _ ...inferenc
 		return m.LearnResponse, usage, nil
 	}
 	return m.ObserveResponse, usage, nil
+}
+
+func (m *MockLLM) Model() string { return "mock-model" }
+
+func (m *MockLLM) ConverseStream(ctx context.Context, system, user string, fn inference.StreamFunc, opts ...inference.ConverseOption) (string, inference.Usage, error) {
+	text, usage, err := m.Converse(ctx, system, user, opts...)
+	if fn != nil && err == nil {
+		fn(inference.StreamDelta{Text: text})
+	}
+	return text, usage, err
 }

@@ -19,17 +19,44 @@ import (
 // LLM is the subset of an LLM client used by the distill pipeline.
 type LLM interface {
 	Converse(ctx context.Context, system, user string, opts ...inference.ConverseOption) (string, inference.Usage, error)
+	ConverseStream(ctx context.Context, system, user string, fn inference.StreamFunc, opts ...inference.ConverseOption) (string, inference.Usage, error)
+	Model() string
+}
+
+// StageStats captures telemetry for a single pipeline stage.
+type StageStats struct {
+	Name     string
+	Model    string        // model or tool used (e.g. "us.anthropic.claude-sonnet-4-20250514-v1:0")
+	Duration time.Duration // wall-clock time for the stage
+	Usage    inference.Usage
+	DataSize int // bytes of input data processed
 }
 
 // Result summarizes a distill run.
 type Result struct {
-	Processed int
-	Pruned    int
-	Remaining int // conversations still pending observation
-	Usage     inference.Usage
-	Muse      string // the distilled muse.md
-	Diff      string // what changed from the previous muse version
-	Warnings  []string
+	Processed    int
+	Pruned       int
+	Remaining    int // conversations still pending observation
+	Observations int // total observations across all conversations
+	Clusters     int // clusters discovered by HDBSCAN (0 for map-reduce)
+	Noise        int // observations that didn't fit any cluster
+	Cache        CacheStats
+	Stages       []StageStats
+	Usage        inference.Usage
+	Muse         string // the distilled muse.md
+	Diff         string // what changed from the previous muse version
+}
+
+// CacheStats tracks cache hit/miss counts for each cached pipeline stage.
+type CacheStats struct {
+	Observe  HitMiss
+	Classify HitMiss
+}
+
+// HitMiss tracks cache hit and miss counts.
+type HitMiss struct {
+	Hit  int
+	Miss int
 }
 
 // Options configures a distill run.
@@ -43,6 +70,8 @@ type Options struct {
 	// Sources filters to conversations from specific sources (e.g. "kiro").
 	// Empty means all sources.
 	Sources []string
+	// Verbose enables per-item progress logging.
+	Verbose bool
 }
 
 // Run executes the distill pipeline: observe new conversations, then learn a muse
@@ -68,7 +97,9 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 				if err := store.DeletePrefix(ctx, prefix); err != nil {
 					return nil, fmt.Errorf("failed to clear observations: %w", err)
 				}
-				fmt.Fprintf(os.Stderr, "Cleared %s\n", prefix)
+				if opts.Verbose {
+					fmt.Fprintf(os.Stderr, "Cleared %s\n", prefix)
+				}
 			}
 		} else {
 			if err := store.DeletePrefix(ctx, "observations/"); err != nil {
@@ -118,7 +149,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 	}
 
 	var mu sync.Mutex
-	var warnings []string
+	var firstErr error
 	var observeUsage inference.Usage
 
 	// Observe pending conversations in parallel
@@ -138,7 +169,9 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 				if err != nil {
 					completed.Add(1)
 					mu.Lock()
-					warnings = append(warnings, fmt.Sprintf("failed to process %s: %v", entry.Key, err))
+					if firstErr == nil {
+						firstErr = fmt.Errorf("load session %s: %w", entry.Key, err)
+					}
 					mu.Unlock()
 					return
 				}
@@ -146,9 +179,10 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 				obs, usage, err := observeSession(ctx, observeLLM, session)
 				n := completed.Add(1)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "  [%d/%d] error: %v %s\n", n, len(pending), err, entry.Key)
 					mu.Lock()
-					warnings = append(warnings, fmt.Sprintf("failed to process %s: %v", entry.Key, err))
+					if firstErr == nil {
+						firstErr = fmt.Errorf("observe %s: %w", entry.Key, err)
+					}
 					mu.Unlock()
 					return
 				}
@@ -156,20 +190,27 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 				// Persist immediately so progress survives cancellation
 				if err := store.PutObservation(ctx, entry.Key, obs); err != nil {
 					mu.Lock()
-					warnings = append(warnings, fmt.Sprintf("failed to save observation for %s: %v", entry.Key, err))
+					if firstErr == nil {
+						firstErr = fmt.Errorf("save observation for %s: %w", entry.Key, err)
+					}
 					mu.Unlock()
 					return
 				}
-				fmt.Fprintf(os.Stderr, "  [%d/%d] Observed %s (%s, $%.4f)\n",
-					n, len(pending), entry.Key, time.Since(start).Round(time.Millisecond), usage.Cost())
+				if opts.Verbose {
+					fmt.Fprintf(os.Stderr, "  [%d/%d] Observed %s (%s, $%.4f)\n",
+						n, len(pending), entry.Key, time.Since(start).Round(time.Millisecond), usage.Cost())
+				}
 				mu.Lock()
 				observeUsage = observeUsage.Add(usage)
 				mu.Unlock()
 			}(entry)
 		}
 		wg.Wait()
+		if firstErr != nil {
+			return nil, firstErr
+		}
 		fmt.Fprintf(os.Stderr, "Observed %d conversations (%s, $%.4f)\n",
-			len(pending)-len(warnings), time.Since(observeStart).Round(time.Millisecond), observeUsage.Cost())
+			len(pending), time.Since(observeStart).Round(time.Millisecond), observeUsage.Cost())
 	}
 
 	remaining := totalPending - len(pending)
@@ -180,7 +221,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 		return nil, fmt.Errorf("failed to load observations: %w", err)
 	}
 	if len(allObservations) == 0 {
-		return &Result{Pruned: pruned, Remaining: remaining, Warnings: warnings}, nil
+		return &Result{Pruned: pruned, Remaining: remaining}, nil
 	}
 
 	// Load previous muse before learning so we can diff afterward.
@@ -196,13 +237,10 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 	// Diff is a post-processing step, not part of learning.
 	d, diffUsage, derr := computeDiff(ctx, observeLLM, store, timestamp, previousMuse, muse)
 	if derr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to compute diff: %v\n", derr)
+		return nil, fmt.Errorf("diff: %w", derr)
 	}
 
-	processed := len(pending) - len(warnings)
-	if processed < 0 {
-		processed = 0
-	}
+	processed := len(pending)
 	return &Result{
 		Processed: processed,
 		Pruned:    pruned,
@@ -210,7 +248,6 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 		Usage:     observeUsage.Add(learnUsage).Add(diffUsage),
 		Muse:      muse,
 		Diff:      d,
-		Warnings:  warnings,
 	}, nil
 }
 
@@ -237,14 +274,13 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) 
 
 	d, diffUsage, derr := computeDiff(ctx, diffLLM, store, timestamp, previousMuse, muse)
 	if derr != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to compute diff: %v\n", derr)
+		return nil, fmt.Errorf("diff: %w", derr)
 	}
 
 	return &Result{
-		Usage:    usage.Add(diffUsage),
-		Muse:     muse,
-		Diff:     d,
-		Warnings: nil,
+		Usage: usage.Add(diffUsage),
+		Muse:  muse,
+		Diff:  d,
 	}, nil
 }
 
@@ -258,7 +294,7 @@ func loadAllObservations(ctx context.Context, store storage.Store) ([]string, er
 	for conversationKey := range index {
 		content, err := store.GetObservation(ctx, conversationKey)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("get observation %s: %w", conversationKey, err)
 		}
 		if content != "" {
 			observations = append(observations, content)
@@ -281,20 +317,16 @@ func observeSession(ctx context.Context, client LLM, session *conversation.Sessi
 
 	var totalUsage inference.Usage
 
-	// Step 1: Summarize assistant context for each turn, then build human-focused view
-	chunks, usage, err := buildHumanFocusedView(ctx, client, turns)
-	totalUsage = totalUsage.Add(usage)
-	if err != nil {
-		return "", totalUsage, err
-	}
+	// Mechanically compress the conversation — no LLM calls.
+	chunks := compressConversation(turns)
 	if len(chunks) == 0 {
 		return "", totalUsage, nil
 	}
 
-	// Step 2: Extract candidate observations (Pass 1)
+	// Extract candidate observations (Pass 1)
 	var allCandidates []string
 	for _, chunk := range chunks {
-		obs, usage, err := client.Converse(ctx, prompts.ObserveExtract, chunk, inference.WithMaxTokens(4096))
+		obs, usage, err := client.Converse(ctx, prompts.Extract, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if err != nil && obs == "" {
 			return "", totalUsage, err
@@ -307,9 +339,9 @@ func observeSession(ctx context.Context, client LLM, session *conversation.Sessi
 		return "", totalUsage, nil
 	}
 
-	// Step 3: Refine observations (Pass 2)
+	// Refine observations (Pass 2)
 	candidates := strings.Join(allCandidates, "\n\n")
-	refined, usage, err := client.Converse(ctx, prompts.ObserveRefine, candidates, inference.WithMaxTokens(4096))
+	refined, usage, err := client.Converse(ctx, prompts.Refine, candidates, inference.WithMaxTokens(4096))
 	totalUsage = totalUsage.Add(usage)
 	if err != nil {
 		return "", totalUsage, err
@@ -325,48 +357,12 @@ func isEmpty(s string) bool {
 	return len(strings.TrimSpace(s)) == 0
 }
 
-// buildHumanFocusedView summarizes assistant messages and formats the conversation
-// as [context]/[human] pairs, chunked to fit within the token budget.
-func buildHumanFocusedView(ctx context.Context, client LLM, turns []turn) ([]string, inference.Usage, error) {
-	var totalUsage inference.Usage
-	var chunks []string
-	var b strings.Builder
-
-	for _, t := range turns {
-		// Summarize the assistant's message into 1-2 structural sentences
-		var contextLine string
-		if t.assistantContent != "" {
-			summary, usage, err := client.Converse(ctx, prompts.ObserveSummarize, t.assistantContent, inference.WithMaxTokens(256))
-			totalUsage = totalUsage.Add(usage)
-			if err != nil {
-				// On error, fall back to a generic context marker
-				contextLine = "[context]: (assistant message)\n"
-			} else {
-				contextLine = fmt.Sprintf("[context]: %s\n", strings.TrimSpace(summary))
-			}
-		}
-
-		humanLine := fmt.Sprintf("[human]: %s\n\n", t.humanContent)
-		entry := contextLine + humanLine
-
-		if b.Len()+len(entry) > maxChunkChars && b.Len() > 0 {
-			chunks = append(chunks, b.String())
-			b.Reset()
-		}
-		b.WriteString(entry)
-	}
-	if b.Len() > 0 {
-		chunks = append(chunks, b.String())
-	}
-	return chunks, totalUsage, nil
-}
-
 func learn(ctx context.Context, client LLM, store storage.Store, observations []string) (string, string, inference.Usage, error) {
 	if len(observations) == 0 {
 		return "", "", inference.Usage{}, nil
 	}
 	input := strings.Join(observations, "\n\n---\n\n")
-	muse, usage, err := client.Converse(ctx, prompts.Learn, input, inference.WithThinking(16000))
+	muse, usage, err := client.Converse(ctx, prompts.Compose, input, inference.WithThinking(16000))
 	if err != nil {
 		return "", "", usage, err
 	}
@@ -390,8 +386,10 @@ func computeDiff(ctx context.Context, client LLM, store storage.Store, timestamp
 		d = "Initial version."
 	} else {
 		input := fmt.Sprintf("Previous muse:\n%s\n\n---\n\nNew muse:\n%s", previous, current)
+		stream := newStageStream(0) // no thinking for diff
 		var err error
-		d, usage, err = client.Converse(ctx, prompts.Diff, input, inference.WithMaxTokens(4096))
+		d, usage, err = client.ConverseStream(ctx, prompts.Diff, input, stream.callback(), inference.WithMaxTokens(4096))
+		stream.finish()
 		if err != nil {
 			return "", usage, err
 		}

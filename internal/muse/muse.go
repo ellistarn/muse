@@ -3,7 +3,6 @@ package muse
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -17,11 +16,13 @@ import (
 
 // UploadResult summarizes what happened during an upload sync.
 type UploadResult struct {
-	Total    int
-	Uploaded int
-	Skipped  int
-	Bytes    int
-	Warnings []string
+	Sources      int
+	SourceCounts map[string]int // per-source upload counts
+	Total        int
+	Uploaded     int
+	Skipped      int
+	Bytes        int
+	Warnings     []string
 }
 
 // AskInput contains the parameters for an Ask call.
@@ -75,7 +76,7 @@ func NewForTest(bedrockClient *bedrock.Client, soul string) *Muse {
 	}
 }
 
-var systemPrompt = prompts.Muse
+var systemPrompt = prompts.System
 
 // Ask handles a conversation turn. If SessionID is set, continues an existing
 // conversation. Otherwise starts a new one.
@@ -189,8 +190,15 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 		}
 		local = filtered
 	}
+	// Count unique sources
+	sourceSet := map[string]bool{}
+	for _, sess := range local {
+		sourceSet[sess.Source] = true
+	}
+
 	var uploaded, skipped int
 	var totalBytes int
+	uploadCounts := map[string]int{}
 	for i := range local {
 		sess := &local[i]
 		key := fmt.Sprintf("conversations/%s/%s.json", sess.Source, sess.SessionID)
@@ -205,16 +213,18 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 			warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", sess.SessionID, err))
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "  upload (%s) %s\n", FormatBytes(n), key)
 		uploaded++
+		uploadCounts[sess.Source]++
 		totalBytes += n
 	}
 	return &UploadResult{
-		Total:    len(local),
-		Uploaded: uploaded,
-		Skipped:  skipped,
-		Bytes:    totalBytes,
-		Warnings: warnings,
+		Sources:      len(sourceSet),
+		SourceCounts: uploadCounts,
+		Total:        len(local),
+		Uploaded:     uploaded,
+		Skipped:      skipped,
+		Bytes:        totalBytes,
+		Warnings:     warnings,
 	}, nil
 }
 

@@ -10,6 +10,7 @@ import (
 )
 
 var bucket string
+var verbose bool
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -36,6 +37,7 @@ Run "muse listen --help" for MCP server configuration.`,
 		SilenceUsage:  true,
 	}
 	cmd.PersistentFlags().StringVar(&bucket, "bucket", os.Getenv("MUSE_BUCKET"), "S3 bucket name (or set MUSE_BUCKET)")
+	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show per-item progress during pipeline stages")
 	cmd.AddCommand(newDistillCmd())
 	cmd.AddCommand(newShowCmd())
 	cmd.AddCommand(newListenCmd())

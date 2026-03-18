@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/bedrock"
+	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/muse"
 )
 
@@ -35,8 +36,8 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 			var wroteOutput bool
 			_, err = m.Ask(ctx, muse.AskInput{
 				Question: question,
-				StreamFunc: bedrock.StreamFunc(func(delta string) {
-					fmt.Fprint(os.Stdout, delta)
+				StreamFunc: bedrock.StreamFunc(func(delta inference.StreamDelta) {
+					fmt.Fprint(os.Stdout, delta.Text)
 					wroteOutput = true
 				}),
 			})
