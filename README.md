@@ -1,6 +1,6 @@
 # Muse
 
-An AI advisor that thinks like you. It learns from your conversation history
+An AI that thinks like you. Distilled from your conversation history
 across Claude Code, Kiro, and OpenCode so your agents can consult your
 perspective without pulling you into the loop.
 
