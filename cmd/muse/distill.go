@@ -149,12 +149,8 @@ func runMapReduceDistill(ctx context.Context, stdout io.Writer, store storage.St
 		if err != nil {
 			return err
 		}
-		diffClient, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
-		if err != nil {
-			return err
-		}
 		opts.Learn = true
-		result, err := distill.LearnOnly(ctx, store, learnClient, diffClient)
+		result, err := distill.LearnOnly(ctx, store, learnClient)
 		if err != nil {
 			return err
 		}
@@ -213,9 +209,9 @@ func printResult(stdout io.Writer, result *distill.Result, learnOnly bool) error
 	if result.Muse != "" {
 		fmt.Fprintf(stdout, "muse.md: ~%d tokens\n", inference.EstimateTokens(result.Muse))
 	}
-	if result.Diff != "" {
-		fmt.Fprintf(stdout, "\n%s\n", result.Diff)
-	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, "  muse show          # view muse.md")
+	fmt.Fprintln(stdout, "  muse show --diff   # view what changed")
 	return nil
 }
 
@@ -251,13 +247,13 @@ func formatBytes(n int) string {
 
 // runDistill executes the map-reduce distill pipeline and prints results.
 // Preserved for backward compatibility with existing tests.
-func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM, diffLLM distill.LLM, opts distill.Options) error {
+func runDistill(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM distill.LLM, opts distill.Options) error {
 	var (
 		result *distill.Result
 		err    error
 	)
 	if opts.Learn {
-		result, err = distill.LearnOnly(ctx, store, learnLLM, diffLLM)
+		result, err = distill.LearnOnly(ctx, store, learnLLM)
 	} else {
 		result, err = distill.Run(ctx, store, observeLLM, learnLLM, opts)
 	}

@@ -44,7 +44,6 @@ type Result struct {
 	Stages       []StageStats
 	Usage        inference.Usage
 	Muse         string // the distilled muse.md
-	Diff         string // what changed from the previous muse version
 }
 
 // CacheStats tracks cache hit/miss counts for each cached pipeline stage.
@@ -229,36 +228,26 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 		return &Result{Pruned: pruned, Remaining: remaining}, nil
 	}
 
-	// Load previous muse before learning so we can diff afterward.
-	previousMuse, _ := store.GetMuse(ctx) // ok if not found (first run)
-
 	learnStart := time.Now()
-	muse, timestamp, learnUsage, err := learn(ctx, learnLLM, store, allObservations)
+	muse, _, learnUsage, err := learn(ctx, learnLLM, store, allObservations)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Muse distilled (%s, $%.4f)\n", time.Since(learnStart).Round(time.Millisecond), learnUsage.Cost())
-
-	// Diff is a post-processing step, not part of learning.
-	d, diffUsage, derr := computeDiff(ctx, observeLLM, store, timestamp, previousMuse, muse)
-	if derr != nil {
-		return nil, fmt.Errorf("diff: %w", derr)
-	}
 
 	processed := len(pending)
 	return &Result{
 		Processed: processed,
 		Pruned:    pruned,
 		Remaining: remaining,
-		Usage:     observeUsage.Add(learnUsage).Add(diffUsage),
+		Usage:     observeUsage.Add(learnUsage),
 		Muse:      muse,
-		Diff:      d,
 	}, nil
 }
 
 // LearnOnly re-runs only the learn phase using persisted observations.
 // Use this to re-compose the muse with improved techniques without re-observing.
-func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) (*Result, error) {
+func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result, error) {
 	allObservations, err := loadAllObservations(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load observations: %w", err)
@@ -267,25 +256,16 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) 
 		return &Result{}, nil
 	}
 
-	// Load previous muse before learning so we can diff afterward.
-	previousMuse, _ := store.GetMuse(ctx)
-
 	start := time.Now()
-	muse, timestamp, usage, err := learn(ctx, learnLLM, store, allObservations)
+	muse, _, usage, err := learn(ctx, learnLLM, store, allObservations)
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Muse distilled (%s, $%.4f)\n", time.Since(start).Round(time.Millisecond), usage.Cost())
 
-	d, diffUsage, derr := computeDiff(ctx, diffLLM, store, timestamp, previousMuse, muse)
-	if derr != nil {
-		return nil, fmt.Errorf("diff: %w", derr)
-	}
-
 	return &Result{
-		Usage: usage.Add(diffUsage),
+		Usage: usage,
 		Muse:  muse,
-		Diff:  d,
 	}, nil
 }
 
@@ -381,9 +361,9 @@ func learn(ctx context.Context, client LLM, store storage.Store, observations []
 	return muse, timestamp, usage, nil
 }
 
-// computeDiff summarizes what changed between two muse versions. On first run
+// ComputeDiff summarizes what changed between two muse versions. On first run
 // (no previous version), writes a static message without an LLM call.
-func computeDiff(ctx context.Context, client LLM, store storage.Store, timestamp, previous, current string) (string, inference.Usage, error) {
+func ComputeDiff(ctx context.Context, client LLM, store storage.Store, timestamp, previous, current string) (string, inference.Usage, error) {
 	var d string
 	var usage inference.Usage
 
@@ -391,7 +371,7 @@ func computeDiff(ctx context.Context, client LLM, store storage.Store, timestamp
 		d = "Initial version."
 	} else {
 		input := fmt.Sprintf("Previous muse:\n%s\n\n---\n\nNew muse:\n%s", previous, current)
-		stream := newStageStream(0) // no thinking for diff
+		stream := newStageStream(0, 4096) // no thinking, writing bar against 4k budget
 		var err error
 		d, usage, err = client.ConverseStream(ctx, prompts.Diff, input, stream.callback(), inference.WithMaxTokens(4096))
 		stream.finish()

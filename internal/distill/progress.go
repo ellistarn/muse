@@ -184,22 +184,25 @@ func renderBar(n, total, width int) string {
 // ── Stage stream ────────────────────────────────────────────────────────
 
 // stageStream renders streaming LLM output for a single-call stage like compose
-// or diff. During thinking, it shows a progress bar against the token budget.
-// Once text tokens arrive, it streams the actual output to stderr.
+// or diff. Shows a two-phase progress bar: thinking tokens against a thinking
+// budget, then writing tokens against a text budget. No raw text is streamed.
 type stageStream struct {
-	thinkingBudget int  // 0 means no thinking bar (just stream text)
-	thinkingTokens int  // accumulated thinking tokens
-	textStarted    bool // flipped on first non-thinking delta
-	wroteOutput    bool // true if any text was written to stderr
-	tty            bool // whether stderr is a terminal
+	thinkingBudget int // 0 means no thinking bar
+	textBudget     int // 0 means no writing bar
+	thinkingTokens int // accumulated thinking tokens
+	textTokens     int // accumulated writing tokens
+	textStarted    bool
+	tty            bool
 	mu             sync.Mutex
 }
 
-// newStageStream creates a stream renderer. thinkingBudget of 0 disables the
-// thinking progress bar (deltas stream directly).
-func newStageStream(thinkingBudget int) *stageStream {
+// newStageStream creates a two-phase progress renderer.
+//   - thinkingBudget: expected thinking tokens (0 disables thinking bar)
+//   - textBudget: expected output tokens (0 disables writing bar)
+func newStageStream(thinkingBudget, textBudget int) *stageStream {
 	return &stageStream{
 		thinkingBudget: thinkingBudget,
+		textBudget:     textBudget,
 		tty:            isTTY(),
 	}
 }
@@ -210,8 +213,10 @@ func (s *stageStream) callback() inference.StreamFunc {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
+		tokens := int(math.Ceil(float64(len(delta.Text)) / 4.0))
+
 		if delta.Thinking {
-			s.thinkingTokens += int(math.Ceil(float64(len(delta.Text)) / 4.0))
+			s.thinkingTokens += tokens
 			if s.tty && s.thinkingBudget > 0 {
 				bar := renderBar(s.thinkingTokens, s.thinkingBudget, barWidth)
 				fmt.Fprintf(os.Stderr, "\r%-*s%s thinking...", stageWidth, "", bar)
@@ -227,20 +232,19 @@ func (s *stageStream) callback() inference.StreamFunc {
 			}
 		}
 
-		fmt.Fprint(os.Stderr, delta.Text)
-		s.wroteOutput = true
+		s.textTokens += tokens
+		if s.tty && s.textBudget > 0 {
+			bar := renderBar(s.textTokens, s.textBudget, barWidth)
+			fmt.Fprintf(os.Stderr, "\r%-*s%s writing...", stageWidth, "", bar)
+		}
 	}
 }
 
-// finish prints a trailing newline if any text was streamed, ensuring the
-// subsequent logAfter line starts on a fresh line.
+// finish erases any active progress bar so the next log line starts clean.
 func (s *stageStream) finish() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.wroteOutput {
-		fmt.Fprintln(os.Stderr)
-	} else if s.tty && s.thinkingBudget > 0 {
-		// No text was streamed but we showed a thinking bar — erase it
+	if s.tty && (s.thinkingBudget > 0 || s.textBudget > 0) {
 		fmt.Fprintf(os.Stderr, "\r%s\r", clearLine)
 	}
 }

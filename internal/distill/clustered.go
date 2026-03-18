@@ -211,11 +211,7 @@ func RunClustered(
 		composeInput += fmt.Sprintf(" + %d outliers", len(noiseObs))
 	}
 	logBefore("compose", "%s", composeInput)
-	previousMuse, err := store.GetMuse(ctx)
-	if err != nil && !storage.IsNotFound(err) {
-		return nil, fmt.Errorf("get previous muse: %w", err)
-	}
-	muse, timestamp, composeUsage, err := runCompose(ctx, composeLLM, store, summaries, noiseObs)
+	muse, _, composeUsage, err := runCompose(ctx, composeLLM, store, summaries, noiseObs)
 	if err != nil {
 		return nil, fmt.Errorf("compose: %w", err)
 	}
@@ -232,21 +228,6 @@ func RunClustered(
 		DataSize: composeDataSize,
 	})
 	logAfter("muse.md").cost(time.Since(composeStart), composeUsage).print()
-
-	// ── DIFF ────────────────────────────────────────────────────────────
-	diffStart := time.Now()
-	d, diffUsage, derr := computeDiff(ctx, labelLLM, store, timestamp, previousMuse, muse)
-	if derr != nil {
-		return nil, fmt.Errorf("diff: %w", derr)
-	}
-	totalUsage = totalUsage.Add(diffUsage)
-	stages = append(stages, StageStats{
-		Name:     "diff",
-		Model:    labelLLM.Model(),
-		Duration: time.Since(diffStart),
-		Usage:    diffUsage,
-		DataSize: len(previousMuse) + len(muse),
-	})
 
 	// ── DONE ────────────────────────────────────────────────────────────
 	logStage("done", "%d patterns → muse.md", len(clusters)).
@@ -267,7 +248,6 @@ func RunClustered(
 		Stages: stages,
 		Usage:  totalUsage,
 		Muse:   muse,
-		Diff:   d,
 	}, nil
 }
 
@@ -1488,7 +1468,7 @@ func runCompose(
 		}
 	}
 
-	stream := newStageStream(16000)
+	stream := newStageStream(16000, 4096)
 	muse, usage, err := llm.ConverseStream(ctx, prompts.ComposeClustered, input.String(), stream.callback(), inference.WithThinking(16000))
 	stream.finish()
 	if err != nil {

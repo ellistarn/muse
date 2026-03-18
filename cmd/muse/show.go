@@ -2,10 +2,13 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ellistarn/muse/internal/bedrock"
+	"github.com/ellistarn/muse/internal/distill"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -17,7 +20,8 @@ func newShowCmd() *cobra.Command {
 		Long: `Prints your current muse.md to stdout. If no muse exists yet, prompts
 you to run 'muse distill'.
 
-Use --diff to print the changelog from the latest distill.`,
+Use --diff to print the changelog from the latest distill. If no diff has
+been computed yet, one is generated on the fly and cached for future use.`,
 		Example: `  muse show          # print the muse
   muse show --diff   # print what changed in the latest distill`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -58,13 +62,36 @@ func runShowDiff(cmd *cobra.Command, store storage.Store) error {
 		return nil
 	}
 	latest := muses[len(muses)-1]
+
+	// Try cached diff first.
 	d, err := store.GetMuseDiff(ctx, latest)
-	if err != nil {
-		if storage.IsNotFound(err) {
-			fmt.Fprintln(cmd.OutOrStdout(), "No diff available for the latest version. Re-run 'muse distill' to generate one.")
-			return nil
-		}
+	if err == nil {
+		fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(d))
+		return nil
+	}
+	if !storage.IsNotFound(err) {
 		return fmt.Errorf("failed to load diff: %w", err)
+	}
+
+	// No cached diff — compute it lazily.
+	current, err := store.GetMuseVersion(ctx, latest)
+	if err != nil {
+		return fmt.Errorf("failed to load latest muse: %w", err)
+	}
+
+	var previous string
+	if len(muses) >= 2 {
+		previous, _ = store.GetMuseVersion(ctx, muses[len(muses)-2])
+	}
+
+	fmt.Fprintln(os.Stderr, "Computing diff...")
+	client, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
+	if err != nil {
+		return fmt.Errorf("bedrock client: %w", err)
+	}
+	d, _, err = distill.ComputeDiff(ctx, client, store, latest, previous, current)
+	if err != nil {
+		return fmt.Errorf("compute diff: %w", err)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(d))
 	return nil

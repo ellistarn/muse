@@ -154,8 +154,8 @@ func TestMapReduce_LimitIncludesPreviousObservations(t *testing.T) {
 	if len(store.Observations) != 4 {
 		t.Errorf("observations after second run = %d, want 4", len(store.Observations))
 	}
-	// The learn call (second-to-last, before diff) should contain all 4 observations
-	learnInput := llm.Calls[len(llm.Calls)-2].User
+	// The learn call (last call, now that diff is computed lazily) should contain all 4 observations
+	learnInput := llm.Calls[len(llm.Calls)-1].User
 	separators := strings.Count(learnInput, "---")
 	if separators < 3 {
 		t.Errorf("learn input has %d separators, want at least 3 (all 4 observations)", separators)
