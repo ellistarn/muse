@@ -18,13 +18,13 @@ import (
 // human turns (the minimum for observation extraction).
 func twoConversationStore() *testutil.ConversationStore {
 	store := testutil.NewConversationStore()
-	store.AddConversation("claude-code", "sess-1", time.Now(), []conversation.Message{
+	store.AddConversation("claude-code", "conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "use kebab-case for file names"},
 		{Role: "assistant", Content: "OK, I'll rename them."},
 		{Role: "user", Content: "also use lowercase"},
 		{Role: "assistant", Content: "Done."},
 	})
-	store.AddConversation("claude-code", "sess-2", time.Now(), []conversation.Message{
+	store.AddConversation("claude-code", "conv-2", time.Now(), []conversation.Message{
 		{Role: "user", Content: "never use emojis in commit messages"},
 		{Role: "assistant", Content: "Understood."},
 		{Role: "user", Content: "and keep them short"},
@@ -86,7 +86,7 @@ func TestMapReduce_NoConversations(t *testing.T) {
 func TestMapReduce_Limit(t *testing.T) {
 	store := testutil.NewConversationStore()
 	for i := 0; i < 5; i++ {
-		store.AddConversation("test", fmt.Sprintf("sess-%d", i), time.Now(), []conversation.Message{
+		store.AddConversation("test", fmt.Sprintf("conv-%d", i), time.Now(), []conversation.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -114,7 +114,7 @@ func TestMapReduce_Limit(t *testing.T) {
 func TestMapReduce_LimitIncludesPreviousObservations(t *testing.T) {
 	store := testutil.NewConversationStore()
 	for i := 0; i < 4; i++ {
-		store.AddConversation("test", fmt.Sprintf("sess-%d", i), time.Now(), []conversation.Message{
+		store.AddConversation("test", fmt.Sprintf("conv-%d", i), time.Now(), []conversation.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},
@@ -204,7 +204,7 @@ func TestMapReduce_ObserveError(t *testing.T) {
 
 func TestMapReduce_Reobserve(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.AddConversation("test", "sess-1", time.Now(), []conversation.Message{
+	store.AddConversation("test", "conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: "hi"},
 		{Role: "user", Content: "one more thing"},
@@ -375,7 +375,7 @@ func TestClustered_ObserveError(t *testing.T) {
 func TestClustered_Limit(t *testing.T) {
 	store := testutil.NewConversationStore()
 	for i := 0; i < 5; i++ {
-		store.AddConversation("test", fmt.Sprintf("sess-%d", i), time.Now(), []conversation.Message{
+		store.AddConversation("test", fmt.Sprintf("conv-%d", i), time.Now(), []conversation.Message{
 			{Role: "user", Content: fmt.Sprintf("message %d", i)},
 			{Role: "assistant", Content: "ok"},
 			{Role: "user", Content: "follow up"},

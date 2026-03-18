@@ -189,3 +189,40 @@ func TestParallelProviderLoading_ErrorHandling(t *testing.T) {
 		t.Errorf("expected 2 conversations from good providers, got %d", len(conversations))
 	}
 }
+
+func TestConversation_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		conv    Conversation
+		wantErr bool
+	}{
+		{
+			name:    "valid",
+			conv:    Conversation{ConversationID: "abc", Source: "test"},
+			wantErr: false,
+		},
+		{
+			name:    "missing conversation_id",
+			conv:    Conversation{Source: "test"},
+			wantErr: true,
+		},
+		{
+			name:    "missing source",
+			conv:    Conversation{ConversationID: "abc"},
+			wantErr: true,
+		},
+		{
+			name:    "both missing",
+			conv:    Conversation{},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.conv.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

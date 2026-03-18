@@ -107,6 +107,9 @@ func (c *S3Store) GetConversation(ctx context.Context, src, conversationID strin
 	if err := json.Unmarshal(data, &conv); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal conversation %s: %w", conversationID, err)
 	}
+	if err := conv.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid conversation %s: %w", conversationID, err)
+	}
 	return &conv, nil
 }
 

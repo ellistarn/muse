@@ -41,7 +41,7 @@ func TestRunDistill_PropagatesRunError(t *testing.T) {
 
 func TestRunDistill_PropagatesLearnError(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.Observations["conversations/test/sess-1.json"] = "- observation"
+	store.Observations["conversations/test/conv-1.json"] = "- observation"
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
@@ -56,7 +56,7 @@ func TestRunDistill_PropagatesLearnError(t *testing.T) {
 
 func TestRunDistill_SuccessfulRun(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.AddConversation("test", "sess-1", time.Now(), []conversation.Message{
+	store.AddConversation("test", "conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "use tabs"},
 		{Role: "assistant", Content: "ok"},
 		{Role: "user", Content: "also no emojis"},
@@ -84,7 +84,7 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 
 func TestRunDistill_SuccessfulLearn(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.Observations["conversations/test/sess-1.json"] = "- observation"
+	store.Observations["conversations/test/conv-1.json"] = "- observation"
 	mockLLM := &testutil.MockLLM{
 		LearnResponse: "## Test\n\nContent.",
 	}

@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -37,6 +38,19 @@ type Conversation struct {
 	ParentID       string    `json:"parent_id,omitempty"`
 	SubagentIDs    []string  `json:"subagent_ids,omitempty"`
 	Messages       []Message `json:"messages"`
+}
+
+// Validate checks that required fields are present. This catches silent
+// deserialization failures (e.g. renamed JSON tags, corrupt data) that would
+// otherwise propagate empty strings through the system.
+func (c *Conversation) Validate() error {
+	if c.ConversationID == "" {
+		return fmt.Errorf("conversation missing required field: conversation_id")
+	}
+	if c.Source == "" {
+		return fmt.Errorf("conversation %s missing required field: source", c.ConversationID)
+	}
+	return nil
 }
 
 type Message struct {

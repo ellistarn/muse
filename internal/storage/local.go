@@ -112,6 +112,9 @@ func (l *LocalStore) GetConversation(_ context.Context, src, conversationID stri
 	if err := json.Unmarshal(data, &conv); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal conversation %s: %w", conversationID, err)
 	}
+	if err := conv.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid conversation %s: %w", conversationID, err)
+	}
 	return &conv, nil
 }
 
