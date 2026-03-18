@@ -183,7 +183,7 @@ func renderBar(n, total, width int) string {
 
 // ── Stage stream ────────────────────────────────────────────────────────
 
-// stageStream renders streaming LLM output for a single-call stage like merge
+// stageStream renders streaming LLM output for a single-call stage like compose
 // or diff. During thinking, it shows a progress bar against the token budget.
 // Once text tokens arrive, it streams the actual output to stderr.
 type stageStream struct {

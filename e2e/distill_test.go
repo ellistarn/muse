@@ -289,12 +289,12 @@ func TestClustered_EndToEnd(t *testing.T) {
 	if len(obsList) == 0 {
 		t.Error("expected observation artifacts")
 	}
-	clsList, err := artifacts.ListClassifications()
+	clsList, err := artifacts.ListLabels()
 	if err != nil {
-		t.Fatalf("ListClassifications: %v", err)
+		t.Fatalf("ListLabels: %v", err)
 	}
 	if len(clsList) == 0 {
-		t.Error("expected classification artifacts")
+		t.Error("expected label artifacts")
 	}
 }
 
@@ -450,10 +450,10 @@ func (m *clusterMockLLM) Converse(_ context.Context, system, user string, _ ...i
 	if m.failOnExtract && strings.Contains(system, "Extract observations") {
 		return "", inference.Usage{}, fmt.Errorf("simulated extract failure")
 	}
-	if strings.Contains(system, "Classify each") {
+	if strings.Contains(system, "Label each") {
 		return "explicit patterns over implicit conventions", usage, nil
 	}
-	if strings.Contains(system, "Synthesize these") {
+	if strings.Contains(system, "Summarize these") {
 		return "I prefer explicit, clear patterns in code.", usage, nil
 	}
 	if strings.Contains(system, "producing muse.md") {

@@ -12,16 +12,22 @@ type Observations struct {
 	Items       []string `json:"items"`
 }
 
-// Classification pairs an observation with its pattern classification.
-type Classification struct {
-	Observation    string `json:"observation"`
-	Classification string `json:"classification"`
+// Label pairs an observation with its pattern label.
+type Label struct {
+	Observation string `json:"observation"`
+	Label       string `json:"label"`
 }
 
-// Classifications stores per-observation classifications for a conversation.
-type Classifications struct {
-	Fingerprint string           `json:"fingerprint"`
-	Items       []Classification `json:"items"`
+// Labels stores per-observation labels for a conversation.
+type Labels struct {
+	Fingerprint string  `json:"fingerprint"`
+	Items       []Label `json:"items"`
+}
+
+// Normalization stores the canonical label mapping produced by the normalize step.
+type Normalization struct {
+	Fingerprint string            `json:"fingerprint"`
+	Mapping     map[string]string `json:"mapping"` // original → canonical
 }
 
 // Fingerprint computes a hex SHA-256 hash of the given inputs concatenated

@@ -19,7 +19,7 @@ import (
 
 func newDistillCmd() *cobra.Command {
 	var reobserve bool
-	var reclassify bool
+	var relabel bool
 	var learn bool
 	var limit int
 	var method string
@@ -33,9 +33,9 @@ muse is always re-distilled.
 
 Two distillation methods are available:
 
-  clustering (default) — classifies observations, groups by label convergence,
-  synthesizes per-cluster, then merges into muse.md. Produces thematically
-  coherent output.
+  clustering (default) — labels observations, normalizes synonyms, groups by
+  label match, summarizes per-cluster, then composes muse.md. Produces
+  thematically coherent output.
 
   map-reduce — observe maps each conversation into observations, then learn
   reduces all observations into a single muse.md. Simpler, sufficient for
@@ -53,7 +53,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
   muse distill kiro --reobserve         # re-observe kiro from scratch
   muse distill --learn                  # re-distill muse from existing observations
   muse distill --limit 50              # process at most 50 conversations
-  muse distill --reclassify             # force re-classify all observations`,
+  muse distill --relabel                 # force re-label all observations`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			sources := args
@@ -84,7 +84,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 
 			switch method {
 			case "clustering":
-				return runClusteredDistill(ctx, cmd.OutOrStdout(), store, sources, reobserve, reclassify, limit, uploaded, uploadBytes)
+				return runClusteredDistill(ctx, cmd.OutOrStdout(), store, sources, reobserve, relabel, limit, uploaded, uploadBytes)
 			case "map-reduce":
 				return runMapReduceDistill(ctx, cmd.OutOrStdout(), store, sources, reobserve, learn, limit)
 			default:
@@ -93,14 +93,14 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 		},
 	}
 	cmd.Flags().BoolVar(&reobserve, "reobserve", false, "re-observe all conversations from scratch")
-	cmd.Flags().BoolVar(&reclassify, "reclassify", false, "force re-classify all observations")
+	cmd.Flags().BoolVar(&relabel, "relabel", false, "force re-label all observations")
 	cmd.Flags().BoolVar(&learn, "learn", false, "skip observe, re-distill muse from existing observations (map-reduce only)")
 	cmd.Flags().IntVar(&limit, "limit", 100, "max conversations to process (0 = no limit)")
 	cmd.Flags().StringVar(&method, "method", "clustering", "distillation method: clustering or map-reduce")
 	return cmd
 }
 
-func runClusteredDistill(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, reclassify bool, limit, uploaded, uploadBytes int) error {
+func runClusteredDistill(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, relabel bool, limit, uploaded, uploadBytes int) error {
 	sonnet, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 	if err != nil {
 		return fmt.Errorf("sonnet client: %w", err)
@@ -115,12 +115,12 @@ func runClusteredDistill(ctx context.Context, stdout io.Writer, store storage.St
 
 	result, err := distill.RunClustered(ctx, store,
 		sonnet, // observe
-		sonnet, // classify
-		sonnet, // synthesize
-		opus,   // merge — editorial judgment where Opus earns its keep
+		sonnet, // label
+		sonnet, // summarize
+		opus,   // compose — editorial judgment where Opus earns its keep
 		distill.ClusteredOptions{
 			Reobserve:   reobserve,
-			Reclassify:  reclassify,
+			Relabel:     relabel,
 			Limit:       limit,
 			Sources:     sources,
 			ArtifactDir: artifactDir,

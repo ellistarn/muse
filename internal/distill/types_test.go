@@ -84,25 +84,25 @@ func TestArtifactStoreObservations(t *testing.T) {
 	}
 }
 
-func TestArtifactStoreClassifications(t *testing.T) {
+func TestArtifactStoreLabels(t *testing.T) {
 	root := t.TempDir()
 	store := NewArtifactStore(root)
 
-	cls := &Classifications{
+	lbl := &Labels{
 		Fingerprint: "def456",
-		Items: []Classification{
-			{Observation: "obs1", Classification: "pattern of X"},
-			{Observation: "obs2", Classification: "pattern of Y"},
+		Items: []Label{
+			{Observation: "obs1", Label: "pattern of X"},
+			{Observation: "obs2", Label: "pattern of Y"},
 		},
 	}
 
-	if err := store.PutClassifications("kiro", "ses_002", cls); err != nil {
-		t.Fatalf("PutClassifications: %v", err)
+	if err := store.PutLabels("kiro", "ses_002", lbl); err != nil {
+		t.Fatalf("PutLabels: %v", err)
 	}
 
-	got, err := store.GetClassifications("kiro", "ses_002")
+	got, err := store.GetLabels("kiro", "ses_002")
 	if err != nil {
-		t.Fatalf("GetClassifications: %v", err)
+		t.Fatalf("GetLabels: %v", err)
 	}
 	if got.Fingerprint != "def456" {
 		t.Errorf("fingerprint: got %q, want %q", got.Fingerprint, "def456")
@@ -133,7 +133,7 @@ func TestArtifactStoreDelete(t *testing.T) {
 	// Create some artifacts
 	store.PutObservations("src1", "s1", &Observations{Items: []string{"a"}})
 	store.PutObservations("src2", "s2", &Observations{Items: []string{"b"}})
-	store.PutClassifications("src1", "s1", &Classifications{Items: []Classification{{Observation: "a", Classification: "x"}}})
+	store.PutLabels("src1", "s1", &Labels{Items: []Label{{Observation: "a", Label: "x"}}})
 
 	// Delete observations for one source
 	if err := store.DeleteObservationsForSource("src1"); err != nil {
@@ -146,10 +146,10 @@ func TestArtifactStoreDelete(t *testing.T) {
 		t.Errorf("expected only src2: %+v", list)
 	}
 
-	// Classifications untouched
-	clsList, _ := store.ListClassifications()
-	if len(clsList) != 1 {
-		t.Errorf("expected 1 classification, got %d", len(clsList))
+	// Labels untouched
+	lblList, _ := store.ListLabels()
+	if len(lblList) != 1 {
+		t.Errorf("expected 1 label, got %d", len(lblList))
 	}
 
 	// Delete all observations

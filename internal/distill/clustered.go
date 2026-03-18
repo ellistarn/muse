@@ -24,7 +24,7 @@ const minClusterSize = 3
 // ClusteredOptions configures a clustered distill run.
 type ClusteredOptions struct {
 	Reobserve   bool
-	Reclassify  bool
+	Relabel     bool
 	Limit       int
 	Sources     []string
 	ArtifactDir string // root for artifact storage (e.g. ~/.muse)
@@ -36,16 +36,14 @@ type ClusteredOptions struct {
 }
 
 // RunClustered executes the full clustering distillation pipeline:
-// observe → classify → group → sample → synthesize → merge → diff.
+// observe → label → normalize → group → sample → summarize → compose → diff.
 //
-// Grouping is by exact label match — label convergence in the classifier
+// Grouping is by exact label match — shared label vocabulary plus normalization
 // produces a shared vocabulary, making embedding-based clustering unnecessary.
-// See https://github.com/ellistarn/muse/issues/81 for the known cache
-// correctness gap in classification fingerprinting.
 func RunClustered(
 	ctx context.Context,
 	store storage.Store,
-	observeLLM, classifyLLM, synthesizeLLM, mergeLLM LLM,
+	observeLLM, labelLLM, summarizeLLM, composeLLM LLM,
 	opts ClusteredOptions,
 ) (*Result, error) {
 	artifacts := NewArtifactStore(opts.ArtifactDir)
@@ -98,39 +96,55 @@ func RunClustered(
 
 	obsDataSize := observationBytes(allObs)
 
-	// ── CLASSIFY ────────────────────────────────────────────────────────
-	var classifyCounter atomic.Int32
-	classifyStart := time.Now()
+	// ── LABEL ──────────────────────────────────────────────────────────
+	var labelCounter atomic.Int32
+	labelStart := time.Now()
 	// Count sessions for progress total
-	classifySessions := map[string]bool{}
+	labelSessions := map[string]bool{}
 	for _, obs := range allObs {
-		classifySessions[obs.Source+"/"+obs.SessionID] = true
+		labelSessions[obs.Source+"/"+obs.SessionID] = true
 	}
-	classifyTotal := len(classifySessions)
-	classifyBeforeNote := ""
-	if classifyTotal > 0 {
-		classifyBeforeNote = fmt.Sprintf(" (%d sessions)", classifyTotal)
+	labelTotal := len(labelSessions)
+	labelBeforeNote := ""
+	if labelTotal > 0 {
+		labelBeforeNote = fmt.Sprintf(" (%d sessions)", labelTotal)
 	}
-	logBefore("label", "%d observations%s", len(allObs), classifyBeforeNote)
-	prog := startProgress(classifyTotal, &classifyCounter)
-	classifyUsage, classifyCache, numLabels, err := runClassify(ctx, artifacts, classifyLLM, allObs, opts.Reclassify, opts.Verbose, &classifyCounter)
+	logBefore("label", "%d observations%s", len(allObs), labelBeforeNote)
+	prog := startProgress(labelTotal, &labelCounter)
+	labelUsage, labelCache, numLabels, err := runLabel(ctx, artifacts, labelLLM, allObs, opts.Relabel, opts.Verbose, &labelCounter)
 	prog.stop()
 	if err != nil {
-		return nil, fmt.Errorf("classify: %w", err)
+		return nil, fmt.Errorf("label: %w", err)
 	}
-	totalUsage = totalUsage.Add(classifyUsage)
+	totalUsage = totalUsage.Add(labelUsage)
 	stages = append(stages, StageStats{
-		Name:     "classify",
-		Model:    classifyLLM.Model(),
-		Duration: time.Since(classifyStart),
-		Usage:    classifyUsage,
+		Name:     "label",
+		Model:    labelLLM.Model(),
+		Duration: time.Since(labelStart),
+		Usage:    labelUsage,
 		DataSize: obsDataSize,
 	})
-	classifyNote := ""
-	if classifyCache.Hit > 0 {
-		classifyNote = fmt.Sprintf(" [%d sessions cached]", classifyCache.Hit)
+	labelNote := ""
+	if labelCache.Hit > 0 {
+		labelNote = fmt.Sprintf(" [%d sessions cached]", labelCache.Hit)
 	}
-	logAfter("%d labels%s", numLabels, classifyNote).cost(time.Since(classifyStart), classifyUsage).print()
+	logAfter("%d labels%s", numLabels, labelNote).cost(time.Since(labelStart), labelUsage).print()
+
+	// ── NORMALIZE ──────────────────────────────────────────────────────
+	normalizeStart := time.Now()
+	logBefore("normalize", "%d labels", numLabels)
+	normalizeUsage, err := runNormalize(ctx, artifacts, labelLLM, opts.Verbose)
+	if err != nil {
+		return nil, fmt.Errorf("normalize: %w", err)
+	}
+	totalUsage = totalUsage.Add(normalizeUsage)
+	stages = append(stages, StageStats{
+		Name:     "normalize",
+		Model:    labelLLM.Model(),
+		Duration: time.Since(normalizeStart),
+		Usage:    normalizeUsage,
+	})
+	logAfter("normalized").cost(time.Since(normalizeStart), normalizeUsage).print()
 
 	// ── GROUP ───────────────────────────────────────────────────────────
 	groupStart := time.Now()
@@ -171,15 +185,15 @@ func RunClustered(
 	logStage("sample", "%d clusters → %d observations sampled",
 		len(samples), totalSampled).print()
 
-	// ── SYNTHESIZE ──────────────────────────────────────────────────────
+	// ── SUMMARIZE ──────────────────────────────────────────────────────
 	var synthCounter atomic.Int32
 	synthStart := time.Now()
 	logBefore("summarize", "%d clusters", len(samples))
 	prog = startProgress(len(samples), &synthCounter)
-	summaries, synthUsage, err := runSynthesize(ctx, synthesizeLLM, samples, &synthCounter)
+	summaries, synthUsage, err := runSummarize(ctx, summarizeLLM, samples, &synthCounter)
 	prog.stop()
 	if err != nil {
-		return nil, fmt.Errorf("synthesize: %w", err)
+		return nil, fmt.Errorf("summarize: %w", err)
 	}
 	totalUsage = totalUsage.Add(synthUsage)
 	synthDataSize := 0
@@ -188,52 +202,52 @@ func RunClustered(
 	}
 	stages = append(stages, StageStats{
 		Name:     "summarize",
-		Model:    synthesizeLLM.Model(),
+		Model:    summarizeLLM.Model(),
 		Duration: time.Since(synthStart),
 		Usage:    synthUsage,
 		DataSize: sampleDataSize,
 	})
 	logAfter("%d summaries", len(summaries)).cost(time.Since(synthStart), synthUsage).print()
 
-	// ── MERGE ───────────────────────────────────────────────────────────
-	mergeStart := time.Now()
-	mergeInput := fmt.Sprintf("%d summaries", len(summaries))
+	// ── COMPOSE ────────────────────────────────────────────────────────
+	composeStart := time.Now()
+	composeInput := fmt.Sprintf("%d summaries", len(summaries))
 	if len(noiseObs) > 0 {
-		mergeInput += fmt.Sprintf(" + %d outliers", len(noiseObs))
+		composeInput += fmt.Sprintf(" + %d outliers", len(noiseObs))
 	}
-	logBefore("merge", "%s", mergeInput)
+	logBefore("compose", "%s", composeInput)
 	previousMuse, err := store.GetMuse(ctx)
 	if err != nil && !storage.IsNotFound(err) {
 		return nil, fmt.Errorf("get previous muse: %w", err)
 	}
-	muse, timestamp, mergeUsage, err := runMerge(ctx, mergeLLM, store, summaries, noiseObs)
+	muse, timestamp, composeUsage, err := runCompose(ctx, composeLLM, store, summaries, noiseObs)
 	if err != nil {
-		return nil, fmt.Errorf("merge: %w", err)
+		return nil, fmt.Errorf("compose: %w", err)
 	}
-	totalUsage = totalUsage.Add(mergeUsage)
-	mergeDataSize := synthDataSize
+	totalUsage = totalUsage.Add(composeUsage)
+	composeDataSize := synthDataSize
 	for _, obs := range noiseObs {
-		mergeDataSize += len(obs)
+		composeDataSize += len(obs)
 	}
 	stages = append(stages, StageStats{
-		Name:     "merge",
-		Model:    mergeLLM.Model(),
-		Duration: time.Since(mergeStart),
-		Usage:    mergeUsage,
-		DataSize: mergeDataSize,
+		Name:     "compose",
+		Model:    composeLLM.Model(),
+		Duration: time.Since(composeStart),
+		Usage:    composeUsage,
+		DataSize: composeDataSize,
 	})
-	logAfter("muse.md").cost(time.Since(mergeStart), mergeUsage).print()
+	logAfter("muse.md").cost(time.Since(composeStart), composeUsage).print()
 
 	// ── DIFF ────────────────────────────────────────────────────────────
 	diffStart := time.Now()
-	d, diffUsage, derr := computeDiff(ctx, classifyLLM, store, timestamp, previousMuse, muse)
+	d, diffUsage, derr := computeDiff(ctx, labelLLM, store, timestamp, previousMuse, muse)
 	if derr != nil {
 		return nil, fmt.Errorf("diff: %w", derr)
 	}
 	totalUsage = totalUsage.Add(diffUsage)
 	stages = append(stages, StageStats{
 		Name:     "diff",
-		Model:    classifyLLM.Model(),
+		Model:    labelLLM.Model(),
 		Duration: time.Since(diffStart),
 		Usage:    diffUsage,
 		DataSize: len(previousMuse) + len(muse),
@@ -252,8 +266,8 @@ func RunClustered(
 		Clusters:     len(clusters),
 		Noise:        len(noiseObs),
 		Cache: CacheStats{
-			Observe:  HitMiss{Hit: observeResult.pruned, Miss: observeResult.processed},
-			Classify: classifyCache,
+			Observe: HitMiss{Hit: observeResult.pruned, Miss: observeResult.processed},
+			Label:   labelCache,
 		},
 		Stages: stages,
 		Usage:  totalUsage,
@@ -353,11 +367,7 @@ func runObserve(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		session, err := store.GetSession(ctx, e.Source, e.SessionID)
-		if err != nil {
-			return nil, fmt.Errorf("get session %s/%s: %w", e.Source, e.SessionID, err)
-		}
-		fp := Fingerprint(session.UpdatedAt.Format(time.RFC3339Nano), promptHash)
+		fp := Fingerprint(e.LastModified.Format(time.RFC3339Nano), promptHash)
 
 		existing, err := artifacts.GetObservations(e.Source, e.SessionID)
 		if err == nil && existing.Fingerprint == fp {
@@ -468,20 +478,6 @@ func runObserve(
 					}
 					mu.Unlock()
 					return
-				}
-
-				// Also persist as legacy observation for map-reduce compatibility
-				if len(items) > 0 {
-					legacy := strings.Join(items, "\n\n")
-					if err := store.PutObservation(ctx, entry.Key, legacy); err != nil {
-						mu.Lock()
-						if firstErr == nil {
-							firstErr = fmt.Errorf("save legacy observation for %s: %w", entry.Key, err)
-							cancelOnErr()
-						}
-						mu.Unlock()
-						return
-					}
 				}
 
 				if opts.Verbose {
@@ -817,34 +813,61 @@ type observationEntry struct {
 }
 
 // loadAllStructuredObservations loads all observation artifacts and returns
-// a flat list of observation entries.
+// a flat list of observation entries, loading sessions in parallel.
 func loadAllStructuredObservations(artifacts *ArtifactStore) ([]observationEntry, error) {
 	sessions, err := artifacts.ListObservations()
 	if err != nil {
 		return nil, err
 	}
+
+	type result struct {
+		entries []observationEntry
+		err     error
+	}
+	results := make([]result, len(sessions))
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 20)
+	for i, ss := range sessions {
+		wg.Add(1)
+		go func(i int, ss SourceSession) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			obs, err := artifacts.GetObservations(ss.Source, ss.SessionID)
+			if err != nil {
+				results[i] = result{err: fmt.Errorf("get observations %s/%s: %w", ss.Source, ss.SessionID, err)}
+				return
+			}
+			var entries []observationEntry
+			for j, item := range obs.Items {
+				entries = append(entries, observationEntry{
+					Source:    ss.Source,
+					SessionID: ss.SessionID,
+					Index:     j,
+					Text:      item,
+				})
+			}
+			results[i] = result{entries: entries}
+		}(i, ss)
+	}
+	wg.Wait()
+
 	var all []observationEntry
-	for _, ss := range sessions {
-		obs, err := artifacts.GetObservations(ss.Source, ss.SessionID)
-		if err != nil {
-			return nil, fmt.Errorf("get observations %s/%s: %w", ss.Source, ss.SessionID, err)
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		for i, item := range obs.Items {
-			all = append(all, observationEntry{
-				Source:    ss.Source,
-				SessionID: ss.SessionID,
-				Index:     i,
-				Text:      item,
-			})
-		}
+		all = append(all, r.entries...)
 	}
 	return all, nil
 }
 
-// ── CLASSIFY ────────────────────────────────────────────────────────────
+// ── LABEL ───────────────────────────────────────────────────────────────
 
-// labelSet tracks assigned classification labels across parallel goroutines.
-// It provides the existing label vocabulary to each classify call so the LLM
+// labelSet tracks assigned labels across parallel goroutines.
+// It provides the existing label vocabulary to each label call so the LLM
 // converges on reusing labels instead of paraphrasing.
 type labelSet struct {
 	mu     sync.Mutex
@@ -880,14 +903,14 @@ func (ls *labelSet) list() []string {
 	return result
 }
 
-// buildClassifyPrompt constructs the classify system prompt, injecting existing
+// buildLabelPrompt constructs the label system prompt, injecting existing
 // labels when available so the LLM converges on a shared vocabulary.
-func buildClassifyPrompt(existingLabels []string) string {
+func buildLabelPrompt(existingLabels []string) string {
 	if len(existingLabels) == 0 {
-		return prompts.Classify
+		return prompts.Label
 	}
 	var b strings.Builder
-	b.WriteString(prompts.Classify)
+	b.WriteString(prompts.Label)
 	b.WriteString("\n\nExisting labels already assigned to other observations (reuse one if it fits; only create a new label when none of these match):\n")
 	for _, l := range existingLabels {
 		b.WriteString("- ")
@@ -897,11 +920,11 @@ func buildClassifyPrompt(existingLabels []string) string {
 	return b.String()
 }
 
-// classifyBatchSize is how many observations to send per LLM call.
-const classifyBatchSize = 10
+// labelBatchSize is how many observations to send per LLM call.
+const labelBatchSize = 10
 
-// buildClassifyInput formats a numbered list of observations for batch classify.
-func buildClassifyInput(observations []string) string {
+// buildLabelInput formats a numbered list of observations for batch labeling.
+func buildLabelInput(observations []string) string {
 	var b strings.Builder
 	for i, obs := range observations {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, obs)
@@ -909,9 +932,9 @@ func buildClassifyInput(observations []string) string {
 	return b.String()
 }
 
-// parseClassifyResponse parses numbered labels from the LLM response.
+// parseLabelResponse parses numbered labels from the LLM response.
 // Returns labels aligned to input indices. Missing/unparseable lines get "".
-func parseClassifyResponse(resp string, count int) []string {
+func parseLabelResponse(resp string, count int) []string {
 	labels := make([]string, count)
 	for _, line := range strings.Split(resp, "\n") {
 		line = strings.TrimSpace(line)
@@ -935,39 +958,38 @@ func parseClassifyResponse(resp string, count int) []string {
 	return labels
 }
 
-// runClassify classifies observations using batched LLM calls.
-// Sessions are processed sequentially so each batch sees all prior labels,
-// ensuring convergence. Within each session, observations are sent in batches
-// of classifyBatchSize.
-func runClassify(
+// runLabel labels observations using batched LLM calls.
+// Sessions are processed in parallel with a shared label vocabulary.
+// A normalization step downstream merges synonymous labels.
+func runLabel(
 	ctx context.Context,
 	artifacts *ArtifactStore,
 	llm LLM,
 	allObs []observationEntry,
-	forceReclassify bool,
+	forceRelabel bool,
 	verbose bool,
 	counter *atomic.Int32,
 ) (inference.Usage, HitMiss, int, error) {
-	if forceReclassify {
-		artifacts.DeleteClassifications()
+	if forceRelabel {
+		artifacts.DeleteLabels()
 	}
 
-	classifyPromptHash := Fingerprint(prompts.Classify)
+	labelPromptHash := Fingerprint(prompts.Label)
 
-	// Seed the label set from cached classifications
+	// Seed the label set from cached labels
 	labels := newLabelSet()
-	existingCls, err := artifacts.ListClassifications()
+	existingLabels, err := artifacts.ListLabels()
 	if err != nil {
-		return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("list classifications: %w", err)
+		return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("list labels: %w", err)
 	}
-	for _, ss := range existingCls {
-		cls, err := artifacts.GetClassifications(ss.Source, ss.SessionID)
+	for _, ss := range existingLabels {
+		lbl, err := artifacts.GetLabels(ss.Source, ss.SessionID)
 		if err != nil {
-			return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("get classifications %s/%s: %w", ss.Source, ss.SessionID, err)
+			return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("get labels %s/%s: %w", ss.Source, ss.SessionID, err)
 		}
-		for _, item := range cls.Items {
-			if item.Classification != "" {
-				labels.add(item.Classification)
+		for _, item := range lbl.Items {
+			if item.Label != "" {
+				labels.add(item.Label)
 			}
 		}
 	}
@@ -980,93 +1002,272 @@ func runClassify(
 		groups[key] = append(groups[key], obs)
 	}
 
+	var mu sync.Mutex
 	var totalUsage inference.Usage
+	var firstErr error
 	var hits, misses atomic.Int32
 	total := len(groups)
 
-	// Process sessions sequentially for label convergence.
-	for key, entries := range groups {
-		if err := ctx.Err(); err != nil {
-			return inference.Usage{}, HitMiss{}, 0, err
-		}
-		// Check cache
-		var obsTexts []string
-		for _, e := range entries {
-			obsTexts = append(obsTexts, e.Text)
-		}
-		fp := Fingerprint(append(obsTexts, classifyPromptHash)...)
+	errCtx, cancelOnErr := context.WithCancel(ctx)
+	defer cancelOnErr()
 
-		existing, err := artifacts.GetClassifications(key.source, key.sessionID)
-		if err == nil && existing.Fingerprint == fp {
-			hits.Add(1)
-			for _, item := range existing.Items {
-				if item.Classification != "" {
-					labels.add(item.Classification)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 50)
+
+	for key, entries := range groups {
+		wg.Add(1)
+		go func(key sessionKey, entries []observationEntry) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			if errCtx.Err() != nil {
+				counter.Add(1)
+				return
+			}
+
+			// Check cache
+			var obsTexts []string
+			for _, e := range entries {
+				obsTexts = append(obsTexts, e.Text)
+			}
+			fp := Fingerprint(append(obsTexts, labelPromptHash)...)
+
+			existing, err := artifacts.GetLabels(key.source, key.sessionID)
+			if err == nil && existing.Fingerprint == fp {
+				hits.Add(1)
+				for _, item := range existing.Items {
+					if item.Label != "" {
+						labels.add(item.Label)
+					}
+				}
+				n := counter.Add(1)
+				if verbose {
+					fmt.Fprintf(os.Stderr, "  [%d/%d] Cached labels for %s/%s\n", n, total, key.source, key.sessionID)
+				}
+				return
+			}
+			misses.Add(1)
+
+			// Batch label: send up to labelBatchSize observations per call
+			var items []Label
+			var usage inference.Usage
+			for i := 0; i < len(entries); i += labelBatchSize {
+				end := i + labelBatchSize
+				if end > len(entries) {
+					end = len(entries)
+				}
+				batch := entries[i:end]
+
+				var batchTexts []string
+				for _, e := range batch {
+					batchTexts = append(batchTexts, e.Text)
+				}
+
+				prompt := buildLabelPrompt(labels.list())
+				input := buildLabelInput(batchTexts)
+				resp, u, err := llm.Converse(errCtx, prompt, input, inference.WithMaxTokens(1024))
+				usage = usage.Add(u)
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("label batch for %s/%s: %w", key.source, key.sessionID, err)
+						cancelOnErr()
+					}
+					mu.Unlock()
+					return
+				}
+
+				batchLabels := parseLabelResponse(resp, len(batch))
+				for j, e := range batch {
+					lbl := batchLabels[j]
+					if lbl == "" {
+						lbl = "uncategorized"
+					}
+					items = append(items, Label{
+						Observation: e.Text,
+						Label:       lbl,
+					})
+					labels.add(lbl)
 				}
 			}
+
+			lblResult := &Labels{
+				Fingerprint: fp,
+				Items:       items,
+			}
+			if err := artifacts.PutLabels(key.source, key.sessionID, lblResult); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("save labels for %s/%s: %w", key.source, key.sessionID, err)
+					cancelOnErr()
+				}
+				mu.Unlock()
+				return
+			}
+
 			n := counter.Add(1)
 			if verbose {
-				fmt.Fprintf(os.Stderr, "  [%d/%d] Cached classifications for %s/%s\n", n, total, key.source, key.sessionID)
-			}
-			continue
-		}
-		misses.Add(1)
-
-		// Batch classify: send up to classifyBatchSize observations per call
-		var items []Classification
-		var usage inference.Usage
-		for i := 0; i < len(entries); i += classifyBatchSize {
-			end := i + classifyBatchSize
-			if end > len(entries) {
-				end = len(entries)
-			}
-			batch := entries[i:end]
-
-			var batchTexts []string
-			for _, e := range batch {
-				batchTexts = append(batchTexts, e.Text)
+				fmt.Fprintf(os.Stderr, "  [%d/%d] Labeled %s/%s (%d items, $%.4f)\n",
+					n, total, key.source, key.sessionID, len(items), usage.Cost())
 			}
 
-			prompt := buildClassifyPrompt(labels.list())
-			input := buildClassifyInput(batchTexts)
-			resp, u, err := llm.Converse(ctx, prompt, input, inference.WithMaxTokens(1024))
-			usage = usage.Add(u)
-			if err != nil {
-				return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("classify batch for %s/%s: %w", key.source, key.sessionID, err)
-			}
+			mu.Lock()
+			totalUsage = totalUsage.Add(usage)
+			mu.Unlock()
+		}(key, entries)
+	}
+	wg.Wait()
 
-			batchLabels := parseClassifyResponse(resp, len(batch))
-			for j, e := range batch {
-				cls := batchLabels[j]
-				if cls == "" {
-					cls = "uncategorized"
-				}
-				items = append(items, Classification{
-					Observation:    e.Text,
-					Classification: cls,
-				})
-				labels.add(cls)
-			}
-		}
-
-		clsResult := &Classifications{
-			Fingerprint: fp,
-			Items:       items,
-		}
-		if err := artifacts.PutClassifications(key.source, key.sessionID, clsResult); err != nil {
-			return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("save classifications for %s/%s: %w", key.source, key.sessionID, err)
-		}
-
-		n := counter.Add(1)
-		if verbose {
-			fmt.Fprintf(os.Stderr, "  [%d/%d] Classified %s/%s (%d items, $%.4f)\n",
-				n, total, key.source, key.sessionID, len(items), usage.Cost())
-		}
-
-		totalUsage = totalUsage.Add(usage)
+	if firstErr != nil {
+		return inference.Usage{}, HitMiss{}, 0, firstErr
 	}
 
 	return totalUsage, HitMiss{Hit: int(hits.Load()), Miss: int(misses.Load())}, len(labels.list()), nil
+}
+
+// ── NORMALIZE ───────────────────────────────────────────────────────────
+
+// runNormalize merges synonymous labels via a single LLM call.
+// The mapping is cached by label vocabulary hash — it only reruns when
+// the set of labels changes.
+func runNormalize(
+	ctx context.Context,
+	artifacts *ArtifactStore,
+	llm LLM,
+	verbose bool,
+) (inference.Usage, error) {
+	// Collect all unique labels
+	sessions, err := artifacts.ListLabels()
+	if err != nil {
+		return inference.Usage{}, fmt.Errorf("list labels: %w", err)
+	}
+
+	uniqueLabels := map[string]bool{}
+	for _, ss := range sessions {
+		lbl, err := artifacts.GetLabels(ss.Source, ss.SessionID)
+		if err != nil {
+			return inference.Usage{}, fmt.Errorf("get labels %s/%s: %w", ss.Source, ss.SessionID, err)
+		}
+		for _, item := range lbl.Items {
+			if item.Label != "" {
+				uniqueLabels[item.Label] = true
+			}
+		}
+	}
+
+	if len(uniqueLabels) == 0 {
+		return inference.Usage{}, nil
+	}
+
+	// Sort labels for deterministic fingerprinting
+	sorted := make([]string, 0, len(uniqueLabels))
+	for l := range uniqueLabels {
+		sorted = append(sorted, l)
+	}
+	sort.Strings(sorted)
+
+	fp := Fingerprint(append(sorted, Fingerprint(prompts.Normalize))...)
+
+	// Check cache
+	existing, err := artifacts.GetNormalization()
+	if err == nil && existing.Fingerprint == fp {
+		// Cache hit — still need to apply mapping to ensure consistency
+		if len(existing.Mapping) > 0 {
+			applyNormalization(artifacts, sessions, existing.Mapping)
+		}
+		return inference.Usage{}, nil
+	}
+
+	// Build input: one label per line
+	var input strings.Builder
+	for _, l := range sorted {
+		input.WriteString("- ")
+		input.WriteString(l)
+		input.WriteString("\n")
+	}
+
+	resp, usage, err := llm.Converse(ctx, prompts.Normalize, input.String(), inference.WithMaxTokens(4096))
+	if err != nil {
+		return usage, fmt.Errorf("normalize: %w", err)
+	}
+
+	// Parse "original → canonical" lines
+	mapping := parseNormalizationResponse(resp)
+
+	if verbose && len(mapping) > 0 {
+		fmt.Fprintf(os.Stderr, "  Normalized %d labels:\n", len(mapping))
+		for from, to := range mapping {
+			fmt.Fprintf(os.Stderr, "    %s → %s\n", from, to)
+		}
+	}
+
+	// Save normalization mapping
+	norm := &Normalization{
+		Fingerprint: fp,
+		Mapping:     mapping,
+	}
+	if err := artifacts.PutNormalization(norm); err != nil {
+		return usage, fmt.Errorf("save normalization: %w", err)
+	}
+
+	// Apply mapping to label artifacts
+	if len(mapping) > 0 {
+		applyNormalization(artifacts, sessions, mapping)
+	}
+
+	return usage, nil
+}
+
+// parseNormalizationResponse parses "original → canonical" lines from the LLM response.
+func parseNormalizationResponse(resp string) map[string]string {
+	mapping := map[string]string{}
+	for _, line := range strings.Split(resp, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Strip leading "- " bullet if present
+		line = strings.TrimPrefix(line, "- ")
+
+		// Try unicode arrow first, then ASCII
+		parts := strings.SplitN(line, "→", 2)
+		if len(parts) != 2 {
+			parts = strings.SplitN(line, "->", 2)
+		}
+		if len(parts) != 2 {
+			continue
+		}
+		from := strings.TrimSpace(parts[0])
+		to := strings.TrimSpace(parts[1])
+		// Strip surrounding quotes
+		from = strings.Trim(from, "\"'")
+		to = strings.Trim(to, "\"'")
+		if from != "" && to != "" && from != to {
+			mapping[from] = to
+		}
+	}
+	return mapping
+}
+
+// applyNormalization rewrites label artifacts, replacing labels according to the mapping.
+func applyNormalization(artifacts *ArtifactStore, sessions []SourceSession, mapping map[string]string) {
+	for _, ss := range sessions {
+		lbl, err := artifacts.GetLabels(ss.Source, ss.SessionID)
+		if err != nil {
+			continue
+		}
+		changed := false
+		for i, item := range lbl.Items {
+			if canonical, ok := mapping[item.Label]; ok {
+				lbl.Items[i].Label = canonical
+				changed = true
+			}
+		}
+		if changed {
+			artifacts.PutLabels(ss.Source, ss.SessionID, lbl)
+		}
+	}
 }
 
 // ── GROUP ───────────────────────────────────────────────────────────────
@@ -1076,31 +1277,31 @@ type clusterResult struct {
 	ObservationIdxs []int // indices into the flat allObs slice
 }
 
-// runGroup groups observations by exact classification label match.
+// runGroup groups observations by exact label match.
 // Labels with minClusterSize+ observations form clusters; the rest is noise.
 func runGroup(artifacts *ArtifactStore, allObs []observationEntry) ([]clusterResult, []string, error) {
-	// Load classifications to get label for each observation
+	// Load labels to get label for each observation
 	type sessionKey struct{ source, sessionID string }
-	clsBySession := map[sessionKey]*Classifications{}
-	sessions, err := artifacts.ListClassifications()
+	lblBySession := map[sessionKey]*Labels{}
+	sessions, err := artifacts.ListLabels()
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, ss := range sessions {
-		cls, err := artifacts.GetClassifications(ss.Source, ss.SessionID)
+		lbl, err := artifacts.GetLabels(ss.Source, ss.SessionID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("get classifications %s/%s: %w", ss.Source, ss.SessionID, err)
+			return nil, nil, fmt.Errorf("get labels %s/%s: %w", ss.Source, ss.SessionID, err)
 		}
-		clsBySession[sessionKey{ss.Source, ss.SessionID}] = cls
+		lblBySession[sessionKey{ss.Source, ss.SessionID}] = lbl
 	}
 
 	// Build observation → label mapping
 	obsLabels := make([]string, len(allObs))
 	for i, obs := range allObs {
 		key := sessionKey{obs.Source, obs.SessionID}
-		cls, ok := clsBySession[key]
-		if ok && obs.Index < len(cls.Items) {
-			obsLabels[i] = strings.ToLower(strings.TrimSpace(cls.Items[obs.Index].Classification))
+		lbl, ok := lblBySession[key]
+		if ok && obs.Index < len(lbl.Items) {
+			obsLabels[i] = strings.ToLower(strings.TrimSpace(lbl.Items[obs.Index].Label))
 			// Strip surrounding quotes from labels
 			obsLabels[i] = strings.Trim(obsLabels[i], "\"'")
 		}
@@ -1152,7 +1353,7 @@ const maxSampleTokens = 10_000
 
 type clusterSample struct {
 	ID           int
-	Theme        string // classification theme for the cluster
+	Theme        string // label theme for the cluster
 	Observations []string
 }
 
@@ -1181,13 +1382,13 @@ func runSampleWithObs(clusters []clusterResult, allObs []observationEntry, artif
 			tokens += t
 		}
 
-		// Determine cluster theme from classifications
+		// Determine cluster theme from labels
 		theme := ""
 		if len(indices) > 0 {
 			obs := allObs[indices[0]]
-			cls, err := artifacts.GetClassifications(obs.Source, obs.SessionID)
-			if err == nil && obs.Index < len(cls.Items) {
-				theme = cls.Items[obs.Index].Classification
+			lbl, err := artifacts.GetLabels(obs.Source, obs.SessionID)
+			if err == nil && obs.Index < len(lbl.Items) {
+				theme = lbl.Items[obs.Index].Label
 			}
 		}
 
@@ -1200,10 +1401,10 @@ func runSampleWithObs(clusters []clusterResult, allObs []observationEntry, artif
 	return samples
 }
 
-// ── SYNTHESIZE ──────────────────────────────────────────────────────────
+// ── SUMMARIZE ──────────────────────────────────────────────────────────
 
-// runSynthesize runs parallel per-cluster synthesis.
-func runSynthesize(
+// runSummarize runs parallel per-cluster synthesis.
+func runSummarize(
 	ctx context.Context,
 	llm LLM,
 	samples []clusterSample,
@@ -1254,7 +1455,7 @@ func runSynthesize(
 	var totalUsage inference.Usage
 	for i, err := range errs {
 		if err != nil {
-			return nil, totalUsage, fmt.Errorf("synthesize cluster %d: %w", i, err)
+			return nil, totalUsage, fmt.Errorf("summarize cluster %d: %w", i, err)
 		}
 		totalUsage = totalUsage.Add(usages[i])
 	}
@@ -1262,10 +1463,10 @@ func runSynthesize(
 	return summaries, totalUsage, nil
 }
 
-// ── MERGE ───────────────────────────────────────────────────────────────
+// ── COMPOSE ────────────────────────────────────────────────────────────
 
-// runMerge combines cluster summaries and noise observations into muse.md.
-func runMerge(
+// runCompose combines cluster summaries and noise observations into muse.md.
+func runCompose(
 	ctx context.Context,
 	llm LLM,
 	store storage.Store,
@@ -1294,7 +1495,7 @@ func runMerge(
 	}
 
 	stream := newStageStream(16000)
-	muse, usage, err := llm.ConverseStream(ctx, prompts.Merge, input.String(), stream.callback(), inference.WithThinking(16000))
+	muse, usage, err := llm.ConverseStream(ctx, prompts.ComposeClustered, input.String(), stream.callback(), inference.WithThinking(16000))
 	stream.finish()
 	if err != nil {
 		return "", "", usage, err

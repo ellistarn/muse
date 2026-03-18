@@ -38,7 +38,7 @@ type Result struct {
 	Pruned       int
 	Remaining    int // conversations still pending observation
 	Observations int // total observations across all conversations
-	Clusters     int // clusters discovered by HDBSCAN (0 for map-reduce)
+	Clusters     int // clusters discovered by clustering (0 for map-reduce)
 	Noise        int // observations that didn't fit any cluster
 	Cache        CacheStats
 	Stages       []StageStats
@@ -49,8 +49,8 @@ type Result struct {
 
 // CacheStats tracks cache hit/miss counts for each cached pipeline stage.
 type CacheStats struct {
-	Observe  HitMiss
-	Classify HitMiss
+	Observe HitMiss
+	Label   HitMiss
 }
 
 // HitMiss tracks cache hit and miss counts.
@@ -252,7 +252,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 }
 
 // LearnOnly re-runs only the learn phase using persisted observations.
-// Use this to re-synthesize the muse with improved techniques without re-observing.
+// Use this to re-compose the muse with improved techniques without re-observing.
 func LearnOnly(ctx context.Context, store storage.Store, learnLLM, diffLLM LLM) (*Result, error) {
 	allObservations, err := loadAllObservations(ctx, store)
 	if err != nil {

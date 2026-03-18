@@ -17,18 +17,17 @@ messages reveal about how they think. The extract prompt requires a structured `
 on each output line — lines without the prefix are discarded at parse time. A refine step filters
 candidates to only those that would change how the muse behaves.
 
-The surviving observations are classified into short thematic labels and grouped into clusters.
-Grouping is by exact label match — the classifier is given existing labels and converges on a shared
-vocabulary, so observations on the same theme get the same label. Labels with 3+ observations form
-clusters; the rest flow through as noise. Each cluster is synthesized independently, then merged with
-noise observations into the final muse.md.
+The surviving observations are labeled with short thematic labels, normalized to merge synonyms, and
+grouped into clusters by exact label match. Labels with 3+ observations form clusters; the rest flow
+through as noise. Each cluster is summarized independently, then composed with noise observations into
+the final muse.md.
 
 ```
 conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► COMPOSE ─► muse.md
 
 OBSERVE    compress → extract (Observation: prefix) → refine → parse
-CLUSTER    classify (label convergence) → group (label match) → sample
-COMPOSE    per-cluster synthesis → merge with noise
+CLUSTER    label (parallel) → normalize (merge synonyms) → group (exact match)
+COMPOSE    per-cluster summarize → compose with noise
 ```
 
 ### Strategies
@@ -50,21 +49,24 @@ correctness; the dependency chain self-invalidates:
 
 ```
 conversation → (observe prompt) → observations
-observation → (classify prompt) → classification
+observation → (label prompt) → labels
+labels → (sorted unique labels) → normalization mapping
 ```
 
-Change a conversation and its observations invalidate, which invalidates classifications. Change the
-classify prompt and all classifications invalidate. Correctness is structural, not procedural.
+Change a conversation and its observations invalidate, which invalidates labels. Change the label
+prompt and all labels invalidate. Change the label vocabulary and the normalization mapping
+invalidates.
 
 Fingerprints per layer:
 
-- **Observation**: `hash(conversation.UpdatedAt, observePromptHash)`
-- **Classification**: `hash(observationContent, classifyPromptHash)`
+- **Observation**: `hash(session.LastModified, observePromptHash)`
+- **Label**: `hash(observationContent, labelPromptHash)`
+- **Normalization**: `hash(sorted unique labels, normalizePromptHash)`
 
-Grouping, sampling, synthesis, and merge are recomputed each run — they're cheap relative to the
-cached stages.
+Grouping, sampling, summarization, and composition are recomputed each run — they're cheap relative
+to the cached stages.
 
-`--reobserve` and `--reclassify` force recomputation unconditionally, skipping fingerprint comparison.
+`--reobserve` and `--relabel` force recomputation unconditionally, skipping fingerprint comparison.
 These are debugging tools for prompt iteration — correctness never depends on them.
 
 ### Storage
@@ -77,25 +79,31 @@ distillation system, nested under `distill/`.
 ├── conversations/{source}/{session_id}.json              # input, syncable
 ├── distill/
 │   ├── observations/{source}/{session_id}.json           # syncable
-│   ├── classifications/{source}/{session_id}.json        # syncable
+│   ├── labels/{source}/{session_id}.json                 # syncable
+│   ├── normalization.json                                # label mapping, ephemeral
 │   └── clusters/{id}.json                                # ephemeral, not synced, overwritten each run
 ├── muse/versions/{timestamp}/muse.md                     # output, syncable
 ├── muse/versions/{timestamp}/diff.md                     # output, syncable
 ```
 
 Observations are a JSON array of discrete strings per conversation — each observation gets its own
-classification. Classifications are stored one file per conversation containing all per-observation
-entries:
+label. Labels are stored one file per conversation containing all per-observation entries:
 
 ```json
 // distill/observations/{source}/{session_id}.json
 {"fingerprint": "abc123", "items": ["obs1", "obs2", "obs3"]}
 
-// distill/classifications/{source}/{session_id}.json
+// distill/labels/{source}/{session_id}.json
 {"fingerprint": "def456", "items": [
-  {"observation": "obs1", "classification": "root cause over symptom fixing"},
-  {"observation": "obs2", "classification": "abstraction must earn its cost"}
+  {"observation": "obs1", "label": "root cause over symptom fixing"},
+  {"observation": "obs2", "label": "abstraction must earn its cost"}
 ]}
+
+// distill/normalization.json
+{"fingerprint": "789abc", "mapping": {
+  "abstraction must earn its keep": "abstraction must earn its cost",
+  "infra-tasks": "infrastructure work"
+}}
 ```
 
 ## Decisions
@@ -130,46 +138,51 @@ conversational meta-commentary when the required output format is explicit. A se
 filter catches any well-formed-but-vacuous observations that slip through (e.g. parenthesized
 meta-commentary).
 
-### Why label convergence in classification?
+### Why normalize instead of sequential convergence?
 
-The classifier receives observations in batches (up to 10 per call) and assigns each a short
-thematic label (3-8 words) naming the thinking pattern it's an instance of. Critically, the
-classifier also receives the list of labels already assigned to other observations and is instructed
-to reuse an existing label when one fits. Sessions are processed sequentially so each batch sees the
-full label vocabulary from prior sessions, preserving convergence.
+The previous design processed label assignments sequentially so each batch saw the full label
+vocabulary from prior batches. This used ordering as an implicit normalization mechanism — label
+convergence was an emergent property of execution order. The consequence was that labeling could not
+be parallelized, making it the pipeline bottleneck.
 
-Without label convergence, each observation gets a unique paraphrase ("abstraction must earn its
-cost" vs. "abstraction must earn its keep") and grouping becomes impossible — everything is
-equidistant. With convergence, the classifier maps both to the same label, and grouping becomes
-trivial: exact string match.
+Normalization separates two concerns that are genuinely separate: *labeling* (what thematic pattern
+does this observation reflect?) and *normalization* (are these two labels the same concept?).
+Labeling runs in parallel with a shared but unordered label set — each call sees the current
+vocabulary and naturally reuses labels where they fit, providing convergence pressure without
+requiring strict ordering. A single normalization call then takes the full label set and produces a
+canonical mapping that merges synonyms, applying it to all stored labels before grouping.
+
+This is both faster (parallel labeling) and architecturally cleaner (normalization is a named step,
+not an emergent property of execution order). The normalization mapping is cached by label set hash
+and only recomputed when the vocabulary actually changes.
 
 ### Why label-match only?
 
-Grouping is exact label match — observations with the same classification label form a cluster. This
-works because label convergence produces a shared vocabulary with ~60% reuse.
+Grouping is exact label match — observations with the same (normalized) label form a cluster. This
+works because labeling with shared vocabulary plus normalization produces consistent terminology.
 
 We initially designed a two-phase approach (label-match followed by HDBSCAN over embeddings for the
-ungrouped residual) but found that classification convergence eliminates the sub-cluster variation
-HDBSCAN was meant to capture. With 168 observations, median cosine distance was 0.92 — the embedding
-space was flat because labels were paraphrasing, not categorizing. Fixing classification upstream
-made the downstream algorithm irrelevant.
+ungrouped residual) but found that consistent labeling eliminates the sub-cluster variation HDBSCAN
+was meant to capture. With 168 observations, median cosine distance was 0.92 — the embedding space
+was flat because labels were paraphrasing, not categorizing. Fixing labeling upstream made the
+downstream algorithm irrelevant.
 
 Observations whose labels appear fewer than 3 times flow through as noise rather than forming
-micro-clusters. This threshold prevents synthesis from operating on groups too small to have a
+micro-clusters. This threshold prevents summarization from operating on groups too small to have a
 meaningful pattern.
 
 ### Why preserve noise?
 
 Noise means "doesn't fit a group," not "worthless." Observations that don't cluster may be the most
 distinctive — patterns expressed once or twice that make the muse sound like you rather than like
-generic advice. Noise flows through to COMPOSE alongside cluster syntheses. COMPOSE is already the
+generic advice. Noise flows through to compose alongside cluster summaries. Compose is already the
 judgment step — it decides what to organize, preserve, or let go.
 
-### Why two-pass compose (synthesize then merge)?
+### Why two-pass compose (summarize then compose)?
 
-Synthesis compresses each cluster independently (parallel), then merge organizes across cluster
-summaries. Single-pass would be simpler but forces one LLM call to both synthesize and organize. Two
-passes keep each call focused and produce debuggable intermediate artifacts.
+Summarization compresses each cluster independently (parallel), then composition organizes across
+cluster summaries. Single-pass would be simpler but forces one LLM call to both summarize and
+organize. Two passes keep each call focused and produce debuggable intermediate artifacts.
 
 ## Deferred
 

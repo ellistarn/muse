@@ -43,19 +43,39 @@ func (s *ArtifactStore) GetObservations(source, sessionID string) (*Observations
 	return &obs, nil
 }
 
-// PutClassifications writes classifications for a conversation.
-func (s *ArtifactStore) PutClassifications(source, sessionID string, cls *Classifications) error {
-	return s.putJSON(s.distillPath("classifications", source, sessionID), cls)
+// PutLabels writes labels for a conversation.
+func (s *ArtifactStore) PutLabels(source, sessionID string, lbl *Labels) error {
+	return s.putJSON(s.distillPath("labels", source, sessionID), lbl)
 }
 
-// GetClassifications reads classifications for a conversation.
+// GetLabels reads labels for a conversation.
 // Returns os.ErrNotExist (via os.IsNotExist) when no artifact is found.
-func (s *ArtifactStore) GetClassifications(source, sessionID string) (*Classifications, error) {
-	var cls Classifications
-	if err := s.getJSON(s.distillPath("classifications", source, sessionID), &cls); err != nil {
+func (s *ArtifactStore) GetLabels(source, sessionID string) (*Labels, error) {
+	var lbl Labels
+	if err := s.getJSON(s.distillPath("labels", source, sessionID), &lbl); err != nil {
 		return nil, err
 	}
-	return &cls, nil
+	return &lbl, nil
+}
+
+// PutNormalization writes the normalization mapping.
+func (s *ArtifactStore) PutNormalization(norm *Normalization) error {
+	return s.putJSON(filepath.Join(s.root, "distill", "normalization.json"), norm)
+}
+
+// GetNormalization reads the normalization mapping.
+// Returns os.ErrNotExist (via os.IsNotExist) when no artifact is found.
+func (s *ArtifactStore) GetNormalization() (*Normalization, error) {
+	var norm Normalization
+	if err := s.getJSON(filepath.Join(s.root, "distill", "normalization.json"), &norm); err != nil {
+		return nil, err
+	}
+	return &norm, nil
+}
+
+// DeleteNormalization removes the normalization artifact.
+func (s *ArtifactStore) DeleteNormalization() error {
+	return os.Remove(filepath.Join(s.root, "distill", "normalization.json"))
 }
 
 // ListObservations returns all (source, sessionID) pairs that have observations.
@@ -63,9 +83,9 @@ func (s *ArtifactStore) ListObservations() ([]SourceSession, error) {
 	return s.listArtifacts("observations")
 }
 
-// ListClassifications returns all (source, sessionID) pairs that have classifications.
-func (s *ArtifactStore) ListClassifications() ([]SourceSession, error) {
-	return s.listArtifacts("classifications")
+// ListLabels returns all (source, sessionID) pairs that have labels.
+func (s *ArtifactStore) ListLabels() ([]SourceSession, error) {
+	return s.listArtifacts("labels")
 }
 
 // DeleteObservations removes all observation artifacts.
@@ -78,9 +98,9 @@ func (s *ArtifactStore) DeleteObservationsForSource(source string) error {
 	return os.RemoveAll(filepath.Join(s.root, "distill", "observations", source))
 }
 
-// DeleteClassifications removes all classification artifacts.
-func (s *ArtifactStore) DeleteClassifications() error {
-	return os.RemoveAll(filepath.Join(s.root, "distill", "classifications"))
+// DeleteLabels removes all label artifacts.
+func (s *ArtifactStore) DeleteLabels() error {
+	return os.RemoveAll(filepath.Join(s.root, "distill", "labels"))
 }
 
 // SourceSession identifies a conversation by its source and session ID.

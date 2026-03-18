@@ -18,9 +18,9 @@ func TestFingerprintCascadeInvalidation(t *testing.T) {
 		t.Error("prompt change should change fingerprint")
 	}
 
-	obs1FP := distill.Fingerprint("obs text", "classify-prompt-v1")
-	obs2FP := distill.Fingerprint("different obs text", "classify-prompt-v1")
+	obs1FP := distill.Fingerprint("obs text", "label-prompt-v1")
+	obs2FP := distill.Fingerprint("different obs text", "label-prompt-v1")
 	if obs1FP == obs2FP {
-		t.Error("different observations should produce different classification fingerprints")
+		t.Error("different observations should produce different label fingerprints")
 	}
 }

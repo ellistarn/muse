@@ -1,4 +1,4 @@
-Classify each numbered observation into a short thematic label (3-8 words) naming the thinking pattern, not restating the observation.
+Label each numbered observation with a short thematic label (3-8 words) naming the thinking pattern, not restating the observation.
 
 Good: "root cause over symptom fixing", "compression over enumeration", "structural enforcement over stated rules"
 Bad (rephrasing): "Prefers using native tools over shell workarounds"
