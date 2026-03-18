@@ -2,6 +2,7 @@ package distill
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -178,4 +179,68 @@ func renderBar(n, total, width int) string {
 		filled = width
 	}
 	return "[" + strings.Repeat(barFull, filled) + strings.Repeat(barEmpty, width-filled) + "]"
+}
+
+// ── Stage stream ────────────────────────────────────────────────────────
+
+// stageStream renders streaming LLM output for a single-call stage like merge
+// or diff. During thinking, it shows a progress bar against the token budget.
+// Once text tokens arrive, it streams the actual output to stderr.
+type stageStream struct {
+	thinkingBudget int  // 0 means no thinking bar (just stream text)
+	thinkingTokens int  // accumulated thinking tokens
+	textStarted    bool // flipped on first non-thinking delta
+	wroteOutput    bool // true if any text was written to stderr
+	tty            bool // whether stderr is a terminal
+	mu             sync.Mutex
+}
+
+// newStageStream creates a stream renderer. thinkingBudget of 0 disables the
+// thinking progress bar (deltas stream directly).
+func newStageStream(thinkingBudget int) *stageStream {
+	return &stageStream{
+		thinkingBudget: thinkingBudget,
+		tty:            isTTY(),
+	}
+}
+
+// callback returns an inference.StreamFunc suitable for ConverseStream.
+func (s *stageStream) callback() inference.StreamFunc {
+	return func(delta inference.StreamDelta) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		if delta.Thinking {
+			s.thinkingTokens += int(math.Ceil(float64(len(delta.Text)) / 4.0))
+			if s.tty && s.thinkingBudget > 0 {
+				bar := renderBar(s.thinkingTokens, s.thinkingBudget, barWidth)
+				fmt.Fprintf(os.Stderr, "\r%-*s%s thinking...", stageWidth, "", bar)
+			}
+			return
+		}
+
+		// First text token — erase the thinking bar
+		if !s.textStarted {
+			s.textStarted = true
+			if s.tty && s.thinkingBudget > 0 {
+				fmt.Fprintf(os.Stderr, "\r%s\r", clearLine)
+			}
+		}
+
+		fmt.Fprint(os.Stderr, delta.Text)
+		s.wroteOutput = true
+	}
+}
+
+// finish prints a trailing newline if any text was streamed, ensuring the
+// subsequent logAfter line starts on a fresh line.
+func (s *stageStream) finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.wroteOutput {
+		fmt.Fprintln(os.Stderr)
+	} else if s.tty && s.thinkingBudget > 0 {
+		// No text was streamed but we showed a thinking bar — erase it
+		fmt.Fprintf(os.Stderr, "\r%s\r", clearLine)
+	}
 }

@@ -1293,7 +1293,9 @@ func runMerge(
 		}
 	}
 
-	muse, usage, err := llm.Converse(ctx, prompts.Merge, input.String(), inference.WithThinking(16000))
+	stream := newStageStream(16000)
+	muse, usage, err := llm.ConverseStream(ctx, prompts.Merge, input.String(), stream.callback(), inference.WithThinking(16000))
+	stream.finish()
 	if err != nil {
 		return "", "", usage, err
 	}

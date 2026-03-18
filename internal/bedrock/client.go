@@ -235,6 +235,21 @@ func (c *Client) Converse(ctx context.Context, system, user string, opts ...infe
 	return text, usage, err
 }
 
+// ConverseStream is like Converse but streams deltas through fn as they arrive.
+func (c *Client) ConverseStream(ctx context.Context, system, user string, fn StreamFunc, opts ...inference.ConverseOption) (string, Usage, error) {
+	messages := []types.Message{
+		{
+			Role:    types.ConversationRoleUser,
+			Content: []types.ContentBlock{&types.ContentBlockMemberText{Value: user}},
+		},
+	}
+	result, err := c.ConverseMessagesStream(ctx, system, messages, fn, opts...)
+	if err != nil {
+		return "", Usage{}, err
+	}
+	return result.Text, result.Usage, nil
+}
+
 // ConverseResult holds the full output from a ConverseMessages call.
 type ConverseResult struct {
 	Text       string
@@ -405,8 +420,8 @@ func systemBlocks(system string) []types.SystemContentBlock {
 	}
 }
 
-// StreamFunc receives text deltas as they arrive from the model.
-type StreamFunc func(delta string)
+// StreamFunc receives streaming deltas (text or thinking) as they arrive.
+type StreamFunc = inference.StreamFunc
 
 // ConverseMessagesStream sends a full message history and streams text deltas
 // through fn. Falls back to non-streaming Converse if the runtime doesn't
@@ -420,7 +435,7 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 			return nil, err
 		}
 		if fn != nil {
-			fn(result.Text)
+			fn(inference.StreamDelta{Text: result.Text})
 		}
 		return result, nil
 	}
@@ -476,10 +491,17 @@ func (c *Client) converseStreamOnce(ctx context.Context, sr StreamingRuntime, in
 	for event := range stream.Events() {
 		switch ev := event.(type) {
 		case *types.ConverseStreamOutputMemberContentBlockDelta:
-			if td, ok := ev.Value.Delta.(*types.ContentBlockDeltaMemberText); ok {
-				text.WriteString(td.Value)
+			switch delta := ev.Value.Delta.(type) {
+			case *types.ContentBlockDeltaMemberText:
+				text.WriteString(delta.Value)
 				if fn != nil {
-					fn(td.Value)
+					fn(inference.StreamDelta{Text: delta.Value})
+				}
+			case *types.ContentBlockDeltaMemberReasoningContent:
+				if td, ok := delta.Value.(*types.ReasoningContentBlockDeltaMemberText); ok {
+					if fn != nil {
+						fn(inference.StreamDelta{Text: td.Value, Thinking: true})
+					}
 				}
 			}
 		case *types.ConverseStreamOutputMemberMessageStop:

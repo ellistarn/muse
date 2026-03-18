@@ -19,6 +19,7 @@ import (
 // LLM is the subset of an LLM client used by the distill pipeline.
 type LLM interface {
 	Converse(ctx context.Context, system, user string, opts ...inference.ConverseOption) (string, inference.Usage, error)
+	ConverseStream(ctx context.Context, system, user string, fn inference.StreamFunc, opts ...inference.ConverseOption) (string, inference.Usage, error)
 	Model() string
 }
 
@@ -385,8 +386,10 @@ func computeDiff(ctx context.Context, client LLM, store storage.Store, timestamp
 		d = "Initial version."
 	} else {
 		input := fmt.Sprintf("Previous muse:\n%s\n\n---\n\nNew muse:\n%s", previous, current)
+		stream := newStageStream(0) // no thinking for diff
 		var err error
-		d, usage, err = client.Converse(ctx, prompts.Diff, input, inference.WithMaxTokens(4096))
+		d, usage, err = client.ConverseStream(ctx, prompts.Diff, input, stream.callback(), inference.WithMaxTokens(4096))
+		stream.finish()
 		if err != nil {
 			return "", usage, err
 		}

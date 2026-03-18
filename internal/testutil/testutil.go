@@ -194,3 +194,11 @@ func (m *MockLLM) Converse(_ context.Context, system, user string, _ ...inferenc
 }
 
 func (m *MockLLM) Model() string { return "mock-model" }
+
+func (m *MockLLM) ConverseStream(ctx context.Context, system, user string, fn inference.StreamFunc, opts ...inference.ConverseOption) (string, inference.Usage, error) {
+	text, usage, err := m.Converse(ctx, system, user, opts...)
+	if fn != nil && err == nil {
+		fn(inference.StreamDelta{Text: text})
+	}
+	return text, usage, err
+}
