@@ -1,5 +1,7 @@
 # Grammar
 
+This document specifies the operations muse performs. User-facing commands may compose or rename them. The document evolves with the system.
+
 ## Types
 
 ```
