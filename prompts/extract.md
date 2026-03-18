@@ -4,4 +4,6 @@ Input: a compressed conversation transcript. [assistant] messages are mechanical
 
 What counts as signal: the human originates an idea, corrects course, explains reasoning, pushes back, or makes a deliberate choice between alternatives. Corrections are especially high-signal — they reveal what this person cares about strongly enough to insist on. Passive acceptance ("sure", "looks good") is not signal.
 
+Every observation must describe the human's own thinking or behavior. When the human is reading or discussing external content, the signal is their reaction to it — their judgment, disagreement, or how they apply it — not the content itself.
+
 Output: one observation per line, each starting with "Observation: " — a self-contained statement about how this person thinks or works. If the conversation has no signal, respond with exactly "NONE".
