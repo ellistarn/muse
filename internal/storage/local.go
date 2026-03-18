@@ -132,12 +132,12 @@ func (l *LocalStore) GetMuse(_ context.Context) (string, error) {
 			return content, nil
 		}
 	}
-	return "", &NotFoundError{Key: "muse/versions/"}
+	return "", &NotFoundError{Key: "versions/"}
 }
 
 // PutMuse writes a muse version at the given timestamp.
 func (l *LocalStore) PutMuse(_ context.Context, timestamp, content string) error {
-	path := filepath.Join(l.root, "muse", "versions", timestamp, "muse.md")
+	path := filepath.Join(l.root, "versions", timestamp, "muse.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -146,7 +146,7 @@ func (l *LocalStore) PutMuse(_ context.Context, timestamp, content string) error
 
 // PutMuseDiff writes a diff summary at the given timestamp.
 func (l *LocalStore) PutMuseDiff(_ context.Context, timestamp, content string) error {
-	path := filepath.Join(l.root, "muse", "versions", timestamp, "diff.md")
+	path := filepath.Join(l.root, "versions", timestamp, "diff.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -155,7 +155,7 @@ func (l *LocalStore) PutMuseDiff(_ context.Context, timestamp, content string) e
 
 // GetMuseDiff reads the diff summary for the given timestamp.
 func (l *LocalStore) GetMuseDiff(_ context.Context, timestamp string) (string, error) {
-	path := filepath.Join(l.root, "muse", "versions", timestamp, "diff.md")
+	path := filepath.Join(l.root, "versions", timestamp, "diff.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -168,7 +168,7 @@ func (l *LocalStore) GetMuseDiff(_ context.Context, timestamp string) (string, e
 
 // ListMuses returns timestamps of all muse versions, sorted ascending.
 func (l *LocalStore) ListMuses(_ context.Context) ([]string, error) {
-	musesDir := filepath.Join(l.root, "muse", "versions")
+	musesDir := filepath.Join(l.root, "versions")
 	entries, err := os.ReadDir(musesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -188,7 +188,7 @@ func (l *LocalStore) ListMuses(_ context.Context) ([]string, error) {
 
 // GetMuseVersion reads a specific muse version.
 func (l *LocalStore) GetMuseVersion(_ context.Context, timestamp string) (string, error) {
-	path := filepath.Join(l.root, "muse", "versions", timestamp, "muse.md")
+	path := filepath.Join(l.root, "versions", timestamp, "muse.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

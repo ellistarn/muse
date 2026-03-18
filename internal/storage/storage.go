@@ -15,8 +15,8 @@ import (
 //
 //	conversations/{source}/{conversation_id}.json   — raw conversations
 //	observations/{source}/{conversation_id}.md      — per-conversation observations
-//	muse/versions/{timestamp}/muse.md          — timestamped muse versions (latest = current)
-//	muse/versions/{timestamp}/diff.md          — what changed from the previous version
+//	versions/{timestamp}/muse.md                — timestamped muse versions (latest = current)
+//	versions/{timestamp}/diff.md               — what changed from the previous version
 type Store interface {
 	// Conversations
 	ListConversations(ctx context.Context) ([]ConversationEntry, error)

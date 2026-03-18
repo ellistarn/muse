@@ -126,7 +126,7 @@ func (c *S3Store) GetMuse(ctx context.Context) (string, error) {
 			return content, nil
 		}
 	}
-	return "", &NotFoundError{Key: "muse/versions/"}
+	return "", &NotFoundError{Key: "versions/"}
 }
 
 // PutMuse writes a muse version at the given timestamp.
@@ -181,7 +181,7 @@ func (c *S3Store) GetMuseDiff(ctx context.Context, timestamp string) (string, er
 
 // ListMuses returns timestamps of all muse versions, sorted ascending.
 func (c *S3Store) ListMuses(ctx context.Context) ([]string, error) {
-	prefix := "muse/versions/"
+	prefix := "versions/"
 	out, err := c.s3.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket:    &c.bucket,
 		Prefix:    aws.String(prefix),
@@ -385,11 +385,11 @@ func parseConversationKey(key string) (src, conversationID string) {
 }
 
 func museVersionKey(timestamp string) string {
-	return fmt.Sprintf("muse/versions/%s/muse.md", timestamp)
+	return fmt.Sprintf("versions/%s/muse.md", timestamp)
 }
 
 func museDiffKey(timestamp string) string {
-	return fmt.Sprintf("muse/versions/%s/diff.md", timestamp)
+	return fmt.Sprintf("versions/%s/diff.md", timestamp)
 }
 
 // observationKey converts a conversation key to its observation storage key.

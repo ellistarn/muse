@@ -120,7 +120,7 @@ func (s *ConversationStore) ListMuses(_ context.Context) ([]string, error) {
 func (s *ConversationStore) GetMuseVersion(_ context.Context, timestamp string) (string, error) {
 	content, ok := s.Muses[timestamp]
 	if !ok {
-		return "", &storage.NotFoundError{Key: "muse/versions/" + timestamp}
+		return "", &storage.NotFoundError{Key: "versions/" + timestamp}
 	}
 	return content, nil
 }
