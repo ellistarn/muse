@@ -2,20 +2,20 @@ package prompts
 
 import _ "embed"
 
-//go:embed observe-extract.md
-var ObserveExtract string
+//go:embed extract.md
+var Extract string
 
-//go:embed observe-refine.md
-var ObserveRefine string
+//go:embed refine.md
+var Refine string
 
-//go:embed learn.md
-var Learn string
+//go:embed compose.md
+var Compose string
 
 //go:embed diff.md
 var Diff string
 
-//go:embed muse.md
-var Muse string
+//go:embed system.md
+var System string
 
 //go:embed tool.md
 var Tool string
@@ -23,8 +23,8 @@ var Tool string
 //go:embed classify.md
 var Classify string
 
-//go:embed synthesize.md
-var Synthesize string
+//go:embed summarize.md
+var Summarize string
 
 //go:embed merge.md
 var Merge string

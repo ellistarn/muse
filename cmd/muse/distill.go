@@ -66,6 +66,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 
 			// Discover and store new conversations (skip for --learn since it
 			// only re-distills from existing observations)
+			var uploaded, uploadBytes int
 			if !learn {
 				m, err := muse.New(ctx, store)
 				if err != nil {
@@ -78,22 +79,13 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				for _, w := range result.Warnings {
 					fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 				}
-				if result.Uploaded > 0 {
-					noun := "conversations"
-					if result.Uploaded == 1 {
-						noun = "conversation"
-					}
-					fmt.Fprintf(os.Stderr, "%-12s %d sources → %d new %s (%s)\n",
-						"load", result.Sources, result.Uploaded, noun, muse.FormatBytes(result.Bytes))
-				} else {
-					fmt.Fprintf(os.Stderr, "%-12s %d sources → no new conversations\n",
-						"load", result.Sources)
-				}
+				uploaded = result.Uploaded
+				uploadBytes = result.Bytes
 			}
 
 			switch method {
 			case "clustering":
-				return runClusteredDistill(ctx, cmd.OutOrStdout(), store, sources, reobserve, reclassify, limit)
+				return runClusteredDistill(ctx, cmd.OutOrStdout(), store, sources, reobserve, reclassify, limit, uploaded, uploadBytes)
 			case "map-reduce":
 				return runMapReduceDistill(ctx, cmd.OutOrStdout(), store, sources, reobserve, learn, limit)
 			default:
@@ -109,7 +101,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 	return cmd
 }
 
-func runClusteredDistill(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, reclassify bool, limit int) error {
+func runClusteredDistill(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, reclassify bool, limit, uploaded, uploadBytes int) error {
 	sonnet, err := bedrock.NewClient(ctx, bedrock.ModelSonnet)
 	if err != nil {
 		return fmt.Errorf("sonnet client: %w", err)
@@ -139,6 +131,8 @@ func runClusteredDistill(ctx context.Context, stdout io.Writer, store storage.St
 			Sources:     sources,
 			ArtifactDir: artifactDir,
 			Verbose:     verbose,
+			Uploaded:    uploaded,
+			UploadBytes: uploadBytes,
 		},
 	)
 	if err != nil {

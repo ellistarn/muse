@@ -30,6 +30,15 @@ func WithThinking(budgetTokens int32) ConverseOption {
 	return func(o *ConverseOptions) { o.ThinkingBudget = budgetTokens }
 }
 
+// StreamDelta is a chunk of streamed output from the model.
+type StreamDelta struct {
+	Text     string
+	Thinking bool // true for reasoning tokens, false for response tokens
+}
+
+// StreamFunc receives streaming deltas as they arrive from the model.
+type StreamFunc func(StreamDelta)
+
 // Usage tracks token consumption and cost from an LLM call.
 type Usage struct {
 	InputTokens  int

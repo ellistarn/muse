@@ -71,6 +71,17 @@ func formatStageDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
+func formatBytes(b int) string {
+	switch {
+	case b >= 1024*1024:
+		return fmt.Sprintf("%.1fMB", float64(b)/(1024*1024))
+	case b >= 1024:
+		return fmt.Sprintf("%.1fKB", float64(b)/1024)
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
+}
+
 // formatSourceBreakdown formats a map of source→count as "(kiro: 12, opencode: 33)".
 func formatSourceBreakdown(counts map[string]int) string {
 	if len(counts) == 0 {

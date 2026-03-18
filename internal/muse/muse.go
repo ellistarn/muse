@@ -76,7 +76,7 @@ func NewForTest(bedrockClient *bedrock.Client, soul string) *Muse {
 	}
 }
 
-var systemPrompt = prompts.Muse
+var systemPrompt = prompts.System
 
 // Ask handles a conversation turn. If SessionID is set, continues an existing
 // conversation. Otherwise starts a new one.

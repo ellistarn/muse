@@ -326,7 +326,7 @@ func observeSession(ctx context.Context, client LLM, session *conversation.Sessi
 	// Extract candidate observations (Pass 1)
 	var allCandidates []string
 	for _, chunk := range chunks {
-		obs, usage, err := client.Converse(ctx, prompts.ObserveExtract, chunk, inference.WithMaxTokens(4096))
+		obs, usage, err := client.Converse(ctx, prompts.Extract, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if err != nil && obs == "" {
 			return "", totalUsage, err
@@ -341,7 +341,7 @@ func observeSession(ctx context.Context, client LLM, session *conversation.Sessi
 
 	// Refine observations (Pass 2)
 	candidates := strings.Join(allCandidates, "\n\n")
-	refined, usage, err := client.Converse(ctx, prompts.ObserveRefine, candidates, inference.WithMaxTokens(4096))
+	refined, usage, err := client.Converse(ctx, prompts.Refine, candidates, inference.WithMaxTokens(4096))
 	totalUsage = totalUsage.Add(usage)
 	if err != nil {
 		return "", totalUsage, err
@@ -362,7 +362,7 @@ func learn(ctx context.Context, client LLM, store storage.Store, observations []
 		return "", "", inference.Usage{}, nil
 	}
 	input := strings.Join(observations, "\n\n---\n\n")
-	muse, usage, err := client.Converse(ctx, prompts.Learn, input, inference.WithThinking(16000))
+	muse, usage, err := client.Converse(ctx, prompts.Compose, input, inference.WithThinking(16000))
 	if err != nil {
 		return "", "", usage, err
 	}

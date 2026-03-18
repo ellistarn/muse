@@ -30,6 +30,10 @@ type ClusteredOptions struct {
 	Sources     []string
 	ArtifactDir string // root for artifact storage (e.g. ~/.muse)
 	Verbose     bool   // per-item progress logging
+
+	// Upload results from the load phase, folded into the discover line.
+	Uploaded    int // new conversations ingested this run
+	UploadBytes int // total bytes of new conversations
 }
 
 // RunClustered executes the full clustering distillation pipeline:
@@ -338,7 +342,7 @@ func runObserve(
 	discovered := len(entries)
 
 	// Compute prompt chain hash for fingerprinting
-	promptHash := Fingerprint(prompts.ObserveExtract, prompts.ObserveRefine)
+	promptHash := Fingerprint(prompts.Extract, prompts.Refine)
 
 	// Determine which conversations need (re)observation
 	var pending []storage.SessionEntry
@@ -373,9 +377,17 @@ func runObserve(
 	var dataSize int
 
 	// Print discover line now that we know totals
-	logStage("discover", "%d sources → %d conversations %s",
+	discoverLine := logStage("discover", "%d sources → %d conversations %s",
 		len(sources), discovered,
-		formatSourceBreakdown(sourceCounts)).print()
+		formatSourceBreakdown(sourceCounts))
+	if opts.Uploaded > 0 {
+		noun := "conversations"
+		if opts.Uploaded == 1 {
+			noun = "conversation"
+		}
+		discoverLine.tail = fmt.Sprintf("(%d new %s, %s)", opts.Uploaded, noun, formatBytes(opts.UploadBytes))
+	}
+	discoverLine.print()
 
 	if len(pending) > 0 {
 		// Print observe before-line: pending count + cached note
@@ -518,7 +530,7 @@ func extractObservations(ctx context.Context, client LLM, session *conversation.
 	// Extract candidates
 	var allCandidates []string
 	for _, chunk := range chunks {
-		obs, usage, err := client.Converse(ctx, prompts.ObserveExtract, chunk, inference.WithMaxTokens(4096))
+		obs, usage, err := client.Converse(ctx, prompts.Extract, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if err != nil && obs == "" {
 			return nil, totalUsage, err
@@ -533,9 +545,9 @@ func extractObservations(ctx context.Context, client LLM, session *conversation.
 
 	// Refine
 	candidates := strings.Join(allCandidates, "\n\n")
-	refined, usage, err := client.Converse(ctx, prompts.ObserveRefine, candidates, inference.WithMaxTokens(4096))
+	refined, usage, err := client.Converse(ctx, prompts.Refine, candidates, inference.WithMaxTokens(4096))
 	totalUsage = totalUsage.Add(usage)
-	if err != nil {
+	if err != nil && refined == "" {
 		return nil, totalUsage, err
 	}
 	if isEmpty(refined) {
@@ -1302,7 +1314,7 @@ func runSynthesize(
 				input += "\n---\n" + obs
 			}
 
-			resp, usage, err := llm.Converse(ctx, prompts.Synthesize, input, inference.WithMaxTokens(4096))
+			resp, usage, err := llm.Converse(ctx, prompts.Summarize, input, inference.WithMaxTokens(4096))
 			summaries[i] = strings.TrimSpace(resp)
 			usages[i] = usage
 			errs[i] = err

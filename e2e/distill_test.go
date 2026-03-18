@@ -432,6 +432,14 @@ func (m *contentFailLLM) Converse(_ context.Context, system, user string, _ ...i
 
 func (m *contentFailLLM) Model() string { return "content-fail-mock" }
 
+func (m *contentFailLLM) ConverseStream(ctx context.Context, system, user string, fn inference.StreamFunc, opts ...inference.ConverseOption) (string, inference.Usage, error) {
+	text, usage, err := m.Converse(ctx, system, user, opts...)
+	if fn != nil && err == nil {
+		fn(inference.StreamDelta{Text: text})
+	}
+	return text, usage, err
+}
+
 // clusterMockLLM dispatches based on system prompt content.
 type clusterMockLLM struct {
 	mu            sync.Mutex
@@ -445,23 +453,23 @@ func (m *clusterMockLLM) Converse(_ context.Context, system, user string, _ ...i
 	m.mu.Unlock()
 	usage := inference.Usage{InputTokens: 100, OutputTokens: 50}
 
-	if m.failOnExtract && strings.Contains(system, "extract observations") {
+	if m.failOnExtract && strings.Contains(system, "Extract observations") {
 		return "", inference.Usage{}, fmt.Errorf("simulated extract failure")
 	}
-	if strings.Contains(system, "classifying a single observation") {
+	if strings.Contains(system, "Classify each") {
 		return "explicit patterns over implicit conventions", usage, nil
 	}
-	if strings.Contains(system, "synthesizing a cluster") {
+	if strings.Contains(system, "Synthesize these") {
 		return "I prefer explicit, clear patterns in code.", usage, nil
 	}
-	if strings.Contains(system, "producing the final muse") {
+	if strings.Contains(system, "producing muse.md") {
 		return "# How I Think\n\nI value explicitness over cleverness.", usage, nil
 	}
 	if strings.Contains(system, "distilling observations") {
 		return "# Muse\n\nValues clarity.", usage, nil
 	}
 	// Refine: pass through observations as-is
-	if strings.Contains(system, "filtering candidate observations") {
+	if strings.Contains(system, "Filter candidate") {
 		return user, usage, nil
 	}
 
@@ -469,3 +477,11 @@ func (m *clusterMockLLM) Converse(_ context.Context, system, user string, _ ...i
 }
 
 func (m *clusterMockLLM) Model() string { return "cluster-mock-model" }
+
+func (m *clusterMockLLM) ConverseStream(ctx context.Context, system, user string, fn inference.StreamFunc, opts ...inference.ConverseOption) (string, inference.Usage, error) {
+	text, usage, err := m.Converse(ctx, system, user, opts...)
+	if fn != nil && err == nil {
+		fn(inference.StreamDelta{Text: text})
+	}
+	return text, usage, err
+}
