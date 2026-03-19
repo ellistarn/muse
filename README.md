@@ -1,6 +1,6 @@
 # Muse
 
-An AI that thinks like you. Distilled from your conversation history
+An AI that thinks like you. Derived from your conversation history
 across Claude Code, Kiro, and OpenCode.
 
 ## Install
@@ -12,7 +12,7 @@ go install github.com/ellistarn/muse@latest
 ## Getting Started
 
 ```bash
-muse distill                # discover conversations and distill muse.md
+muse distill              # discover conversations and distill muse.md
 muse ask "your question"  # ask your muse directly
 muse listen               # start MCP server
 muse show                 # print muse.md
