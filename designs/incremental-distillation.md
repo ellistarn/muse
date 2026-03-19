@@ -41,10 +41,10 @@ on recency and importance. There is a real tradeoff between recency and importan
 
 ### Update granularity
 
-Each run of `muse distill` produces a batch: a few new conversations yielding ~10-15 observations.
-Updating one observation at a time works but costs an Opus call per observation. Batching amortizes
-that overhead, but too large a batch reintroduces context rot. The right batch size balances call
-overhead against context quality and needs experimental tuning.
+Each run of `muse distill` produces a batch of new observations. Updating one observation at a
+time works but costs an Opus call per observation. Batching amortizes that overhead, but too
+large a batch overwhelms the model's reasoning about a dense muse. The batch size shrinks as
+the muse fills (see Decisions below).
 
 ### How the update works
 
@@ -120,6 +120,14 @@ weighting beyond what the user's own words convey.
 
 The sliding scale (~200 → ~100 → ~10) is a starting point. The right batching unit is very likely something
 more like token count or information density rather than observation count. Requires experimental evaluation.
+
+### Weighting
+
+Each update takes a muse and some observations and returns a new muse. The words in the new
+muse are entirely determined by the input muse, the observations, the prompt to the LLM, and
+the LLM's choice (with some wiggle room from stochastic decoding). Weighting is implemented
+as "prompt the LLM to strike a balance between recent observations and the current content of
+the muse." Optimizing that prompt is future work.
 
 ### Defining tradeoff between recency and importance
 
