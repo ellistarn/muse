@@ -41,7 +41,14 @@ other people.
 ### update
 
 Folds new observations into the existing muse. See [incremental-distillation.md](incremental-distillation.md)
-for the full design. Produces both an updated muse and a record of what was forgotten.
+for the full design. Produces two outputs:
+
+1. **muse.md** — the updated muse
+2. **forgotten.md** — what was removed or softened, with a reason
+
+Every entry in the forgotten log has a cause: "contradicted by X" or "subsumed by Y." If the log
+ever says "hasn't been mentioned recently," the update prompt is wrong. The forgotten log provides
+audit (why did the muse stop mentioning X?) and recovery (feed a dropped observation back in).
 
 ### ask
 
