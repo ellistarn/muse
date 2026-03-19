@@ -7,24 +7,24 @@ LLMs produce lower-quality responses (context rot), and eventually the input ove
 
 [Exponentially weighted moving averages](https://en.wikipedia.org/wiki/EWMA) solve a similar
 problem in statistics: maintain a running estimate from streaming data without revisiting history.
-The current estimate plus the new data point is sufficient. In EWMA, recent data points have
-higher weight, which naturally bounds the estimate's length by forgetting stale signal. The same
-intuition applies here: the current muse plus new observations is sufficient to produce the next
-muse.
+The current estimate plus the new data point is sufficient. The same structure applies here: the
+current muse plus new observations is sufficient to produce the next muse.
+
+The analogy is not perfect. EWMA operates in one dimension with a numeric weighting factor.
+A muse update operates in a complex multi-dimensional space — the space of all possible muse
+documents — where "weighting" is achieved through the prompt, not a parameter.
 
 ## Solution
 
 ```
+muse(0)   = ""
 muse(n+1) = update(muse(n), new_observations)
 ```
 
-Each update folds new observations into the existing muse. The full history has influence
-through the muse itself: prior observations shaped it, and some were reinforced while others
-were not. The update input is the current muse plus one batch of observations.
-
-There are two length problems. **Distillation length**: more observations than fit in context.
-**Muse length**: as the muse grows, it becomes less effective as a system prompt. This design
-solves distillation length. Muse length is a follow-up.
+Observations are persisted and reusable across distillation methods. Only the reduce step
+changes: instead of reprocessing all observations, each update folds a small batch into the
+existing muse. The full history has influence through the muse itself — prior observations
+shaped it, and some were reinforced while others were not.
 
 ```
 conversations ─► OBSERVE ─► observations ─► UPDATE ─► muse'
@@ -34,7 +34,10 @@ conversations ─► OBSERVE ─► observations ─► UPDATE ─► muse'
 across all distillation methods.
 
 **Update** is a single Opus call with extended thinking. Input: current muse + new batch.
-Output: updated muse.
+Output: updated muse. The update prompt includes a target length for the muse. When the muse
+approaches the budget, the model must compress or prioritize rather than append. This is a
+simple form of forgetting: a fixed length budget forces the model to choose what stays based
+on recency and importance. There is a real tradeoff between recency and importance.
 
 ### Update granularity
 
@@ -61,8 +64,6 @@ of evidence is conveyed through natural language:
 
 ### Storage
 
-Observations are shared across distillation methods.
-
 ```
 ~/.muse/
 ├── conversations/{source}/{session_id}.json              # input, syncable
@@ -73,24 +74,30 @@ Observations are shared across distillation methods.
 │   └── diff.md                                           # output, syncable
 ```
 
-### Strategies
+### Usage
 
 ```bash
 muse distill --method=incremental
 ```
 
-## Bootstrap
+## Bootstrap and Updates
 
-First run (no existing muse): select the ~200 most recent observations and run a single update
-call to produce the initial muse.
+First run: the muse is empty, so the batch can be large (~200 most recent observations). As
+the muse fills through successive updates, the batch shrinks per the sliding scale above.
 
 ## Decisions
 
-### Why ~10 observations per batch?
+### Why does batch size shrink?
 
-Each Opus call has fixed overhead from the thinking budget. Batching amortizes that. But context
-rot degrades output quality as the batch grows. We start with ~10 (roughly one sync's worth of
-new conversations) as a sensible default and tune experimentally.
+The batch size is a function of how full the muse is. An empty muse has no accumulated
+information to reason against, so bootstrap can process ~200 observations at once. A half-full
+muse encodes enough compressed knowledge that the update step needs more care — batch drops to
+~100. A full muse has high information density from many prior updates, so the batch shrinks to
+~10 to let the model reason carefully about a dense input plus the new observations.
+
+Observation count is a proxy for tokens, which is a proxy for information content. The real
+batching unit is probably tokens or something closer to compressibility of the input, not a
+fixed observation count. These numbers are tuned on vibes for now.
 
 ### Why bias toward the existing muse?
 
@@ -102,20 +109,22 @@ the owner thinks take several observations to fully propagate.
 
 ### How does observation strength work?
 
-The strength of an observation comes from the user's input. A correction ("no, do it this way")
+The strength of an observation comes from the user's input. A course correction ("no, do it this way")
 is stronger than a passing preference. The observe step captures this in how it phrases the
 observation, and the update LLM infers relative strength from that language. We don't add explicit
 weighting beyond what the user's own words convey.
 
 ## Deferred
 
-### Muse length
-
-As observations accumulate, the muse grows. A long muse is less effective as a system prompt
-(context rot applies to the consumer too). This design solves distillation length. Muse length
-requires separate mechanisms (summarization, tiered storage, or selective loading).
-
 ### Batch size tuning
 
-The ~10 observation default is a starting point. Optimal batch size depends on observation density,
-muse complexity, and model capability. Requires experimental evaluation.
+The sliding scale (~200 → ~100 → ~10) is a starting point. The right batching unit is very likely something
+more like token count or information density rather than observation count. Requires experimental evaluation.
+
+### Defining tradeoff between recency and importance
+
+Things change over time, and some things that were important last year are less important this year.
+This isn't always true though, and recency bias happens when we assume that the recent things are
+strictly more important. Some important things just don't happen often enough, and defining how to
+make this tradeoff when constructing a muse is left for future work, for now we just make our most
+capable model try to figure out something sensible.
