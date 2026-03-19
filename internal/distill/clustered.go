@@ -1005,7 +1005,7 @@ func runLabel(
 			for _, e := range entries {
 				obsTexts = append(obsTexts, e.Text)
 			}
-			fp := Fingerprint(append(obsTexts, labelPromptHash)...)
+			fp := Fingerprint(append(obsTexts, labelPromptHash, Fingerprint(labels.list()...))...)
 
 			existing, err := GetLabels(ctx, store, key.source, key.conversationID)
 			if err == nil && existing.Fingerprint == fp {
