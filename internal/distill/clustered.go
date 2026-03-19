@@ -439,7 +439,7 @@ func runObserve(
 					return
 				}
 
-				fp := Fingerprint(conv.UpdatedAt.Format(time.RFC3339Nano), promptHash)
+				fp := Fingerprint(entry.LastModified.Format(time.RFC3339Nano), promptHash)
 				obs := &Observations{
 					Fingerprint: fp,
 					Items:       items,
