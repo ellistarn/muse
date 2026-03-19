@@ -1,6 +1,6 @@
 # Muse
 
-An AI that thinks like you. Derived from your conversation history across Claude Code, Kiro, and
+Your muse is an AI that thinks like you, derived from your conversation history across Claude Code, Kiro, and
 OpenCode.
 
 ## Install
