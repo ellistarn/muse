@@ -14,18 +14,18 @@ import (
 	"github.com/ellistarn/muse/internal/testutil"
 )
 
-func TestDistillCmd_NoStore(t *testing.T) {
+func TestComposeCmd_NoStore(t *testing.T) {
 	// When no bucket is set, local store is used — this test just validates
 	// the command doesn't panic. It will fail at bedrock client creation
 	// which is expected.
 	t.Setenv("MUSE_BUCKET", "")
 }
 
-func TestDistillCmd_LearnNoStore(t *testing.T) {
+func TestComposeCmd_LearnNoStore(t *testing.T) {
 	t.Setenv("MUSE_BUCKET", "")
 }
 
-func TestRunDistill_PropagatesRunError(t *testing.T) {
+func TestRunCompose_PropagatesRunError(t *testing.T) {
 	store := &failingStore{err: fmt.Errorf("storage unavailable")}
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
@@ -39,7 +39,7 @@ func TestRunDistill_PropagatesRunError(t *testing.T) {
 	}
 }
 
-func TestRunDistill_PropagatesLearnError(t *testing.T) {
+func TestRunCompose_PropagatesLearnError(t *testing.T) {
 	store := testutil.NewConversationStore()
 	store.Observations["conversations/test/conv-1.json"] = "- observation"
 	ctx := context.Background()
@@ -54,7 +54,7 @@ func TestRunDistill_PropagatesLearnError(t *testing.T) {
 	}
 }
 
-func TestRunDistill_SuccessfulRun(t *testing.T) {
+func TestRunCompose_SuccessfulRun(t *testing.T) {
 	store := testutil.NewConversationStore()
 	store.AddConversation("test", "conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "use tabs"},
@@ -82,7 +82,7 @@ func TestRunDistill_SuccessfulRun(t *testing.T) {
 	}
 }
 
-func TestRunDistill_SuccessfulLearn(t *testing.T) {
+func TestRunCompose_SuccessfulLearn(t *testing.T) {
 	store := testutil.NewConversationStore()
 	store.Observations["conversations/test/conv-1.json"] = "- observation"
 	mockLLM := &testutil.MockLLM{

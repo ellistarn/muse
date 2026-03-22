@@ -88,7 +88,7 @@ The scrubber loads these at initialization and adds them to the pattern list. Th
 | `internal/scrub/scrub.go` (new) | Deterministic regex scrubber |
 | `internal/scrub/patterns.go` (new) | Pattern definitions |
 | `internal/scrub/scrub_test.go` (new) | Table-driven tests for every pattern |
-| `internal/compose/distill.go` | Scrub conversation before observe, scrub skills after learn |
+| `internal/compose/compose.go` | Scrub conversation before observe, scrub skills after learn |
 | `internal/muse/muse.go` | Scrub response in `Ask()` |
 | `internal/storage/s3.go` | Add `PurgeProcessedConversations()` |
 

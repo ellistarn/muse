@@ -299,7 +299,7 @@ func runObserve(
 				}
 			}
 		} else {
-			DeleteDistillObservations(ctx, store)
+			DeleteObservations(ctx, store)
 			fmt.Fprintln(os.Stderr, "  Cleared all observations")
 		}
 	}

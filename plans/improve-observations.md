@@ -69,7 +69,7 @@ Change: if a message role is `tool` or the content is a tool result, skip it or 
 |------|--------|
 | `internal/compose/prompts.go:6-21` | Rewrite `observePrompt` |
 | `skills/observe/SKILL.md` | Update to match new prompt |
-| `internal/compose/distill.go:284-293` | Strip tool payloads in `formatSession` |
+| `internal/compose/compose.go:284-293` | Strip tool payloads in `formatSession` |
 
 ## What this does NOT include
 

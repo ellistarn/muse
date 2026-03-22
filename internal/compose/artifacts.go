@@ -81,8 +81,8 @@ func ListLabels(ctx context.Context, store storage.Store) ([]SourceConversation,
 	return listArtifacts(ctx, store, "compose/labels/")
 }
 
-// DeleteDistillObservations removes all observation artifacts.
-func DeleteDistillObservations(ctx context.Context, store storage.Store) error {
+// DeleteObservations removes all observation artifacts.
+func DeleteObservations(ctx context.Context, store storage.Store) error {
 	return store.DeleteData(ctx, "compose/observations/")
 }
 

@@ -148,8 +148,8 @@ func TestArtifactDelete(t *testing.T) {
 
 	// Delete all observations
 	PutObservations(ctx, store, "src3", "s3", &Observations{Items: []string{"c"}})
-	if err := DeleteDistillObservations(ctx, store); err != nil {
-		t.Fatalf("DeleteDistillObservations: %v", err)
+	if err := DeleteObservations(ctx, store); err != nil {
+		t.Fatalf("DeleteObservations: %v", err)
 	}
 	list, _ = ListObservations(ctx, store)
 	if len(list) != 0 {
