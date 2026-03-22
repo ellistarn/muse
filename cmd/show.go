@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/bedrock"
-	"github.com/ellistarn/muse/internal/distill"
+	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -18,12 +18,12 @@ func newShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Print muse.md",
 		Long: `Prints your current muse.md to stdout. If no muse exists yet, prompts
-you to run 'muse distill'.
+you to run 'muse compose'.
 
-Use --diff to print the changelog from the latest distill. If no diff has
+Use --diff to print the changelog from the latest compose. If no diff has
 been computed yet, one is generated on the fly and cached for future use.`,
 		Example: `  muse show          # print the muse
-  muse show --diff   # print what changed in the latest distill`,
+  muse show --diff   # print what changed in the latest compose`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			store, err := newStore(ctx)
@@ -40,14 +40,14 @@ been computed yet, one is generated on the fly and cached for future use.`,
 				if !storage.IsNotFound(err) {
 					return fmt.Errorf("failed to load muse: %w", err)
 				}
-				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from conversations.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse compose' to generate one from conversations.")
 				return nil
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(soul))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&diff, "diff", false, "print what changed in the latest distill")
+	cmd.Flags().BoolVar(&diff, "diff", false, "print what changed in the latest compose")
 	return cmd
 }
 
@@ -58,7 +58,7 @@ func runShowDiff(cmd *cobra.Command, store storage.Store) error {
 		return fmt.Errorf("failed to list muse history: %w", err)
 	}
 	if len(muses) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse distill' to generate one from conversations.")
+		fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse compose' to generate one from conversations.")
 		return nil
 	}
 	latest := muses[len(muses)-1]
@@ -89,7 +89,7 @@ func runShowDiff(cmd *cobra.Command, store storage.Store) error {
 	if err != nil {
 		return fmt.Errorf("bedrock client: %w", err)
 	}
-	d, _, err = distill.ComputeDiff(ctx, client, store, latest, previous, current)
+	d, _, err = compose.ComputeDiff(ctx, client, store, latest, previous, current)
 	if err != nil {
 		return fmt.Errorf("compute diff: %w", err)
 	}

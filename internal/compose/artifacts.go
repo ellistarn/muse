@@ -1,4 +1,4 @@
-package distill
+package compose
 
 import (
 	"context"
@@ -9,13 +9,13 @@ import (
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-// Artifact path conventions. Each strategy builds paths under "distill/" using
+// Artifact path conventions. Each strategy builds paths under "compose/" using
 // the Store's generic PutData/GetData/ListData/DeleteData methods.
 //
 // Clustering artifacts:
-//   distill/observations/{source}/{conversationID}.json
-//   distill/labels/{source}/{conversationID}.json
-//   distill/normalization.json
+//   compose/observations/{source}/{conversationID}.json
+//   compose/labels/{source}/{conversationID}.json
+//   compose/normalization.json
 
 // SourceConversation identifies a conversation by its source and conversation ID.
 type SourceConversation struct {
@@ -23,21 +23,21 @@ type SourceConversation struct {
 	ConversationID string
 }
 
-// distillPath returns the key for a distill artifact.
-func distillPath(kind, source, conversationID string) string {
-	return fmt.Sprintf("distill/%s/%s/%s.json", kind, source, conversationID)
+// composePath returns the key for a compose artifact.
+func composePath(kind, source, conversationID string) string {
+	return fmt.Sprintf("compose/%s/%s/%s.json", kind, source, conversationID)
 }
 
 // PutObservations writes observations for a conversation.
 func PutObservations(ctx context.Context, store storage.Store, source, conversationID string, obs *Observations) error {
-	return putJSON(ctx, store, distillPath("observations", source, conversationID), obs)
+	return putJSON(ctx, store, composePath("observations", source, conversationID), obs)
 }
 
 // GetObservations reads observations for a conversation.
 // Returns storage.NotFoundError when no artifact exists.
 func GetObservations(ctx context.Context, store storage.Store, source, conversationID string) (*Observations, error) {
 	var obs Observations
-	if err := getJSON(ctx, store, distillPath("observations", source, conversationID), &obs); err != nil {
+	if err := getJSON(ctx, store, composePath("observations", source, conversationID), &obs); err != nil {
 		return nil, err
 	}
 	return &obs, nil
@@ -45,13 +45,13 @@ func GetObservations(ctx context.Context, store storage.Store, source, conversat
 
 // PutLabels writes labels for a conversation.
 func PutLabels(ctx context.Context, store storage.Store, source, conversationID string, lbl *Labels) error {
-	return putJSON(ctx, store, distillPath("labels", source, conversationID), lbl)
+	return putJSON(ctx, store, composePath("labels", source, conversationID), lbl)
 }
 
 // GetLabels reads labels for a conversation.
 func GetLabels(ctx context.Context, store storage.Store, source, conversationID string) (*Labels, error) {
 	var lbl Labels
-	if err := getJSON(ctx, store, distillPath("labels", source, conversationID), &lbl); err != nil {
+	if err := getJSON(ctx, store, composePath("labels", source, conversationID), &lbl); err != nil {
 		return nil, err
 	}
 	return &lbl, nil
@@ -59,46 +59,46 @@ func GetLabels(ctx context.Context, store storage.Store, source, conversationID 
 
 // PutNormalization writes the normalization mapping.
 func PutNormalization(ctx context.Context, store storage.Store, norm *Normalization) error {
-	return putJSON(ctx, store, "distill/normalization.json", norm)
+	return putJSON(ctx, store, "compose/normalization.json", norm)
 }
 
 // GetNormalization reads the normalization mapping.
 func GetNormalization(ctx context.Context, store storage.Store) (*Normalization, error) {
 	var norm Normalization
-	if err := getJSON(ctx, store, "distill/normalization.json", &norm); err != nil {
+	if err := getJSON(ctx, store, "compose/normalization.json", &norm); err != nil {
 		return nil, err
 	}
 	return &norm, nil
 }
 
-// ListDistillObservations returns all (source, conversationID) pairs that have observations.
-func ListDistillObservations(ctx context.Context, store storage.Store) ([]SourceConversation, error) {
-	return listArtifacts(ctx, store, "distill/observations/")
+// ListObservations returns all (source, conversationID) pairs that have observations.
+func ListObservations(ctx context.Context, store storage.Store) ([]SourceConversation, error) {
+	return listArtifacts(ctx, store, "compose/observations/")
 }
 
-// ListDistillLabels returns all (source, conversationID) pairs that have labels.
-func ListDistillLabels(ctx context.Context, store storage.Store) ([]SourceConversation, error) {
-	return listArtifacts(ctx, store, "distill/labels/")
+// ListLabels returns all (source, conversationID) pairs that have labels.
+func ListLabels(ctx context.Context, store storage.Store) ([]SourceConversation, error) {
+	return listArtifacts(ctx, store, "compose/labels/")
 }
 
 // DeleteDistillObservations removes all observation artifacts.
 func DeleteDistillObservations(ctx context.Context, store storage.Store) error {
-	return store.DeleteData(ctx, "distill/observations/")
+	return store.DeleteData(ctx, "compose/observations/")
 }
 
-// DeleteDistillObservationsForSource removes observation artifacts for a specific source.
-func DeleteDistillObservationsForSource(ctx context.Context, store storage.Store, source string) error {
-	return store.DeleteData(ctx, fmt.Sprintf("distill/observations/%s/", source))
+// DeleteObservationsForSource removes observation artifacts for a specific source.
+func DeleteObservationsForSource(ctx context.Context, store storage.Store, source string) error {
+	return store.DeleteData(ctx, fmt.Sprintf("compose/observations/%s/", source))
 }
 
-// DeleteDistillLabels removes all label artifacts.
-func DeleteDistillLabels(ctx context.Context, store storage.Store) error {
-	return store.DeleteData(ctx, "distill/labels/")
+// DeleteLabels removes all label artifacts.
+func DeleteLabels(ctx context.Context, store storage.Store) error {
+	return store.DeleteData(ctx, "compose/labels/")
 }
 
-// DeleteDistillNormalization removes the normalization mapping artifact.
-func DeleteDistillNormalization(ctx context.Context, store storage.Store) error {
-	return store.DeleteData(ctx, "distill/normalization.json")
+// DeleteNormalization removes the normalization mapping artifact.
+func DeleteNormalization(ctx context.Context, store storage.Store) error {
+	return store.DeleteData(ctx, "compose/normalization.json")
 }
 
 // listArtifacts returns (source, conversationID) pairs from keys under the given prefix.

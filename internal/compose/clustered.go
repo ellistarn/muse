@@ -1,4 +1,4 @@
-package distill
+package compose
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 // a cluster. Labels with fewer observations flow through as noise.
 const minClusterSize = 3
 
-// ClusteredOptions configures a clustered distill run.
+// ClusteredOptions configures a clustered compose run.
 type ClusteredOptions struct {
 	BaseOptions
 	Relabel bool // force re-label all observations
@@ -31,7 +31,7 @@ type ClusteredOptions struct {
 	UploadBytes int // total bytes of new conversations
 }
 
-// RunClustered executes the full clustering distillation pipeline:
+// RunClustered executes the full clustering composition pipeline:
 // observe → label → normalize → group → sample → summarize → compose → diff.
 //
 // Grouping is by exact label match — shared label vocabulary plus normalization
@@ -293,7 +293,7 @@ func runObserve(
 	if opts.Reobserve {
 		if len(opts.Sources) > 0 {
 			for _, src := range opts.Sources {
-				DeleteDistillObservationsForSource(ctx, store, src)
+				DeleteObservationsForSource(ctx, store, src)
 				if opts.Verbose {
 					fmt.Fprintf(os.Stderr, "  Cleared observations for %s\n", src)
 				}
@@ -789,7 +789,7 @@ type observationEntry struct {
 // loadAllStructuredObservations loads all observation artifacts and returns
 // a flat list of observation entries, loading conversations in parallel.
 func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]observationEntry, error) {
-	convList, err := ListDistillObservations(ctx, store)
+	convList, err := ListObservations(ctx, store)
 	if err != nil {
 		return nil, err
 	}
@@ -945,14 +945,14 @@ func runLabel(
 	counter *atomic.Int32,
 ) (inference.Usage, HitMiss, int, error) {
 	if forceRelabel {
-		DeleteDistillLabels(ctx, store)
+		DeleteLabels(ctx, store)
 	}
 
 	labelPromptHash := Fingerprint(prompts.Label)
 
 	// Seed the label set from cached labels
 	labels := newLabelSet()
-	existingLabels, err := ListDistillLabels(ctx, store)
+	existingLabels, err := ListLabels(ctx, store)
 	if err != nil {
 		return inference.Usage{}, HitMiss{}, 0, fmt.Errorf("list labels: %w", err)
 	}
@@ -1112,7 +1112,7 @@ func runNormalize(
 	verbose bool,
 ) (inference.Usage, error) {
 	// Collect all unique labels
-	convList, err := ListDistillLabels(ctx, store)
+	convList, err := ListLabels(ctx, store)
 	if err != nil {
 		return inference.Usage{}, fmt.Errorf("list labels: %w", err)
 	}
@@ -1257,7 +1257,7 @@ func runGroup(ctx context.Context, store storage.Store, allObs []observationEntr
 	// Load labels to get label for each observation
 	type conversationKey struct{ source, conversationID string }
 	lblByConversation := map[conversationKey]*Labels{}
-	convList, err := ListDistillLabels(ctx, store)
+	convList, err := ListLabels(ctx, store)
 	if err != nil {
 		return nil, nil, err
 	}

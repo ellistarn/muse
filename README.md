@@ -12,7 +12,7 @@ go install github.com/ellistarn/muse@latest
 ## Getting Started
 
 ```bash
-muse distill              # discover conversations and distill muse.md
+muse compose              # discover conversations and compose muse.md
 muse ask "your question"  # ask your muse directly
 muse listen               # start MCP server
 muse show                 # print muse.md

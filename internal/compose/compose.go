@@ -1,4 +1,4 @@
-package distill
+package compose
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/ellistarn/muse/prompts"
 )
 
-// LLM is the inference client used by the distill pipeline.
+// LLM is the inference client used by the compose pipeline.
 type LLM = inference.Client
 
 // StageStats captures telemetry for a single pipeline stage.
@@ -28,7 +28,7 @@ type StageStats struct {
 	DataSize int // bytes of input data processed
 }
 
-// Result summarizes a distill run.
+// Result summarizes a compose run.
 type Result struct {
 	Processed    int
 	Pruned       int
@@ -39,7 +39,7 @@ type Result struct {
 	Cache        CacheStats
 	Stages       []StageStats
 	Usage        inference.Usage
-	Muse         string // the distilled muse.md
+	Muse         string // the composed muse.md
 }
 
 // CacheStats tracks cache hit/miss counts for each cached pipeline stage.
@@ -54,7 +54,7 @@ type HitMiss struct {
 	Miss int
 }
 
-// BaseOptions contains fields shared across all distill strategies.
+// BaseOptions contains fields shared across all compose strategies.
 type BaseOptions struct {
 	// Reobserve ignores persisted observations and re-observes all conversations.
 	Reobserve bool
@@ -67,14 +67,14 @@ type BaseOptions struct {
 	Verbose bool
 }
 
-// Options configures a map-reduce distill run.
+// Options configures a map-reduce compose run.
 type Options struct {
 	BaseOptions
-	// Learn skips observe and only re-distills from existing observations.
+	// Learn skips observe and only recomposes from existing observations.
 	Learn bool
 }
 
-// Run executes the distill pipeline: observe new conversations, then learn a muse
+// Run executes the compose pipeline: observe new conversations, then learn a muse
 // from all observations. Observations are the source of truth for what has been
 // processed; there is no separate state file.
 func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opts Options) (*Result, error) {
@@ -229,7 +229,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Muse distilled (%s, $%.4f)\n", time.Since(learnStart).Round(time.Millisecond), learnUsage.Cost())
+	fmt.Fprintf(os.Stderr, "Muse composed (%s, $%.4f)\n", time.Since(learnStart).Round(time.Millisecond), learnUsage.Cost())
 
 	processed := len(pending)
 	return &Result{
@@ -242,7 +242,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 }
 
 // LearnOnly re-runs only the learn phase using persisted observations.
-// Use this to re-compose the muse with improved techniques without re-observing.
+// Use this to recompose the muse with improved techniques without re-observing.
 func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result, error) {
 	allObservations, err := loadAllObservations(ctx, store)
 	if err != nil {
@@ -257,7 +257,7 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result,
 	if err != nil {
 		return nil, fmt.Errorf("learn failed: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Muse distilled (%s, $%.4f)\n", time.Since(start).Round(time.Millisecond), usage.Cost())
+	fmt.Fprintf(os.Stderr, "Muse composed (%s, $%.4f)\n", time.Since(start).Round(time.Millisecond), usage.Cost())
 
 	return &Result{
 		Usage: usage,

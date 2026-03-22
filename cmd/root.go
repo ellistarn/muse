@@ -25,20 +25,20 @@ func Execute() error {
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "muse",
-		Short: "The distilled essence of how you think",
-		Long: `A muse absorbs your conversations from agent interactions, distills them into
+		Short: "The composed essence of how you think",
+		Long: `A muse absorbs your conversations from agent interactions, composes them into
 muse.md, and embodies your unique thought processes when asked questions.
 
 Workflow:
 
-  1. muse distill    Discover conversations, observe, and distill muse.md
+  1. muse compose    Discover conversations, observe, and compose muse.md
   2. muse show       Print muse.md
   3. muse ask        Ask your muse a question (stateless, one-shot)
   4. muse listen     Start an MCP server so agents can ask your muse
 
 Getting started:
 
-  muse distill && muse show
+  muse compose && muse show
 
 Data is stored locally at ~/.muse/ by default. Set MUSE_BUCKET to use S3 instead.
 
@@ -51,7 +51,7 @@ Run "muse listen --help" for MCP server configuration.`,
 	}
 	cmd.PersistentFlags().StringVar(&bucket, "bucket", os.Getenv("MUSE_BUCKET"), "S3 bucket name (or set MUSE_BUCKET)")
 	cmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show per-item progress during pipeline stages")
-	cmd.AddCommand(newDistillCmd())
+	cmd.AddCommand(newComposeCmd())
 	cmd.AddCommand(newShowCmd())
 	cmd.AddCommand(newListenCmd())
 	cmd.AddCommand(newAskCmd())

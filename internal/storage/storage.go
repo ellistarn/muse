@@ -38,7 +38,7 @@ type Store interface {
 
 	// Raw data — generic key/value operations for pipeline artifacts and
 	// strategy-specific state. Keys are slash-delimited paths (e.g.
-	// "distill/observations/opencode/ses_001.json"). Each strategy builds
+	// "compose/observations/opencode/ses_001.json"). Each strategy builds
 	// its own path conventions on top.
 	PutData(ctx context.Context, key string, data []byte) error
 	GetData(ctx context.Context, key string) ([]byte, error)

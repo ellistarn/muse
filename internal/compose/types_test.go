@@ -1,4 +1,4 @@
-package distill
+package compose
 
 import (
 	"context"
@@ -67,9 +67,9 @@ func TestArtifactObservations(t *testing.T) {
 	}
 
 	// List
-	list, err := ListDistillObservations(ctx, store)
+	list, err := ListObservations(ctx, store)
 	if err != nil {
-		t.Fatalf("ListDistillObservations: %v", err)
+		t.Fatalf("ListObservations: %v", err)
 	}
 	if len(list) != 1 {
 		t.Fatalf("expected 1 observation, got %d", len(list))
@@ -130,18 +130,18 @@ func TestArtifactDelete(t *testing.T) {
 	PutLabels(ctx, store, "src1", "s1", &Labels{Items: []Label{{Observation: "a", Label: "x"}}})
 
 	// Delete observations for one source
-	if err := DeleteDistillObservationsForSource(ctx, store, "src1"); err != nil {
-		t.Fatalf("DeleteDistillObservationsForSource: %v", err)
+	if err := DeleteObservationsForSource(ctx, store, "src1"); err != nil {
+		t.Fatalf("DeleteObservationsForSource: %v", err)
 	}
 
 	// src1 gone, src2 remains
-	list, _ := ListDistillObservations(ctx, store)
+	list, _ := ListObservations(ctx, store)
 	if len(list) != 1 || list[0].Source != "src2" {
 		t.Errorf("expected only src2: %+v", list)
 	}
 
 	// Labels untouched
-	lblList, _ := ListDistillLabels(ctx, store)
+	lblList, _ := ListLabels(ctx, store)
 	if len(lblList) != 1 {
 		t.Errorf("expected 1 label, got %d", len(lblList))
 	}
@@ -151,7 +151,7 @@ func TestArtifactDelete(t *testing.T) {
 	if err := DeleteDistillObservations(ctx, store); err != nil {
 		t.Fatalf("DeleteDistillObservations: %v", err)
 	}
-	list, _ = ListDistillObservations(ctx, store)
+	list, _ = ListObservations(ctx, store)
 	if len(list) != 0 {
 		t.Errorf("expected 0 observations after delete all, got %d", len(list))
 	}

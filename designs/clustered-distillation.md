@@ -36,9 +36,9 @@ Two distillation methods are available permanently. Clustering produces thematic
 at higher complexity. Map-reduce is simpler and sufficient for smaller observation sets.
 
 ```bash
-muse distill                      # default: clustering
-muse distill --method=clustering
-muse distill --method=map-reduce
+muse compose                      # default: clustering
+muse compose --method=clustering
+muse compose --method=map-reduce
 ```
 
 ### Caching
@@ -72,12 +72,12 @@ These are debugging tools for prompt iteration — correctness never depends on 
 ### Storage
 
 Conversations are input. The muse is output. Everything in between is pipeline internals owned by the
-distillation system, nested under `distill/`.
+distillation system, nested under `compose/`.
 
 ```
 ~/.muse/
 ├── conversations/{source}/{conversation_id}.json              # input, syncable
-├── distill/
+├── compose/
 │   ├── observations/{source}/{conversation_id}.json           # syncable
 │   ├── labels/{source}/{conversation_id}.json                 # syncable
 │   ├── normalization.json                                # label mapping, ephemeral
@@ -90,16 +90,16 @@ Observations are a JSON array of discrete strings per conversation — each obse
 label. Labels are stored one file per conversation containing all per-observation entries:
 
 ```json
-// distill/observations/{source}/{conversation_id}.json
+// compose/observations/{source}/{conversation_id}.json
 {"fingerprint": "abc123", "items": ["obs1", "obs2", "obs3"]}
 
-// distill/labels/{source}/{conversation_id}.json
+// compose/labels/{source}/{conversation_id}.json
 {"fingerprint": "def456", "items": [
   {"observation": "obs1", "label": "root cause over symptom fixing"},
   {"observation": "obs2", "label": "abstraction must earn its cost"}
 ]}
 
-// distill/normalization.json
+// compose/normalization.json
 {"fingerprint": "789abc", "mapping": {
   "abstraction must earn its keep": "abstraction must earn its cost",
   "infra-tasks": "infrastructure work"

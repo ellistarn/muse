@@ -41,7 +41,7 @@ on recency and importance. There is a real tradeoff between recency and importan
 
 ### Update granularity
 
-Each run of `muse distill` produces a batch of new observations. Updating one observation at a
+Each run of `muse compose` produces a batch of new observations. Updating one observation at a
 time works but costs an Opus call per observation. Batching amortizes that overhead, but too
 large a batch overwhelms the model's reasoning about a dense muse. The batch size shrinks as
 the muse fills (see Decisions below).
@@ -67,7 +67,7 @@ of evidence is conveyed through natural language:
 ```
 ~/.muse/
 ├── conversations/{source}/{session_id}.json              # input, syncable
-├── distill/
+├── compose/
 │   └── observations/{source}/{session_id}.json           # shared, syncable
 ├── muse/versions/{timestamp}/
 │   ├── muse.md                                           # output, syncable
@@ -77,7 +77,7 @@ of evidence is conveyed through natural language:
 ### Usage
 
 ```bash
-muse distill --method=incremental
+muse compose --method=incremental
 ```
 
 ## Bootstrap and Updates

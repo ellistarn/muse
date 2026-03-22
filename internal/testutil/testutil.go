@@ -210,9 +210,9 @@ type LLMCall struct {
 	User   string
 }
 
-// MockLLM is a test double for distill.LLM that returns canned responses.
+// MockLLM is a test double for compose.LLM that returns canned responses.
 // It dispatches based on whether the system prompt contains
-// "distilling observations" (learn phase) or not (observe phase).
+// "composing observations" (learn phase) or not (observe phase).
 type MockLLM struct {
 	ObserveResponse string
 	LearnResponse   string
@@ -236,7 +236,7 @@ func (m *MockLLM) ConverseMessages(_ context.Context, system string, messages []
 	}
 	usage := inference.Usage{InputTokens: 100, OutputTokens: 50}
 	text := m.ObserveResponse
-	if strings.Contains(system, "distilling observations") {
+	if strings.Contains(system, "composing observations") {
 		text = m.LearnResponse
 	}
 	return &inference.Response{Text: text, Usage: usage}, nil

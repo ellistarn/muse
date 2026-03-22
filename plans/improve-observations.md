@@ -1,8 +1,8 @@
 # Plan: Improve Observations
 
-The observe step is the atomic unit of the distill pipeline: one conversation in, observations out. Even as the pipeline around it evolves, observe stays. Getting it right is the highest-leverage move.
+The observe step is the atomic unit of the compose pipeline: one conversation in, observations out. Even as the pipeline around it evolves, observe stays. Getting it right is the highest-leverage move.
 
-Three changes, all in `internal/distill/`. No new packages.
+Three changes, all in `internal/compose/`. No new packages.
 
 ## 1. Rewrite `observePrompt` in `prompts.go`
 
@@ -57,7 +57,7 @@ Key differences from current:
 
 The SKILL.md is the human-readable source of truth. The prompt is its operational form. Keep them in sync. Same changes: default to "produce nothing," emphasize reasoning over surface patterns, add the good/bad example.
 
-## 3. Strip tool data in `formatSession` at `distill.go:284-293`
+## 3. Strip tool data in `formatSession` at `compose.go:284-293`
 
 `formatSession` currently dumps `[role]: content` for every message. Tool call inputs/outputs are the highest-PII payload (file contents, command outputs, API responses). The role/content pairs already capture the human's words and the assistant's reasoning, which is where all the signal lives.
 
@@ -67,9 +67,9 @@ Change: if a message role is `tool` or the content is a tool result, skip it or 
 
 | File | Change |
 |------|--------|
-| `internal/distill/prompts.go:6-21` | Rewrite `observePrompt` |
+| `internal/compose/prompts.go:6-21` | Rewrite `observePrompt` |
 | `skills/observe/SKILL.md` | Update to match new prompt |
-| `internal/distill/distill.go:284-293` | Strip tool payloads in `formatSession` |
+| `internal/compose/distill.go:284-293` | Strip tool payloads in `formatSession` |
 
 ## What this does NOT include
 
@@ -80,7 +80,7 @@ Change: if a message role is `tool` or the content is a tool result, skip it or 
 
 ## How to validate
 
-Run `muse distill --reobserve` on existing conversations and diff the old vs new observations. Look for:
+Run `muse compose --reobserve` on existing conversations and diff the old vs new observations. Look for:
 
 - More `NO_OBSERVATIONS` outputs (good -- means it's not inventing signal)
 - Observations that include reasoning ("because...") rather than just preferences

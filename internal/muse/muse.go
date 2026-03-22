@@ -50,7 +50,7 @@ func New(ctx context.Context, store storage.Store, llm inference.Client) (*Muse,
 		if !storage.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to load muse: %w", err)
 		}
-		soul = "" // no muse yet — first run before any distills
+		soul = "" // no muse yet — first run before any composes
 	}
 	return &Muse{
 		storage:  store,
@@ -87,7 +87,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 		// New conversation
 		soul := m.soul
 		if soul == "" {
-			soul = "No muse available yet. Run 'muse distill' to generate one from conversations."
+			soul = "No muse available yet. Run 'muse compose' to generate one from conversations."
 		}
 		session = &Session{
 			System: fmt.Sprintf(systemPrompt, soul),

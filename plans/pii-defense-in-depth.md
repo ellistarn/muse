@@ -41,7 +41,7 @@ What it preserves:
 
 Supports user-provided custom redaction terms via config (your name, company names, project names).
 
-Hooks into `observeSession` in `distill.go`, scrubbing the formatted conversation before the LLM call.
+Hooks into `observeSession` in `compose.go`, scrubbing the formatted conversation before the LLM call.
 
 ### Layer 2: Strip tool data in `formatSession`
 
@@ -63,7 +63,7 @@ In `Ask()`, scrub the LLM response before returning it. Last line of defense. If
 
 ### Layer 5: Storage hygiene
 
-After a successful distill, purge processed conversations from S3. Raw conversations are only needed until they're observed. Add `PurgeProcessedConversations` to the storage client.
+After a successful compose, purge processed conversations from S3. Raw conversations are only needed until they're observed. Add `PurgeProcessedConversations` to the storage client.
 
 Also: S3 bucket should have server-side encryption enabled and public access blocked.
 
@@ -88,7 +88,7 @@ The scrubber loads these at initialization and adds them to the pattern list. Th
 | `internal/scrub/scrub.go` (new) | Deterministic regex scrubber |
 | `internal/scrub/patterns.go` (new) | Pattern definitions |
 | `internal/scrub/scrub_test.go` (new) | Table-driven tests for every pattern |
-| `internal/distill/distill.go` | Scrub conversation before observe, scrub skills after learn |
+| `internal/compose/distill.go` | Scrub conversation before observe, scrub skills after learn |
 | `internal/muse/muse.go` | Scrub response in `Ask()` |
 | `internal/storage/s3.go` | Add `PurgeProcessedConversations()` |
 

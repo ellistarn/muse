@@ -48,12 +48,12 @@ Sends a question to the muse. Stateless, one-shot. The muse is loaded as the sys
 ## Commands
 
 ```
-muse distill [source...]        # observe new conversations and compose the muse
+muse compose [source...]        # observe new conversations and compose the muse
 muse ask <question>             # ask the muse a question
 muse show                       # print the muse
 muse show --diff                # what changed in the last composition
 muse sync <src> <dst>           # copy data between local and S3
 ```
 
-`distill` composes observe and compose into a single command. The operations are defined
+`compose` combines observe and compose into a single command. The operations are defined
 separately because they have distinct types and can be implemented independently.

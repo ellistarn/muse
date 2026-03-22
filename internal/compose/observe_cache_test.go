@@ -1,4 +1,4 @@
-package distill
+package compose
 
 import (
 	"context"

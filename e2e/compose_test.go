@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/ellistarn/muse/internal/conversation"
-	"github.com/ellistarn/muse/internal/distill"
+	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/testutil"
 )
@@ -44,7 +44,7 @@ func TestMapReduce_EndToEnd(t *testing.T) {
 		LearnResponse:   "## Naming\n\nI use kebab-case for file names.\n\n## Commits\n\nNo emojis. Keep them short.",
 	}
 
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestMapReduce_NoConversations(t *testing.T) {
 	store := testutil.NewConversationStore()
 	llm := &testutil.MockLLM{}
 
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestMapReduce_Limit(t *testing.T) {
 		LearnResponse:   "## Test\n\nContent here.",
 	}
 
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{BaseOptions: distill.BaseOptions{Limit: 2}})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{BaseOptions: compose.BaseOptions{Limit: 2}})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestMapReduce_LimitIncludesPreviousObservations(t *testing.T) {
 	}
 
 	// First run: limit to 2
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{BaseOptions: distill.BaseOptions{Limit: 2}})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{BaseOptions: compose.BaseOptions{Limit: 2}})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestMapReduce_LimitIncludesPreviousObservations(t *testing.T) {
 
 	// Second run: limit to 2 again, should observe 2 more and learn from all 4
 	llm.Calls = nil
-	result, err = distill.Run(context.Background(), store, llm, llm, distill.Options{BaseOptions: distill.BaseOptions{Limit: 2}})
+	result, err = compose.Run(context.Background(), store, llm, llm, compose.Options{BaseOptions: compose.BaseOptions{Limit: 2}})
 	if err != nil {
 		t.Fatalf("second Run() error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestMapReduce_EmptyConversation(t *testing.T) {
 
 	llm := &testutil.MockLLM{}
 
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestMapReduce_ObserveError(t *testing.T) {
 		{Role: "assistant", Content: "sure"},
 	})
 
-	_, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
+	_, err := compose.Run(context.Background(), store, llm, llm, compose.Options{})
 	if err == nil {
 		t.Fatal("expected error from LLM failure, got nil")
 	}
@@ -217,14 +217,14 @@ func TestMapReduce_Reobserve(t *testing.T) {
 	}
 
 	// First run
-	_, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
+	_, err := compose.Run(context.Background(), store, llm, llm, compose.Options{})
 	if err != nil {
 		t.Fatalf("first Run() error: %v", err)
 	}
 
 	// With Reobserve, it should process again
 	llm.Calls = nil
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{BaseOptions: distill.BaseOptions{Reobserve: true}})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{BaseOptions: compose.BaseOptions{Reobserve: true}})
 	if err != nil {
 		t.Fatalf("reprocess Run() error: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestMapReduce_IncrementalPersist(t *testing.T) {
 		LearnResponse:   "## Test\n\nContent.",
 	}
 
-	result, err := distill.Run(context.Background(), store, llm, llm, distill.Options{})
+	result, err := compose.Run(context.Background(), store, llm, llm, compose.Options{})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -260,10 +260,10 @@ func TestClustered_EndToEnd(t *testing.T) {
 	store := twoConversationStore()
 	mock := &clusterMockLLM{}
 
-	result, err := distill.RunClustered(
+	result, err := compose.RunClustered(
 		context.Background(), store,
 		mock, mock, mock, mock,
-		distill.ClusteredOptions{BaseOptions: distill.BaseOptions{Limit: 100}},
+		compose.ClusteredOptions{BaseOptions: compose.BaseOptions{Limit: 100}},
 	)
 	if err != nil {
 		t.Fatalf("RunClustered: %v", err)
@@ -280,16 +280,16 @@ func TestClustered_EndToEnd(t *testing.T) {
 	}
 
 	// Verify artifacts via Store
-	obsList, err := distill.ListDistillObservations(context.Background(), store)
+	obsList, err := compose.ListObservations(context.Background(), store)
 	if err != nil {
-		t.Fatalf("ListDistillObservations: %v", err)
+		t.Fatalf("ListObservations: %v", err)
 	}
 	if len(obsList) == 0 {
 		t.Error("expected observation artifacts")
 	}
-	clsList, err := distill.ListDistillLabels(context.Background(), store)
+	clsList, err := compose.ListLabels(context.Background(), store)
 	if err != nil {
-		t.Fatalf("ListDistillLabels: %v", err)
+		t.Fatalf("ListLabels: %v", err)
 	}
 	if len(clsList) == 0 {
 		t.Error("expected label artifacts")
@@ -306,17 +306,17 @@ func TestClustered_CacheHit(t *testing.T) {
 	})
 
 	mock := &clusterMockLLM{}
-	opts := distill.ClusteredOptions{BaseOptions: distill.BaseOptions{Limit: 100}}
+	opts := compose.ClusteredOptions{BaseOptions: compose.BaseOptions{Limit: 100}}
 
 	// First run
-	_, err := distill.RunClustered(context.Background(), store, mock, mock, mock, mock, opts)
+	_, err := compose.RunClustered(context.Background(), store, mock, mock, mock, mock, opts)
 	if err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	callsBefore := len(mock.calls)
 
 	// Second run should use cache
-	_, err = distill.RunClustered(context.Background(), store, mock, mock, mock, mock, opts)
+	_, err = compose.RunClustered(context.Background(), store, mock, mock, mock, mock, opts)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -330,10 +330,10 @@ func TestClustered_NoConversations(t *testing.T) {
 	store := testutil.NewConversationStore()
 	mock := &clusterMockLLM{}
 
-	result, err := distill.RunClustered(
+	result, err := compose.RunClustered(
 		context.Background(), store,
 		mock, mock, mock, mock,
-		distill.ClusteredOptions{BaseOptions: distill.BaseOptions{Limit: 100}},
+		compose.ClusteredOptions{BaseOptions: compose.BaseOptions{Limit: 100}},
 	)
 	if err != nil {
 		t.Fatalf("RunClustered: %v", err)
@@ -357,10 +357,10 @@ func TestClustered_ObserveError(t *testing.T) {
 
 	mock := &clusterMockLLM{failOnExtract: true}
 
-	_, err := distill.RunClustered(
+	_, err := compose.RunClustered(
 		context.Background(), store,
 		mock, mock, mock, mock,
-		distill.ClusteredOptions{BaseOptions: distill.BaseOptions{Limit: 100}},
+		compose.ClusteredOptions{BaseOptions: compose.BaseOptions{Limit: 100}},
 	)
 	if err == nil {
 		t.Fatal("expected error from LLM failure, got nil")
@@ -380,10 +380,10 @@ func TestClustered_Limit(t *testing.T) {
 
 	mock := &clusterMockLLM{}
 
-	result, err := distill.RunClustered(
+	result, err := compose.RunClustered(
 		context.Background(), store,
 		mock, mock, mock, mock,
-		distill.ClusteredOptions{BaseOptions: distill.BaseOptions{Limit: 2}},
+		compose.ClusteredOptions{BaseOptions: compose.BaseOptions{Limit: 2}},
 	)
 	if err != nil {
 		t.Fatalf("RunClustered: %v", err)
@@ -413,7 +413,7 @@ func (m *contentFailLLM) ConverseMessages(_ context.Context, system string, mess
 		user = messages[len(messages)-1].Content
 	}
 	usage := inference.Usage{InputTokens: 100, OutputTokens: 50}
-	if strings.Contains(system, "distilling observations") {
+	if strings.Contains(system, "composing observations") {
 		return &inference.Response{Text: m.learnResponse, Usage: usage}, nil
 	}
 	if strings.Contains(user, m.failOn) {
@@ -461,7 +461,7 @@ func (m *clusterMockLLM) ConverseMessages(_ context.Context, system string, mess
 	if strings.Contains(system, "producing muse.md") {
 		return &inference.Response{Text: "# How I Think\n\nI value explicitness over cleverness.", Usage: usage}, nil
 	}
-	if strings.Contains(system, "distilling observations") {
+	if strings.Contains(system, "composing observations") {
 		return &inference.Response{Text: "# Muse\n\nValues clarity.", Usage: usage}, nil
 	}
 	// Refine: pass through observations as-is
