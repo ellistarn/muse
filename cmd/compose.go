@@ -66,15 +66,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 			// only recomposes from existing observations)
 			var uploaded, uploadBytes int
 			if !learn {
-				llm, err := newLLMClient(ctx, TierCompose)
-				if err != nil {
-					return err
-				}
-				m, err := muse.New(ctx, store, llm)
-				if err != nil {
-					return err
-				}
-				result, err := m.Upload(ctx, sources...)
+				result, err := muse.Upload(ctx, store, sources...)
 				if err != nil {
 					return err
 				}

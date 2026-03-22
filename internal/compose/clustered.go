@@ -305,19 +305,7 @@ func runObserve(
 	}
 
 	// Filter by sources
-	if len(opts.Sources) > 0 {
-		allowed := make(map[string]bool, len(opts.Sources))
-		for _, s := range opts.Sources {
-			allowed[s] = true
-		}
-		var filtered []storage.ConversationEntry
-		for _, e := range entries {
-			if allowed[e.Source] {
-				filtered = append(filtered, e)
-			}
-		}
-		entries = filtered
-	}
+	entries = storage.FilterEntriesBySource(entries, opts.Sources)
 
 	// Count per-source conversations
 	sourceCounts := map[string]int{}
@@ -502,46 +490,12 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
 func extractObservations(ctx context.Context, client LLM, conv *conversation.Conversation, verbose bool) ([]string, inference.Usage, error) {
-	turns := extractTurns(conv)
-	if len(turns) == 0 {
-		return nil, inference.Usage{}, nil
+	refined, usage, err := extractAndRefine(ctx, client, conv)
+	if err != nil {
+		return nil, usage, err
 	}
-
-	// Mechanically compress the conversation — no LLM calls. Strips code blocks,
-	// collapses tool output to [tool: name] markers, truncates long assistant messages.
-	// Human messages are preserved in full since they carry the signal.
-	chunks := compressConversation(turns)
-	if len(chunks) == 0 {
-		return nil, inference.Usage{}, nil
-	}
-
-	var totalUsage inference.Usage
-
-	// Extract candidates
-	var allCandidates []string
-	for _, chunk := range chunks {
-		obs, usage, err := inference.Converse(ctx, client, prompts.Extract, chunk, inference.WithMaxTokens(4096))
-		totalUsage = totalUsage.Add(usage)
-		if err != nil && obs == "" {
-			return nil, totalUsage, err
-		}
-		if obs != "" && !isEmpty(obs) {
-			allCandidates = append(allCandidates, obs)
-		}
-	}
-	if len(allCandidates) == 0 {
-		return nil, totalUsage, nil
-	}
-
-	// Refine
-	candidates := strings.Join(allCandidates, "\n\n")
-	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
-	totalUsage = totalUsage.Add(usage)
-	if err != nil && refined == "" {
-		return nil, totalUsage, err
-	}
-	if isEmpty(refined) {
-		return nil, totalUsage, nil
+	if refined == "" {
+		return nil, usage, nil
 	}
 
 	// Parse refined output into discrete items.
@@ -567,7 +521,54 @@ func extractObservations(ctx context.Context, client LLM, conv *conversation.Con
 			fmt.Fprintf(os.Stderr, "      - %s\n", text)
 		}
 	}
-	return relevant, totalUsage, nil
+	return relevant, usage, nil
+}
+
+// extractAndRefine is the shared core of the observation pipeline. It extracts
+// turns from a conversation, mechanically compresses them, runs the extract
+// prompt in chunks, and refines the candidates into a single text.
+// Both the map-reduce path (which wants raw text) and the clustering path
+// (which further parses into discrete items) call this function.
+func extractAndRefine(ctx context.Context, client LLM, conv *conversation.Conversation) (string, inference.Usage, error) {
+	turns := extractTurns(conv)
+	if len(turns) == 0 {
+		return "", inference.Usage{}, nil
+	}
+
+	chunks := compressConversation(turns)
+	if len(chunks) == 0 {
+		return "", inference.Usage{}, nil
+	}
+
+	var totalUsage inference.Usage
+
+	// Extract candidates (Pass 1)
+	var allCandidates []string
+	for _, chunk := range chunks {
+		obs, usage, err := inference.Converse(ctx, client, prompts.Extract, chunk, inference.WithMaxTokens(4096))
+		totalUsage = totalUsage.Add(usage)
+		if err != nil && obs == "" {
+			return "", totalUsage, err
+		}
+		if obs != "" && !isEmpty(obs) {
+			allCandidates = append(allCandidates, obs)
+		}
+	}
+	if len(allCandidates) == 0 {
+		return "", totalUsage, nil
+	}
+
+	// Refine (Pass 2)
+	candidates := strings.Join(allCandidates, "\n\n")
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if err != nil && refined == "" {
+		return "", totalUsage, err
+	}
+	if isEmpty(refined) {
+		return "", totalUsage, nil
+	}
+	return refined, totalUsage, nil
 }
 
 // maxAssistantChars caps truncated assistant messages. Long assistant output is
@@ -755,8 +756,7 @@ func parseObservationItems(text string) []string {
 	return items
 }
 
-// observationEntry flattens source/conversation/index into a single record
-// so downstream stages can track observations across conversations. removes a leading bullet or numbered-list marker from a line.
+// stripListPrefix removes a leading bullet or numbered-list marker from a line.
 // Handles "- ...", "• ...", "* ...", "1. ...", "12. ...", etc.
 func stripListPrefix(s string) string {
 	// Bullet markers: "- ", "• ", "* "

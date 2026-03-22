@@ -115,19 +115,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 	}
 
 	// Filter by sources if specified
-	if len(opts.Sources) > 0 {
-		allowed := make(map[string]bool, len(opts.Sources))
-		for _, s := range opts.Sources {
-			allowed[s] = true
-		}
-		var filtered []storage.ConversationEntry
-		for _, e := range entries {
-			if allowed[e.Source] {
-				filtered = append(filtered, e)
-			}
-		}
-		entries = filtered
-	}
+	entries = storage.FilterEntriesBySource(entries, opts.Sources)
 
 	// Diff: conversations without corresponding observations (or stale ones) are pending
 	var pending []storage.ConversationEntry
@@ -291,46 +279,11 @@ type turn struct {
 }
 
 func observeConversation(ctx context.Context, client LLM, conv *conversation.Conversation) (string, inference.Usage, error) {
-	turns := extractTurns(conv)
-	if len(turns) == 0 {
-		return "", inference.Usage{}, nil
-	}
-
-	var totalUsage inference.Usage
-
-	// Mechanically compress the conversation — no LLM calls.
-	chunks := compressConversation(turns)
-	if len(chunks) == 0 {
-		return "", totalUsage, nil
-	}
-
-	// Extract candidate observations (Pass 1)
-	var allCandidates []string
-	for _, chunk := range chunks {
-		obs, usage, err := inference.Converse(ctx, client, prompts.Extract, chunk, inference.WithMaxTokens(4096))
-		totalUsage = totalUsage.Add(usage)
-		if err != nil && obs == "" {
-			return "", totalUsage, err
-		}
-		if obs != "" && !isEmpty(obs) {
-			allCandidates = append(allCandidates, obs)
-		}
-	}
-	if len(allCandidates) == 0 {
-		return "", totalUsage, nil
-	}
-
-	// Refine observations (Pass 2)
-	candidates := strings.Join(allCandidates, "\n\n")
-	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
-	totalUsage = totalUsage.Add(usage)
+	refined, usage, err := extractAndRefine(ctx, client, conv)
 	if err != nil {
-		return "", totalUsage, err
+		return "", usage, err
 	}
-	if isEmpty(refined) {
-		return "", totalUsage, nil
-	}
-	return refined, totalUsage, nil
+	return refined, usage, nil
 }
 
 // isEmpty checks if the LLM output has no substantive content.

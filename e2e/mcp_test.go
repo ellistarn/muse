@@ -22,7 +22,7 @@ func newMCPClient(t *testing.T, soul string, responses ...bedrockruntime.Convers
 	runtime := &mockRuntime{responses: responses}
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := museinternal.NewForTest(bedrockClient, soul)
+	m := museinternal.New(bedrockClient, soul)
 	srv := musemcp.NewServer(m)
 
 	c, err := client.NewInProcessClient(srv)
@@ -101,7 +101,7 @@ func TestMCP_ErrorsReturnedAsToolResults(t *testing.T) {
 	errRuntime := &errorRuntime{err: fmt.Errorf("model not available")}
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, errRuntime)
-	m := museinternal.NewForTest(bedrockClient, "some soul")
+	m := museinternal.New(bedrockClient, "some soul")
 	srv := musemcp.NewServer(m)
 
 	c, err := client.NewInProcessClient(srv)

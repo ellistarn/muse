@@ -120,14 +120,14 @@ func (l *LocalStore) GetConversation(_ context.Context, src, conversationID stri
 
 // GetMuse returns the latest muse version by finding the most recent timestamp
 // that contains a muse.md file. Directories with only a diff.md are skipped.
-func (l *LocalStore) GetMuse(_ context.Context) (string, error) {
-	timestamps, err := l.ListMuses(context.Background())
+func (l *LocalStore) GetMuse(ctx context.Context) (string, error) {
+	timestamps, err := l.ListMuses(ctx)
 	if err != nil {
 		return "", err
 	}
 	// Walk backwards to find the latest timestamp that has a muse.md
 	for i := len(timestamps) - 1; i >= 0; i-- {
-		content, err := l.GetMuseVersion(context.Background(), timestamps[i])
+		content, err := l.GetMuseVersion(ctx, timestamps[i])
 		if err == nil {
 			return content, nil
 		}
@@ -317,12 +317,8 @@ func (l *LocalStore) ListData(_ context.Context, prefix string) ([]string, error
 }
 
 // DeleteData removes all files under the given prefix.
-func (l *LocalStore) DeleteData(_ context.Context, prefix string) error {
-	path := filepath.Join(l.root, filepath.FromSlash(prefix))
-	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete %s: %w", prefix, err)
-	}
-	return nil
+func (l *LocalStore) DeleteData(ctx context.Context, prefix string) error {
+	return l.DeletePrefix(ctx, prefix)
 }
 
 // DeletePrefix removes all files under the given prefix.

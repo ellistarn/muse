@@ -66,7 +66,7 @@ func TestAskWithSoul(t *testing.T) {
 
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := muse.NewForTest(bedrockClient, "Use kebab-case for file names. Always wrap errors with context.")
+	m := muse.New(bedrockClient, "Use kebab-case for file names. Always wrap errors with context.")
 
 	result, err := m.Ask(ctx, muse.AskInput{Question: "how should I name files?"})
 	if err != nil {
@@ -103,7 +103,7 @@ func TestAskEmptyMuse(t *testing.T) {
 
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := muse.NewForTest(bedrockClient, "")
+	m := muse.New(bedrockClient, "")
 
 	result, err := m.Ask(ctx, muse.AskInput{Question: "how do you handle errors?"})
 	if err != nil {
@@ -129,7 +129,7 @@ func TestAskMultiTurn(t *testing.T) {
 
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := muse.NewForTest(bedrockClient, "Keep functions small.")
+	m := muse.New(bedrockClient, "Keep functions small.")
 
 	// Turn 1: initial question
 	r1, err := m.Ask(ctx, muse.AskInput{Question: "Is my handler well structured?"})
@@ -174,7 +174,7 @@ func TestAskIndependentSessions(t *testing.T) {
 
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := muse.NewForTest(bedrockClient, "Be concise.")
+	m := muse.New(bedrockClient, "Be concise.")
 
 	// Start two independent conversations
 	r1, err := m.Ask(ctx, muse.AskInput{Question: "Question A"})
@@ -209,7 +209,7 @@ func TestAskExpiredSession(t *testing.T) {
 	runtime := &mockRuntime{}
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := muse.NewForTest(bedrockClient, "")
+	m := muse.New(bedrockClient, "")
 
 	_, err := m.Ask(ctx, muse.AskInput{SessionID: "nonexistent", Question: "hello"})
 	if err == nil {

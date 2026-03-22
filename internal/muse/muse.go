@@ -36,32 +36,16 @@ type AskResult struct {
 	Usage     inference.Usage // token usage and cost for this call
 }
 
-// Muse holds the state needed for all operations.
+// Muse holds the state needed for conversational Ask operations.
 type Muse struct {
-	storage  storage.Store
 	llm      inference.Client
-	soul     string // the full muse.md, loaded at init
+	soul     string // the full muse.md
 	sessions *sessionStore
 }
 
-func New(ctx context.Context, store storage.Store, llm inference.Client) (*Muse, error) {
-	soul, err := store.GetMuse(ctx)
-	if err != nil {
-		if !storage.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to load muse: %w", err)
-		}
-		soul = "" // no muse yet — first run before any composes
-	}
-	return &Muse{
-		storage:  store,
-		llm:      llm,
-		soul:     soul,
-		sessions: newSessionStore(),
-	}, nil
-}
-
-// NewForTest creates a Muse with caller-provided dependencies.
-func NewForTest(llm inference.Client, soul string) *Muse {
+// New creates a Muse with the given LLM client and soul (muse.md content).
+// Pass an empty soul for first-run before any composes.
+func New(llm inference.Client, soul string) *Muse {
 	return &Muse{
 		llm:      llm,
 		soul:     soul,
@@ -129,10 +113,15 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 	}, nil
 }
 
+// Document returns the current muse.md for use by the MCP handler.
+func (m *Muse) Document() string {
+	return m.soul
+}
+
 // Upload scans local sources, diffs against storage, and uploads changed conversations.
 // If sources are specified, only those providers are scanned.
-func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, error) {
-	existing, err := m.storage.ListConversations(ctx)
+func Upload(ctx context.Context, store storage.Store, sources ...string) (*UploadResult, error) {
+	existing, err := store.ListConversations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list remote conversations: %w", err)
 	}
@@ -171,18 +160,9 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 
 	// Filter by source if specified.
 	if len(sources) > 0 {
-		allowed := make(map[string]bool, len(sources))
-		for _, s := range sources {
-			allowed[s] = true
-		}
-		var filtered []conversation.Conversation
-		for _, sess := range local {
-			if allowed[sess.Source] {
-				filtered = append(filtered, sess)
-			}
-		}
-		local = filtered
+		local = filterConversationsBySource(local, sources)
 	}
+
 	// Count unique sources
 	sourceSet := map[string]bool{}
 	for _, sess := range local {
@@ -201,7 +181,7 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 				continue
 			}
 		}
-		n, err := m.storage.PutConversation(ctx, sess)
+		n, err := store.PutConversation(ctx, sess)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", sess.ConversationID, err))
 			continue
@@ -221,18 +201,16 @@ func (m *Muse) Upload(ctx context.Context, sources ...string) (*UploadResult, er
 	}, nil
 }
 
-func FormatBytes(b int) string {
-	switch {
-	case b >= 1024*1024:
-		return fmt.Sprintf("%.1fMB", float64(b)/(1024*1024))
-	case b >= 1024:
-		return fmt.Sprintf("%.1fKB", float64(b)/1024)
-	default:
-		return fmt.Sprintf("%dB", b)
+func filterConversationsBySource(convs []conversation.Conversation, sources []string) []conversation.Conversation {
+	allowed := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		allowed[s] = true
 	}
-}
-
-// Document returns the current muse.md for use by the MCP handler.
-func (m *Muse) Document() string {
-	return m.soul
+	var filtered []conversation.Conversation
+	for _, c := range convs {
+		if allowed[c.Source] {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
 }

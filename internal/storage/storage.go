@@ -71,3 +71,22 @@ func IsNotFound(err error) bool {
 	var nf *NotFoundError
 	return errors.As(err, &nf)
 }
+
+// FilterEntriesBySource returns only entries matching the allowed sources.
+// If sources is empty, all entries are returned.
+func FilterEntriesBySource(entries []ConversationEntry, sources []string) []ConversationEntry {
+	if len(sources) == 0 {
+		return entries
+	}
+	allowed := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		allowed[s] = true
+	}
+	var filtered []ConversationEntry
+	for _, e := range entries {
+		if allowed[e.Source] {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
