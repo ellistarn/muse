@@ -234,7 +234,7 @@ func (c *S3Store) GetMuseVersion(ctx context.Context, timestamp string) (string,
 
 // PutObservation writes observations to S3 under observations/{source}/{conversation}.md.
 func (c *S3Store) PutObservation(ctx context.Context, key, content string) error {
-	path := observationKey(key)
+	path := ObservationKey(key)
 	contentType := "text/markdown"
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &c.bucket,
@@ -262,7 +262,7 @@ func (c *S3Store) ListObservations(ctx context.Context) (map[string]time.Time, e
 		}
 		for _, obj := range page.Contents {
 			key := aws.ToString(obj.Key)
-			conversationKey := observationKeyToConversationKey(key)
+			conversationKey := ObservationKeyToConversationKey(key)
 			observations[conversationKey] = aws.ToTime(obj.LastModified)
 		}
 	}
@@ -271,7 +271,7 @@ func (c *S3Store) ListObservations(ctx context.Context) (map[string]time.Time, e
 
 // GetObservation downloads an observation's content from S3.
 func (c *S3Store) GetObservation(ctx context.Context, conversationKey string) (string, error) {
-	path := observationKey(conversationKey)
+	path := ObservationKey(conversationKey)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &c.bucket,
 		Key:    &path,
@@ -403,15 +403,15 @@ func museDiffKey(timestamp string) string {
 	return fmt.Sprintf("versions/%s/diff.md", timestamp)
 }
 
-// observationKey converts a conversation key to its observation storage key.
+// ObservationKey converts a conversation key to its observation storage key.
 // conversations/opencode/ses_abc.json -> observations/opencode/ses_abc.md
-func observationKey(conversationKey string) string {
+func ObservationKey(conversationKey string) string {
 	return fmt.Sprintf("observations/%s.md", strings.TrimPrefix(strings.TrimSuffix(conversationKey, ".json"), "conversations/"))
 }
 
-// observationKeyToConversationKey converts an observation storage key back to a conversation key.
+// ObservationKeyToConversationKey converts an observation storage key back to a conversation key.
 // observations/opencode/ses_abc.md -> conversations/opencode/ses_abc.json
-func observationKeyToConversationKey(key string) string {
+func ObservationKeyToConversationKey(key string) string {
 	rel := strings.TrimPrefix(key, "observations/")
 	return "conversations/" + strings.TrimSuffix(rel, ".md") + ".json"
 }

@@ -198,7 +198,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 				}
 				if opts.Verbose {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] Observed ~/.muse/%s (%s, $%.4f)\n",
-						n, len(pending), distillPath("observations", entry.Source, entry.ConversationID), time.Since(start).Round(time.Millisecond), usage.Cost())
+						n, len(pending), storage.ObservationKey(entry.Key), time.Since(start).Round(time.Millisecond), usage.Cost())
 				}
 				mu.Lock()
 				observeUsage = observeUsage.Add(usage)

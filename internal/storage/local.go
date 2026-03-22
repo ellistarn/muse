@@ -205,7 +205,7 @@ func (l *LocalStore) GetMuseVersion(_ context.Context, timestamp string) (string
 
 // PutObservation writes observations under observations/.
 func (l *LocalStore) PutObservation(_ context.Context, key, content string) error {
-	relPath := observationKey(key)
+	relPath := ObservationKey(key)
 	path := filepath.Join(l.root, filepath.FromSlash(relPath))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
@@ -247,7 +247,7 @@ func (l *LocalStore) ListObservations(_ context.Context) (map[string]time.Time, 
 
 // GetObservation reads an observation's content.
 func (l *LocalStore) GetObservation(_ context.Context, conversationKey string) (string, error) {
-	relPath := observationKey(conversationKey)
+	relPath := ObservationKey(conversationKey)
 	path := filepath.Join(l.root, filepath.FromSlash(relPath))
 	data, err := os.ReadFile(path)
 	if err != nil {
