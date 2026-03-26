@@ -1,58 +1,61 @@
-# Conversation Format Resilience
+# Data Source Interface
 
-## Problem
+## Context
 
-Muse reads conversations written by external tools (Claude Code, Kiro, OpenCode). Those tools
-control their own JSON schema and change it without notice. Muse's conversation struct requires
-specific field names (`conversation_id`, `source`). When an upstream tool renames a field — as
-Claude Code did with `session_id` -> `conversation_id` — every conversation written under the old
-schema becomes unreadable.
+Muse reads conversations written by external tools (Claude Code, Kiro, OpenCode). Each tool
+controls its own JSON schema and changes it without notice. Users accumulate conversations across
+tool versions, so a single `~/.muse/conversations/claude-code/` directory may contain files written
+under different schemas.
 
-This isn't a one-time migration problem. It will recur: upstream tools ship new formats, users
-accumulate conversations across versions, and `--reobserve` re-reads everything from disk. The
-current behavior is fatal: one unreadable file kills the entire observe pipeline. In the eval run,
-~100 of 234 claude-code conversations failed validation, blocking all observation.
+During the incremental composition eval, ~100 of 234 claude-code conversations failed to parse
+because Claude Code renamed `session_id` to `conversation_id`. The observe pipeline treated this as
+a fatal error.
 
-The failure mode is especially bad because it's silent until triggered. Normal runs skip
-already-observed conversations (cache hit). The problem only surfaces on `--reobserve`, on first
-run against old data, or when a new sandbox has no cached observations — exactly the cases where
-the user expects things to work.
+## Data Source Contract
 
-## Proposed Changes
+A data source is a directory of conversation files under `conversations/<source>/`. Each file is a
+JSON document representing one conversation. Muse requires two fields from each conversation:
 
-### 1. Accept both field names during deserialization
+- **`conversation_id`** — unique identifier for the conversation
+- **messages** — the conversation content (turns between human and assistant)
 
-The `Conversation` struct should accept `session_id` as an alias for `conversation_id`. This is a
-one-line change (custom UnmarshalJSON or a second struct tag via a helper). The validation error
-disappears for existing data.
+The source name (e.g. `claude-code`, `kiro`) comes from the directory, not the file.
 
-More generally: when a field is renamed upstream, add backward-compatible deserialization rather
-than requiring users to re-export their data.
+### Parsing
 
-### 2. Skip invalid conversations instead of failing
+Each source has a parser that deserializes its conversation format into muse's internal
+`Conversation` struct. Parsers handle schema variation across tool versions. When an upstream tool
+renames a field, the parser accepts both names — backward-compatible deserialization, not migration.
+Old files stay on disk as-is.
 
-When a conversation fails validation during observe, log a warning and continue. The user sees
-"Skipped 3 invalid conversations" at the end instead of a fatal error. This matches the principle
-that distillation is best-effort over the available data — one bad file shouldn't block insights
-from the other 200.
+### Validation
 
-Implementation: in the observe goroutine, when `GetConversation` returns a validation error,
-increment a skip counter and continue instead of setting `firstErr`.
+A conversation that cannot be parsed is an error. Muse fails fast with a clear message identifying
+the file and the parse failure. This surfaces format changes immediately rather than silently
+dropping data.
 
-### 3. Report skipped conversations
+The distinction: a file that doesn't match any known schema for its source is a real error worth
+failing on. A file that matches a known older schema is normal and handled by the parser.
 
-Add a `Skipped int` field to `compose.Result` so the output shows:
-```
-Processed 97 conversations (3 skipped, 130 pruned)
-```
+### Discovery
 
-Users can then investigate the skipped files if they care, but the pipeline isn't blocked.
+Muse discovers conversations by listing files in each source directory. Discovery is independent of
+observation — a conversation exists if its file exists, regardless of whether it has been observed.
 
-## What this doesn't address
+## Why fail fast
 
-- **Forward migration**: converting old-format files to new format on disk. Probably not worth it —
-  accept both formats indefinitely.
-- **Validation for other fields**: `source` is also required but less likely to be missing. Same
-  skip-and-warn pattern would apply.
-- **Schema versioning**: a `schema_version` field exists but isn't used for dispatch. If more format
-  changes accumulate, a proper version-dispatch deserializer may be needed.
+When a new upstream format appears, the user needs to know immediately. Silent skipping would mask
+the problem: muse would produce a muse.md from whatever subset of conversations it could parse, and
+the user wouldn't know that half their data was ignored. A fatal error on an unknown format is the
+signal to update the parser.
+
+## What this means for format changes
+
+When an upstream tool ships a new schema:
+
+1. Identify the field mapping between old and new schemas
+2. Update the parser to accept both
+3. No migration of files on disk — accept old formats indefinitely
+
+If format changes accumulate beyond simple field renames (structural changes, new message types), a
+version-dispatch layer in the parser may be needed. Not yet.
