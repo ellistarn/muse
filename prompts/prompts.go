@@ -31,3 +31,6 @@ var ComposeClustered string
 
 //go:embed normalize.md
 var Normalize string
+
+//go:embed compose-incremental.md
+var ComposeIncremental string

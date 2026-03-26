@@ -40,7 +40,8 @@ Getting started:
 
   muse compose && muse show
 
-Data is stored locally at ~/.muse/ by default. Set MUSE_BUCKET to use S3 instead.
+Data is stored locally at ~/.muse/ by default. Set MUSE_DIR to override the local
+directory, or MUSE_BUCKET to use S3 instead.
 
 Provider is auto-detected from API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY) or
 falls back to Bedrock. Override with MUSE_PROVIDER=anthropic|openai|bedrock.
@@ -60,10 +61,14 @@ Run "muse listen --help" for MCP server configuration.`,
 }
 
 // newStore returns an S3-backed store when a bucket is configured,
-// otherwise a local filesystem store rooted at ~/.muse/.
+// otherwise a local filesystem store. The local root defaults to ~/.muse/
+// but can be overridden with MUSE_DIR.
 func newStore(ctx context.Context) (storage.Store, error) {
 	if bucket != "" {
 		return storage.NewS3Store(ctx, bucket)
+	}
+	if dir := os.Getenv("MUSE_DIR"); dir != "" {
+		return storage.NewLocalStoreWithRoot(dir), nil
 	}
 	store, err := storage.NewLocalStore()
 	if err != nil {

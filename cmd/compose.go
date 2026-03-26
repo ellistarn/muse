@@ -29,11 +29,15 @@ that captures how you think. Safe to run repeatedly — only new
 conversations are discovered and only unobserved conversations are processed. The
 muse is always recomposed.
 
-Two composition methods are available:
+Three composition methods are available:
 
   clustering (default) — labels observations, normalizes synonyms, groups by
   label match, summarizes per-cluster, then composes muse.md. Produces
   thematically coherent output.
+
+  incremental — loads the current muse and folds only new observations into
+  it via a single Opus call. Efficient for ongoing updates after the initial
+  muse is established.
 
   map-reduce — observe maps each conversation into observations, then learn
   reduces all observations into a single muse.md. Simpler, sufficient for
@@ -45,6 +49,7 @@ discovery and observation to those sources.
 Use --learn to recompose the muse from existing observations without
 reprocessing conversations. Use --reobserve to reprocess conversations from scratch.`,
 		Example: `  muse compose                          # default: clustering
+  muse compose --method=incremental     # fold new observations into existing muse
   muse compose --method=map-reduce      # simpler pipeline
   muse compose codex                    # only Codex conversations
   muse compose kiro                     # only kiro conversations
@@ -88,10 +93,12 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 			switch method {
 			case "clustering":
 				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, sources, reobserve, relabel, limit, uploaded, uploadBytes)
+			case "incremental":
+				return runIncrementalCompose(ctx, cmd.OutOrStdout(), store, sources, reobserve, limit)
 			case "map-reduce":
 				return runMapReduceCompose(ctx, cmd.OutOrStdout(), store, sources, reobserve, learn, limit)
 			default:
-				return fmt.Errorf("unknown method %q (use 'clustering' or 'map-reduce')", method)
+				return fmt.Errorf("unknown method %q (use 'clustering', 'incremental', or 'map-reduce')", method)
 			}
 		},
 	}
@@ -99,7 +106,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 	cmd.Flags().BoolVar(&relabel, "relabel", false, "force re-label all observations")
 	cmd.Flags().BoolVar(&learn, "learn", false, "skip observe, recompose muse from existing observations (map-reduce only)")
 	cmd.Flags().IntVar(&limit, "limit", 100, "max conversations to process (0 = no limit)")
-	cmd.Flags().StringVar(&method, "method", "clustering", "composition method: clustering or map-reduce")
+	cmd.Flags().StringVar(&method, "method", "clustering", "composition method: clustering, incremental, or map-reduce")
 	return cmd
 }
 
@@ -134,6 +141,30 @@ func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.St
 		return err
 	}
 
+	return printResult(stdout, result, false)
+}
+
+func runIncrementalCompose(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve bool, limit int) error {
+	observeLLM, err := newLLMClient(ctx, TierObserve)
+	if err != nil {
+		return err
+	}
+	composeLLM, err := newLLMClient(ctx, TierCompose)
+	if err != nil {
+		return err
+	}
+
+	result, err := compose.RunIncremental(ctx, store, observeLLM, composeLLM, compose.IncrementalOptions{
+		BaseOptions: compose.BaseOptions{
+			Reobserve: reobserve,
+			Limit:     limit,
+			Sources:   sources,
+			Verbose:   verbose,
+		},
+	})
+	if err != nil {
+		return err
+	}
 	return printResult(stdout, result, false)
 }
 
