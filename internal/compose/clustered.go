@@ -251,11 +251,13 @@ func RunClustered(
 	}, nil
 }
 
-// observationBytes returns the total byte size of all observation texts.
+// observationBytes returns the total byte size of all formatted observation
+// content. This reflects what downstream LLM stages actually receive via
+// Format(), including date, quote prefix, and observation prefix overhead.
 func observationBytes(obs []observationEntry) int {
 	n := 0
 	for _, o := range obs {
-		n += len(o.Text)
+		n += len(o.Format())
 	}
 	return n
 }
@@ -435,6 +437,7 @@ func runObserve(
 				fp := Fingerprint(entry.LastModified.Format(time.RFC3339Nano), promptHash)
 				obs := &Observations{
 					Fingerprint: fp,
+					Date:        entry.LastModified.Format("2006-01-02"),
 					Items:       items,
 				}
 				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, obs); err != nil {
@@ -488,13 +491,13 @@ func conversationDataSize(conv *conversation.Conversation) int {
 }
 
 // extractObservations runs the observe pipeline on a conversation and returns
-// discrete observation strings (not a markdown blob).
+// discrete observations (not a markdown blob).
 //
 // Raw conversation is sent to the extract prompt by default. When the raw text
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func extractObservations(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]string, inference.Usage, error) {
+func extractObservations(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]Observation, inference.Usage, error) {
 	refined, usage, err := extractAndRefine(ctx, client, conv, verbose)
 	if err != nil {
 		return nil, usage, err
@@ -507,10 +510,10 @@ func extractObservations(ctx context.Context, client inference.Client, conv *con
 	items := parseObservationItems(refined)
 
 	// Filter irrelevant items: empty responses, LLM meta-commentary, placeholder tokens
-	var relevant []string
-	var irrelevant []string
+	var relevant []Observation
+	var irrelevant []Observation
 	for _, item := range items {
-		if isRelevant(item) {
+		if isRelevant(item.Observation) {
 			relevant = append(relevant, item)
 		} else {
 			irrelevant = append(irrelevant, item)
@@ -518,8 +521,8 @@ func extractObservations(ctx context.Context, client inference.Client, conv *con
 	}
 	if len(irrelevant) > 0 && verbose {
 		fmt.Fprintf(os.Stderr, "    filtered %d irrelevant observations:\n", len(irrelevant))
-		for _, s := range irrelevant {
-			text := s
+		for _, item := range irrelevant {
+			text := item.Observation
 			if len(text) > 100 {
 				text = text[:100] + "..."
 			}
@@ -744,28 +747,52 @@ func isRelevant(s string) bool {
 // observationPrefix is the required prefix for structured observation output.
 const observationPrefix = "Observation: "
 
+// quotePrefix is the optional prefix for verbatim voice-carrying quotes.
+const quotePrefix = "Quote: "
+
 // parseObservationItems extracts discrete observations from LLM output.
-// Lines starting with "Observation: " are extracted and the prefix stripped.
+// Lines starting with "Observation: " are extracted. An optional "Quote: " line
+// preceding an "Observation: " line is paired with that observation — intervening
+// blank lines do not break the pairing, but any non-empty non-prefix line does.
 // All other lines (meta-commentary, blank lines, preamble) are discarded.
-// This structural parsing replaces heuristic pattern-matching for garbage filtering.
-func parseObservationItems(text string) []string {
+func parseObservationItems(text string) []Observation {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
 
-	var items []string
+	var items []Observation
+	var pendingQuote string
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
-		// Strip optional bullet/number prefix before checking for Observation:
+		// Strip optional bullet/number prefix before checking for prefixes.
 		// Handles "- Observation: ...", "1. Observation: ...", "• Observation: ..."
 		cleaned := stripListPrefix(line)
+
+		if strings.HasPrefix(cleaned, quotePrefix) {
+			q := strings.TrimSpace(cleaned[len(quotePrefix):])
+			// Strip surrounding quotes if present
+			q = strings.Trim(q, "\"")
+			q = strings.Trim(q, "\u201c\u201d") // smart quotes
+			pendingQuote = q
+			continue
+		}
 
 		if strings.HasPrefix(cleaned, observationPrefix) {
 			obs := strings.TrimSpace(cleaned[len(observationPrefix):])
 			if obs != "" {
-				items = append(items, obs)
+				items = append(items, Observation{
+					Quote:       pendingQuote,
+					Observation: obs,
+				})
 			}
+			pendingQuote = ""
+			continue
+		}
+
+		// Any non-Quote, non-Observation line resets the pending quote
+		if cleaned != "" {
+			pendingQuote = ""
 		}
 	}
 	return items
@@ -798,7 +825,29 @@ type observationEntry struct {
 	Source         string
 	ConversationID string
 	Index          int
-	Text           string
+	Quote          string // optional verbatim quote carrying voice signal
+	Text           string // the analytical observation text
+	Date           string // conversation date (YYYY-MM-DD)
+}
+
+// Format returns the observation as text for LLM consumption. When a quote
+// is present, it's included as a voice exemplar preceding the observation.
+// The date is included so downstream stages can reason about recency.
+func (e observationEntry) Format() string {
+	var parts []string
+	if e.Date != "" {
+		parts = append(parts, fmt.Sprintf("[%s]", e.Date))
+	}
+	if e.Quote != "" {
+		parts = append(parts, fmt.Sprintf("Quote: \"%s\"", e.Quote))
+	}
+	parts = append(parts, fmt.Sprintf("Observation: %s", e.Text))
+	return strings.Join(parts, "\n")
+}
+
+// FormatTokens estimates the token count of the formatted observation.
+func (e observationEntry) FormatTokens() int {
+	return inference.EstimateTokens(e.Format())
 }
 
 // loadAllStructuredObservations loads all observation artifacts and returns
@@ -835,7 +884,9 @@ func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]
 					Source:         ss.Source,
 					ConversationID: ss.ConversationID,
 					Index:          j,
-					Text:           item,
+					Quote:          item.Quote,
+					Text:           item.Observation,
+					Date:           obs.Date,
 				})
 			}
 			results[i] = result{entries: entries}
@@ -1324,7 +1375,7 @@ func runGroup(ctx context.Context, store storage.Store, allObs []observationEntr
 	var noiseObs []string
 	for i, obs := range allObs {
 		if !clusteredObs[i] {
-			noiseObs = append(noiseObs, obs.Text)
+			noiseObs = append(noiseObs, obs.Format())
 		}
 	}
 
@@ -1363,11 +1414,11 @@ func runSampleWithObs(ctx context.Context, clusters []clusterResult, allObs []ob
 		tokens := 0
 		for _, idx := range shuffled {
 			obs := allObs[idx]
-			t := inference.EstimateTokens(obs.Text)
+			t := obs.FormatTokens()
 			if tokens+t > maxSampleTokens && len(selected) > 0 {
 				break
 			}
-			selected = append(selected, obs.Text)
+			selected = append(selected, obs.Format())
 			tokens += t
 		}
 
