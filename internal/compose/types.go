@@ -5,11 +5,20 @@ import (
 	"fmt"
 )
 
+// Observation is a discrete insight about how the owner thinks, works, or
+// sounds. Quote carries the owner's actual words — chosen for voice signal
+// (register, phrasing, conviction) — and is optional since some observations
+// are inferred from patterns rather than anchored to a single utterance.
+type Observation struct {
+	Quote       string `json:"quote,omitempty"`
+	Observation string `json:"observation"`
+}
+
 // Observations stores discrete observations extracted from a single conversation.
-// Each observation is a standalone insight about how the owner thinks or works.
 type Observations struct {
-	Fingerprint string   `json:"fingerprint"`
-	Items       []string `json:"items"`
+	Fingerprint string        `json:"fingerprint"`
+	Date        string        `json:"date,omitempty"` // conversation date (YYYY-MM-DD)
+	Items       []Observation `json:"items"`
 }
 
 // Label pairs an observation with its pattern label.
