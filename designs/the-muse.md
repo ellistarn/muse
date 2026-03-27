@@ -1,12 +1,14 @@
 # The Muse
 
 A muse is a distillation of how its owner thinks — their reasoning, awareness, and voice. It gives
-models a specific point of view to work from rather than reasoning from general training alone.
-
-The muse is derived from conversations — with other people, with agents, across any medium where the
+models a specific point of view to work from rather than reasoning from general training alone. The
+muse is derived from conversations — with other people, with agents, across any medium where the
 owner is reacting, correcting, and choosing. A person's reasoning is most legible when they push back
-on something, not when they present a finished position. As an artifact, the muse is a system prompt:
-text that occupies a context window, competes for attention, and steers generation.
+on something, not when they present a finished position.
+
+As an artifact, the muse is a system prompt: text that occupies a context window, competes for
+attention, and steers generation. Every constraint that follows — compression, specificity,
+faithfulness — is a consequence of this form.
 
 A point of view is what makes one person's judgment different from another's. Models are capable but
 general. A muse makes them specific, amplifying the owner's ability to steer. A muse that stops
@@ -63,8 +65,6 @@ weight doesn't just waste space — it actively degrades the tokens that are, by
 model attends to. The muse must be both faithful and compressed. It grows in accuracy over time, not
 in length.
 
-The failure modes below use a single example — a chef's muse — to make the distinctions concrete.
-
 ### Generic
 
 The muse contains things anyone would say. Generic content wastes the model's attention on
@@ -92,11 +92,12 @@ The extraction process turns this into polished food-writing prose. The content 
 but someone working with this muse would expect an articulate collaborator and get whiplash meeting
 the actual chef.
 
-A common form of distortion is encoding frustration with model defaults as owner traits. The chef's
-real terseness becomes indistinguishable from a generic instruction to be less verbose. The defense
-is provenance: content in the muse must be traceable to observed behavior independent of any model
-context — grounded in what the person actually did, not in self-reported identity or corrections
-applied to model output.
+A common form of distortion is the extraction process encoding frustration with model defaults as
+owner traits. The chef's real terseness becomes indistinguishable from a generic instruction to be
+less verbose. Manual curation carries the same risk — adding content to correct model behavior rather
+than to represent the owner. The defense is provenance: content in the muse must be traceable to
+observed behavior independent of any model context, not self-reported identity or corrections applied
+to model output.
 
 The test: _show the output to someone who works with the owner daily. Do they recognize the person?_
 
