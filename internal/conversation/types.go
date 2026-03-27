@@ -24,6 +24,7 @@ func Providers() []Provider {
 		&Codex{},
 		&Kiro{},
 		&KiroCLI{},
+		&GitHub{},
 	}
 }
 
