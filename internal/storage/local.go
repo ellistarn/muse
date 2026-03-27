@@ -316,11 +316,6 @@ func (l *LocalStore) ListData(_ context.Context, prefix string) ([]string, error
 	return keys, nil
 }
 
-// DeleteData removes all files under the given prefix.
-func (l *LocalStore) DeleteData(ctx context.Context, prefix string) error {
-	return l.DeletePrefix(ctx, prefix)
-}
-
 // DeletePrefix removes all files under the given prefix.
 func (l *LocalStore) DeletePrefix(_ context.Context, prefix string) error {
 	path := filepath.Join(l.root, filepath.FromSlash(prefix))

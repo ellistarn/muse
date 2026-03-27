@@ -72,13 +72,13 @@ func newStore(ctx context.Context) (storage.Store, error) {
 	return store, nil
 }
 
-// loadSoul loads the muse.md content from storage. Returns empty string on first run.
-func loadSoul(ctx context.Context, store storage.Store) string {
-	soul, err := store.GetMuse(ctx)
+// loadDocument loads the muse.md content from storage. Returns empty string on first run.
+func loadDocument(ctx context.Context, store storage.Store) string {
+	document, err := store.GetMuse(ctx)
 	if err != nil {
 		return ""
 	}
-	return soul
+	return document
 }
 
 // Model tiers used by the pipeline. Compose is for editorial work (final

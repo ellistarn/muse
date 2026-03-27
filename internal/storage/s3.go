@@ -338,11 +338,6 @@ func (c *S3Store) ListData(ctx context.Context, prefix string) ([]string, error)
 	return keys, nil
 }
 
-// DeleteData removes all objects under the given S3 prefix.
-func (c *S3Store) DeleteData(ctx context.Context, prefix string) error {
-	return c.DeletePrefix(ctx, prefix)
-}
-
 // DeletePrefix removes all objects under a given S3 prefix.
 func (c *S3Store) DeletePrefix(ctx context.Context, prefix string) error {
 	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{

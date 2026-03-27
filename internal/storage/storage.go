@@ -8,8 +8,9 @@ import (
 	"github.com/ellistarn/muse/internal/conversation"
 )
 
-// Store is the interface for all storage operations. Implementations include
-// S3 (for hosted/remote mode) and local filesystem (for zero-config local use).
+// Store is the composite interface for all storage operations.
+// Implementations include S3 (for hosted/remote mode) and local filesystem
+// (for zero-config local use).
 //
 // Storage layout:
 //
@@ -18,34 +19,43 @@ import (
 //	versions/{timestamp}/muse.md                — timestamped muse versions (latest = current)
 //	versions/{timestamp}/diff.md               — what changed from the previous version
 type Store interface {
-	// Conversations
+	ConversationStore
+	MuseStore
+	ObservationStore
+	DataStore
+}
+
+// ConversationStore manages raw conversation data.
+type ConversationStore interface {
 	ListConversations(ctx context.Context) ([]ConversationEntry, error)
 	GetConversation(ctx context.Context, src, conversationID string) (*conversation.Conversation, error)
 	PutConversation(ctx context.Context, conv *conversation.Conversation) (int, error)
+}
 
-	// Muses
+// MuseStore manages muse versions and diffs.
+type MuseStore interface {
 	GetMuse(ctx context.Context) (string, error)                          // latest version
 	PutMuse(ctx context.Context, timestamp, content string) error         // write muse.md at timestamp
 	GetMuseDiff(ctx context.Context, timestamp string) (string, error)    // read diff.md at timestamp
 	PutMuseDiff(ctx context.Context, timestamp, content string) error     // write diff.md at timestamp
 	ListMuses(ctx context.Context) ([]string, error)                      // all timestamps, sorted asc
 	GetMuseVersion(ctx context.Context, timestamp string) (string, error) // specific version
+}
 
-	// Observations
+// ObservationStore manages per-conversation observations.
+type ObservationStore interface {
 	ListObservations(ctx context.Context) (map[string]time.Time, error)
 	GetObservation(ctx context.Context, conversationKey string) (string, error)
 	PutObservation(ctx context.Context, key, content string) error
+}
 
-	// Raw data — generic key/value operations for pipeline artifacts and
-	// strategy-specific state. Keys are slash-delimited paths (e.g.
-	// "compose/observations/opencode/ses_001.json"). Each strategy builds
-	// its own path conventions on top.
+// DataStore provides generic key/value operations for pipeline artifacts and
+// strategy-specific state. Keys are slash-delimited paths (e.g.
+// "compose/observations/opencode/ses_001.json").
+type DataStore interface {
 	PutData(ctx context.Context, key string, data []byte) error
 	GetData(ctx context.Context, key string) ([]byte, error)
 	ListData(ctx context.Context, prefix string) ([]string, error) // returns keys under prefix
-	DeleteData(ctx context.Context, prefix string) error
-
-	// Maintenance
 	DeletePrefix(ctx context.Context, prefix string) error
 }
 

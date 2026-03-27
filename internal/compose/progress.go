@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,9 +40,9 @@ func logStage(name, format string, args ...any) *stageLog {
 
 func (s *stageLog) cost(d time.Duration, u inference.Usage) *stageLog {
 	if u.Cost() > 0 {
-		s.tail = fmt.Sprintf("(%s, $%.4f)", formatStageDuration(d), u.Cost())
+		s.tail = fmt.Sprintf("(%s, $%.4f)", FormatDuration(d), u.Cost())
 	} else if d > time.Millisecond {
-		s.tail = fmt.Sprintf("(%s)", formatStageDuration(d))
+		s.tail = fmt.Sprintf("(%s)", FormatDuration(d))
 	}
 	return s
 }
@@ -66,14 +67,16 @@ func logAfter(format string, args ...any) *stageLog {
 	return &stageLog{name: "", body: fmt.Sprintf("→ %s", fmt.Sprintf(format, args...))}
 }
 
-func formatStageDuration(d time.Duration) string {
+// FormatDuration formats a duration for display.
+func FormatDuration(d time.Duration) string {
 	if d < time.Second {
 		return fmt.Sprintf("%dms", d.Milliseconds())
 	}
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
-func formatBytes(b int) string {
+// FormatBytes formats a byte count for display.
+func FormatBytes(b int) string {
 	switch {
 	case b >= 1024*1024:
 		return fmt.Sprintf("%.1fMB", float64(b)/(1024*1024))
@@ -89,19 +92,12 @@ func formatSourceBreakdown(counts map[string]int) string {
 	if len(counts) == 0 {
 		return ""
 	}
-	// Sort for determinism — use sorted keys
+	// Sort for determinism
 	keys := make([]string, 0, len(counts))
 	for k := range counts {
 		keys = append(keys, k)
 	}
-	// Sort alphabetically
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[i] > keys[j] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
+	sort.Strings(keys)
 	parts := make([]string, len(keys))
 	for i, k := range keys {
 		parts[i] = fmt.Sprintf("%s: %d", k, counts[k])

@@ -39,16 +39,16 @@ type AskResult struct {
 // Muse holds the state needed for conversational Ask operations.
 type Muse struct {
 	llm      inference.Client
-	soul     string // the full muse.md
+	document string // the full muse.md
 	sessions *sessionStore
 }
 
-// New creates a Muse with the given LLM client and soul (muse.md content).
-// Pass an empty soul for first-run before any composes.
-func New(llm inference.Client, soul string) *Muse {
+// New creates a Muse with the given LLM client and document (muse.md content).
+// Pass an empty document for first-run before any composes.
+func New(llm inference.Client, document string) *Muse {
 	return &Muse{
 		llm:      llm,
-		soul:     soul,
+		document: document,
 		sessions: newSessionStore(),
 	}
 }
@@ -69,12 +69,12 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 		session = s
 	} else {
 		// New conversation
-		soul := m.soul
-		if soul == "" {
-			soul = "No muse available yet. Run 'muse compose' to generate one from conversations."
+		doc := m.document
+		if doc == "" {
+			doc = "No muse available yet. Run 'muse compose' to generate one from conversations."
 		}
 		session = &Session{
-			System: fmt.Sprintf(systemPrompt, soul),
+			System: fmt.Sprintf(systemPrompt, doc),
 		}
 	}
 
@@ -115,7 +115,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 
 // Document returns the current muse.md for use by the MCP handler.
 func (m *Muse) Document() string {
-	return m.soul
+	return m.document
 }
 
 // Upload scans local sources, diffs against storage, and uploads changed conversations.

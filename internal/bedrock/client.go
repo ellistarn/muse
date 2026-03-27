@@ -26,10 +26,6 @@ import (
 const (
 	ModelOpus   = "claude-opus"
 	ModelSonnet = "claude-sonnet"
-
-	// defaultMaxTokens matches the AI SDK's default for Claude on Bedrock.
-	// When extended thinking is enabled, the thinking budget is added on top.
-	defaultMaxTokens = 4096
 )
 
 // Usage is an alias for inference.Usage so callers don't need to import both packages.
@@ -38,16 +34,13 @@ type Usage = inference.Usage
 // StreamFunc receives streaming deltas (text or thinking) as they arrive.
 type StreamFunc = inference.StreamFunc
 
-type modelPricing struct {
-	inputPerToken  float64
-	outputPerToken float64
-}
+type modelPricing = inference.Pricing
 
 // Bedrock on-demand pricing per token, keyed by model family substring.
 // https://aws.amazon.com/bedrock/pricing/
 var pricingTable = map[string]modelPricing{
-	"claude-sonnet-4": {3.0 / 1_000_000, 15.0 / 1_000_000},
-	"claude-opus-4":   {5.0 / 1_000_000, 25.0 / 1_000_000},
+	"claude-sonnet-4": {InputPerToken: 3.0 / 1_000_000, OutputPerToken: 15.0 / 1_000_000},
+	"claude-opus-4":   {InputPerToken: 5.0 / 1_000_000, OutputPerToken: 25.0 / 1_000_000},
 }
 
 // lookupPricing finds pricing by matching a model family key against the full
@@ -204,7 +197,7 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 	}
 
 	o := inference.Apply(opts)
-	maxTokens := int32(defaultMaxTokens)
+	maxTokens := int32(inference.DefaultMaxTokens)
 	if o.MaxTokens > 0 {
 		maxTokens = o.MaxTokens
 	}
@@ -273,7 +266,7 @@ func (c *Client) converseRaw(ctx context.Context, system string, messages []type
 }
 
 func (c *Client) converseRawOnce(ctx context.Context, system string, messages []types.Message, toolConfig *types.ToolConfiguration, opts inference.ConverseOptions) (string, Usage, types.StopReason, error) {
-	maxTokens := int32(defaultMaxTokens)
+	maxTokens := int32(inference.DefaultMaxTokens)
 	if opts.MaxTokens > 0 {
 		maxTokens = opts.MaxTokens
 	}
@@ -323,17 +316,16 @@ func (c *Client) converseRawOnce(ctx context.Context, system string, messages []
 }
 
 func (c *Client) extractUsage(out *bedrockruntime.ConverseOutput) Usage {
-	var usage Usage
+	var in, outt int
 	if out.Usage != nil {
 		if out.Usage.InputTokens != nil {
-			usage.InputTokens = int(*out.Usage.InputTokens)
+			in = int(*out.Usage.InputTokens)
 		}
 		if out.Usage.OutputTokens != nil {
-			usage.OutputTokens = int(*out.Usage.OutputTokens)
+			outt = int(*out.Usage.OutputTokens)
 		}
 	}
-	usage.Cost_ = float64(usage.InputTokens)*c.pricing.inputPerToken + float64(usage.OutputTokens)*c.pricing.outputPerToken
-	return usage
+	return inference.NewUsage(in, outt, c.pricing.ComputeCost(in, outt))
 }
 
 func (c *Client) converseStreamOnce(ctx context.Context, sr StreamingRuntime, input *bedrockruntime.ConverseStreamInput, fn StreamFunc) (*inference.Response, error) {
@@ -367,15 +359,16 @@ func (c *Client) converseStreamOnce(ctx context.Context, sr StreamingRuntime, in
 		case *types.ConverseStreamOutputMemberMessageStop:
 			stopReason = ev.Value.StopReason
 		case *types.ConverseStreamOutputMemberMetadata:
+			var in, out int
 			if ev.Value.Usage != nil {
 				if ev.Value.Usage.InputTokens != nil {
-					usage.InputTokens = int(*ev.Value.Usage.InputTokens)
+					in = int(*ev.Value.Usage.InputTokens)
 				}
 				if ev.Value.Usage.OutputTokens != nil {
-					usage.OutputTokens = int(*ev.Value.Usage.OutputTokens)
+					out = int(*ev.Value.Usage.OutputTokens)
 				}
 			}
-			usage.Cost_ = float64(usage.InputTokens)*c.pricing.inputPerToken + float64(usage.OutputTokens)*c.pricing.outputPerToken
+			usage = inference.NewUsage(in, out, c.pricing.ComputeCost(in, out))
 		}
 	}
 

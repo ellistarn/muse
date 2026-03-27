@@ -83,22 +83,22 @@ func ListLabels(ctx context.Context, store storage.Store) ([]SourceConversation,
 
 // DeleteObservations removes all observation artifacts.
 func DeleteObservations(ctx context.Context, store storage.Store) error {
-	return store.DeleteData(ctx, "compose/observations/")
+	return store.DeletePrefix(ctx, "compose/observations/")
 }
 
 // DeleteObservationsForSource removes observation artifacts for a specific source.
 func DeleteObservationsForSource(ctx context.Context, store storage.Store, source string) error {
-	return store.DeleteData(ctx, fmt.Sprintf("compose/observations/%s/", source))
+	return store.DeletePrefix(ctx, fmt.Sprintf("compose/observations/%s/", source))
 }
 
 // DeleteLabels removes all label artifacts.
 func DeleteLabels(ctx context.Context, store storage.Store) error {
-	return store.DeleteData(ctx, "compose/labels/")
+	return store.DeletePrefix(ctx, "compose/labels/")
 }
 
 // DeleteNormalization removes the normalization mapping artifact.
 func DeleteNormalization(ctx context.Context, store storage.Store) error {
-	return store.DeleteData(ctx, "compose/normalization.json")
+	return store.DeletePrefix(ctx, "compose/normalization.json")
 }
 
 // listArtifacts returns (source, conversationID) pairs from keys under the given prefix.

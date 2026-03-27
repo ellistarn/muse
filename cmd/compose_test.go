@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/compose"
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/internal/testutil"
 )
@@ -138,4 +138,3 @@ func (s *failingStore) GetData(_ context.Context, _ string) ([]byte, error) { re
 func (s *failingStore) ListData(_ context.Context, _ string) ([]string, error) {
 	return nil, s.err
 }
-func (s *failingStore) DeleteData(_ context.Context, _ string) error { return s.err }

@@ -8,7 +8,7 @@ import (
 	"github.com/ellistarn/muse/internal/inference"
 )
 
-func TestBuildParamsAddsThinkingBudgetToMaxCompletionTokens(t *testing.T) {
+func TestBuildParamsIgnoresThinkingBudgetForNonReasoningModels(t *testing.T) {
 	client := &Client{model: ModelFull}
 	opts := inference.Apply([]inference.ConverseOption{inference.WithThinking(16000)})
 
@@ -17,7 +17,8 @@ func TestBuildParamsAddsThinkingBudgetToMaxCompletionTokens(t *testing.T) {
 	if !params.MaxCompletionTokens.Valid() {
 		t.Fatal("MaxCompletionTokens should be set")
 	}
-	if got, want := params.MaxCompletionTokens.Value, int64(defaultMaxTokens+16000); got != want {
+	// Non-reasoning models don't get thinking budget added.
+	if got, want := params.MaxCompletionTokens.Value, int64(inference.DefaultMaxTokens); got != want {
 		t.Fatalf("MaxCompletionTokens = %d, want %d", got, want)
 	}
 	if params.ReasoningEffort != "" {
@@ -34,7 +35,7 @@ func TestBuildParamsSetsReasoningEffortForReasoningModels(t *testing.T) {
 	if got, want := params.ReasoningEffort, sdkopenai.ReasoningEffortMedium; got != want {
 		t.Fatalf("ReasoningEffort = %q, want %q", got, want)
 	}
-	if got, want := params.MaxCompletionTokens.Value, int64(defaultMaxTokens+8000); got != want {
+	if got, want := params.MaxCompletionTokens.Value, int64(inference.DefaultMaxTokens+8000); got != want {
 		t.Fatalf("MaxCompletionTokens = %d, want %d", got, want)
 	}
 }

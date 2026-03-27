@@ -27,12 +27,12 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 			if err != nil {
 				return err
 			}
-			soul := loadSoul(ctx, store)
+			document := loadDocument(ctx, store)
 			llm, err := newLLMClient(ctx, TierCompose)
 			if err != nil {
 				return err
 			}
-			m := muse.New(llm, soul)
+			m := muse.New(llm, document)
 			question := strings.Join(args, " ")
 			var wroteOutput bool
 			_, err = m.Ask(ctx, muse.AskInput{

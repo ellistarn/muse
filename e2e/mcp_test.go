@@ -17,12 +17,12 @@ import (
 )
 
 // newMCPClient creates an in-process MCP client backed by a Muse with canned responses.
-func newMCPClient(t *testing.T, soul string, responses ...bedrockruntime.ConverseOutput) *client.Client {
+func newMCPClient(t *testing.T, document string, responses ...bedrockruntime.ConverseOutput) *client.Client {
 	t.Helper()
 	runtime := &mockRuntime{responses: responses}
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := museinternal.New(bedrockClient, soul)
+	m := museinternal.New(bedrockClient, document)
 	srv := musemcp.NewServer(m)
 
 	c, err := client.NewInProcessClient(srv)
@@ -101,7 +101,7 @@ func TestMCP_ErrorsReturnedAsToolResults(t *testing.T) {
 	errRuntime := &errorRuntime{err: fmt.Errorf("model not available")}
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, errRuntime)
-	m := museinternal.New(bedrockClient, "some soul")
+	m := museinternal.New(bedrockClient, "test document")
 	srv := musemcp.NewServer(m)
 
 	c, err := client.NewInProcessClient(srv)
@@ -139,7 +139,7 @@ func TestMCP_ErrorsReturnedAsToolResults(t *testing.T) {
 }
 
 func TestMCP_MissingQuestionReturnsToolError(t *testing.T) {
-	c := newMCPClient(t, "soul")
+	c := newMCPClient(t, "test document")
 
 	// Call without the required "question" argument
 	req := mcp.CallToolRequest{}
@@ -155,7 +155,7 @@ func TestMCP_MissingQuestionReturnsToolError(t *testing.T) {
 }
 
 func TestMCP_ListToolsReturnsAsk(t *testing.T) {
-	c := newMCPClient(t, "soul")
+	c := newMCPClient(t, "test document")
 	result, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
 	if err != nil {
 		t.Fatalf("ListTools error: %v", err)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -188,10 +187,10 @@ func printResult(stdout io.Writer, result *compose.Result, learnOnly bool) error
 			fmt.Fprintf(stdout, "%-12s %-45s %8s %8s %8s %8s %s\n",
 				s.Name,
 				model,
-				formatDuration(s.Duration),
+				compose.FormatDuration(s.Duration),
 				formatTokens(s.Usage.InputTokens),
 				formatTokens(s.Usage.OutputTokens),
-				formatBytes(s.DataSize),
+				formatDataSize(s.DataSize),
 				cost,
 			)
 		}
@@ -208,13 +207,6 @@ func printResult(stdout io.Writer, result *compose.Result, learnOnly bool) error
 	return nil
 }
 
-func formatDuration(d time.Duration) string {
-	if d < time.Second {
-		return fmt.Sprintf("%dms", d.Milliseconds())
-	}
-	return fmt.Sprintf("%.1fs", d.Seconds())
-}
-
 func formatTokens(n int) string {
 	if n == 0 {
 		return "—"
@@ -225,22 +217,16 @@ func formatTokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func formatBytes(n int) string {
+func formatDataSize(n int) string {
 	if n == 0 {
 		return "—"
 	}
-	if n >= 1024*1024 {
-		return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
-	}
-	if n >= 1024 {
-		return fmt.Sprintf("%.1fKB", float64(n)/1024)
-	}
-	return fmt.Sprintf("%dB", n)
+	return compose.FormatBytes(n)
 }
 
 // runCompose executes the map-reduce compose pipeline and prints results.
 // Preserved for backward compatibility with existing tests.
-func runCompose(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM compose.LLM, opts compose.Options) error {
+func runCompose(ctx context.Context, stdout, stderr io.Writer, store storage.Store, observeLLM, learnLLM inference.Client, opts compose.Options) error {
 	var (
 		result *compose.Result
 		err    error

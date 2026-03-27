@@ -16,9 +16,6 @@ import (
 	"github.com/ellistarn/muse/prompts"
 )
 
-// LLM is the inference client used by the compose pipeline.
-type LLM = inference.Client
-
 // StageStats captures telemetry for a single pipeline stage.
 type StageStats struct {
 	Name     string
@@ -77,7 +74,7 @@ type Options struct {
 // Run executes the compose pipeline: observe new conversations, then learn a muse
 // from all observations. Observations are the source of truth for what has been
 // processed; there is no separate state file.
-func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opts Options) (*Result, error) {
+func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inference.Client, opts Options) (*Result, error) {
 	// List all conversations and existing observations
 	entries, err := store.ListConversations(ctx)
 	if err != nil {
@@ -231,7 +228,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM LLM, opt
 
 // LearnOnly re-runs only the learn phase using persisted observations.
 // Use this to recompose the muse with improved techniques without re-observing.
-func LearnOnly(ctx context.Context, store storage.Store, learnLLM LLM) (*Result, error) {
+func LearnOnly(ctx context.Context, store storage.Store, learnLLM inference.Client) (*Result, error) {
 	allObservations, err := loadAllObservations(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load observations: %w", err)
@@ -278,7 +275,7 @@ type turn struct {
 	humanContent     string // human's message
 }
 
-func observeConversation(ctx context.Context, client LLM, conv *conversation.Conversation) (string, inference.Usage, error) {
+func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
 	refined, usage, err := extractAndRefine(ctx, client, conv)
 	if err != nil {
 		return "", usage, err
@@ -291,7 +288,7 @@ func isEmpty(s string) bool {
 	return len(strings.TrimSpace(s)) == 0
 }
 
-func learn(ctx context.Context, client LLM, store storage.Store, observations []string) (string, string, inference.Usage, error) {
+func learn(ctx context.Context, client inference.Client, store storage.Store, observations []string) (string, string, inference.Usage, error) {
 	if len(observations) == 0 {
 		return "", "", inference.Usage{}, nil
 	}
@@ -312,7 +309,7 @@ func learn(ctx context.Context, client LLM, store storage.Store, observations []
 
 // ComputeDiff summarizes what changed between two muse versions. On first run
 // (no previous version), writes a static message without an LLM call.
-func ComputeDiff(ctx context.Context, client LLM, store storage.Store, timestamp, previous, current string) (string, inference.Usage, error) {
+func ComputeDiff(ctx context.Context, client inference.Client, store storage.Store, timestamp, previous, current string) (string, inference.Usage, error) {
 	var d string
 	var usage inference.Usage
 

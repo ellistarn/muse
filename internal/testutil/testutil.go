@@ -156,6 +156,11 @@ func (s *ConversationStore) DeletePrefix(_ context.Context, prefix string) error
 	if prefix == "observations/" {
 		s.Observations = map[string]string{}
 	}
+	for k := range s.RawData {
+		if strings.HasPrefix(k, prefix) {
+			delete(s.RawData, k)
+		}
+	}
 	return nil
 }
 
@@ -187,17 +192,6 @@ func (s *ConversationStore) ListData(_ context.Context, prefix string) ([]string
 	}
 	sort.Strings(keys)
 	return keys, nil
-}
-
-func (s *ConversationStore) DeleteData(_ context.Context, prefix string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for k := range s.RawData {
-		if strings.HasPrefix(k, prefix) {
-			delete(s.RawData, k)
-		}
-	}
-	return nil
 }
 
 // ---------------------------------------------------------------------------

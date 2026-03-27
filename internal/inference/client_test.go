@@ -23,7 +23,7 @@ func (s stubClient) Model() string { return "stub" }
 
 func TestConversePreservesPartialResponseOnError(t *testing.T) {
 	wantErr := errors.New("response truncated")
-	wantUsage := Usage{InputTokens: 12, OutputTokens: 34, Cost_: 0.56}
+	wantUsage := NewUsage(12, 34, 0.56)
 
 	text, usage, err := Converse(context.Background(), stubClient{
 		resp: &Response{Text: "partial output", Usage: wantUsage},
@@ -43,7 +43,7 @@ func TestConversePreservesPartialResponseOnError(t *testing.T) {
 
 func TestConverseStreamPreservesPartialResponseOnError(t *testing.T) {
 	wantErr := errors.New("response truncated")
-	wantUsage := Usage{InputTokens: 21, OutputTokens: 43, Cost_: 0.65}
+	wantUsage := NewUsage(21, 43, 0.65)
 
 	text, usage, err := ConverseStream(context.Background(), stubClient{
 		resp: &Response{Text: "partial stream", Usage: wantUsage},

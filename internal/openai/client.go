@@ -11,23 +11,18 @@ import (
 	"github.com/ellistarn/muse/internal/inference"
 )
 
-const defaultMaxTokens = 4096
-
-type modelPricing struct {
-	inputPerToken  float64
-	outputPerToken float64
-}
+type modelPricing = inference.Pricing
 
 // OpenAI pricing per token.
 // https://openai.com/api/pricing/
 var pricingTable = map[string]modelPricing{
-	"gpt-4.1":      {2.0 / 1_000_000, 8.0 / 1_000_000},
-	"gpt-4.1-mini": {0.4 / 1_000_000, 1.6 / 1_000_000},
-	"gpt-4.1-nano": {0.1 / 1_000_000, 0.4 / 1_000_000},
-	"gpt-4o":       {2.5 / 1_000_000, 10.0 / 1_000_000},
-	"gpt-4o-mini":  {0.15 / 1_000_000, 0.6 / 1_000_000},
-	"o3":           {2.0 / 1_000_000, 8.0 / 1_000_000},
-	"o4-mini":      {1.1 / 1_000_000, 4.4 / 1_000_000},
+	"gpt-4.1":      {InputPerToken: 2.0 / 1_000_000, OutputPerToken: 8.0 / 1_000_000},
+	"gpt-4.1-mini": {InputPerToken: 0.4 / 1_000_000, OutputPerToken: 1.6 / 1_000_000},
+	"gpt-4.1-nano": {InputPerToken: 0.1 / 1_000_000, OutputPerToken: 0.4 / 1_000_000},
+	"gpt-4o":       {InputPerToken: 2.5 / 1_000_000, OutputPerToken: 10.0 / 1_000_000},
+	"gpt-4o-mini":  {InputPerToken: 0.15 / 1_000_000, OutputPerToken: 0.6 / 1_000_000},
+	"o3":           {InputPerToken: 2.0 / 1_000_000, OutputPerToken: 8.0 / 1_000_000},
+	"o4-mini":      {InputPerToken: 1.1 / 1_000_000, OutputPerToken: 4.4 / 1_000_000},
 }
 
 func lookupPricing(model string) modelPricing {
@@ -159,7 +154,7 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 }
 
 func (c *Client) buildParams(system string, messages []inference.Message, opts inference.ConverseOptions) openai.ChatCompletionNewParams {
-	maxTokens := int64(defaultMaxTokens)
+	maxTokens := int64(inference.DefaultMaxTokens)
 	if opts.MaxTokens > 0 {
 		maxTokens = int64(opts.MaxTokens)
 	}
@@ -190,10 +185,7 @@ func (c *Client) buildParams(system string, messages []inference.Message, opts i
 }
 
 func (c *Client) extractUsage(usage openai.CompletionUsage) inference.Usage {
-	u := inference.Usage{
-		InputTokens:  int(usage.PromptTokens),
-		OutputTokens: int(usage.CompletionTokens),
-	}
-	u.Cost_ = float64(u.InputTokens)*c.pricing.inputPerToken + float64(u.OutputTokens)*c.pricing.outputPerToken
-	return u
+	in := int(usage.PromptTokens)
+	out := int(usage.CompletionTokens)
+	return inference.NewUsage(in, out, c.pricing.ComputeCost(in, out))
 }

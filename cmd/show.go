@@ -34,7 +34,7 @@ been computed yet, one is generated on the fly and cached for future use.`,
 				return runShowDiff(cmd, store)
 			}
 
-			soul, err := store.GetMuse(ctx)
+			document, err := store.GetMuse(ctx)
 			if err != nil {
 				if !storage.IsNotFound(err) {
 					return fmt.Errorf("failed to load muse: %w", err)
@@ -42,7 +42,7 @@ been computed yet, one is generated on the fly and cached for future use.`,
 				fmt.Fprintln(cmd.OutOrStdout(), "No muse found. Run 'muse compose' to generate one from conversations.")
 				return nil
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(soul))
+			fmt.Fprintln(cmd.OutOrStdout(), strings.TrimSpace(document))
 			return nil
 		},
 	}

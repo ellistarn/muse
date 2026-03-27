@@ -39,7 +39,7 @@ type ClusteredOptions struct {
 func RunClustered(
 	ctx context.Context,
 	store storage.Store,
-	observeLLM, labelLLM, summarizeLLM, composeLLM LLM,
+	observeLLM, labelLLM, summarizeLLM, composeLLM inference.Client,
 	opts ClusteredOptions,
 ) (*Result, error) {
 	pipelineStart := time.Now()
@@ -280,7 +280,7 @@ type observeResult struct {
 func runObserve(
 	ctx context.Context,
 	store storage.Store,
-	llm LLM,
+	llm inference.Client,
 	opts ClusteredOptions,
 	counter *atomic.Int32,
 ) (*observeResult, error) {
@@ -367,7 +367,7 @@ func runObserve(
 		if opts.Uploaded == 1 {
 			noun = "conversation"
 		}
-		discoverLine.tail = fmt.Sprintf("(%d new %s, %s)", opts.Uploaded, noun, formatBytes(opts.UploadBytes))
+		discoverLine.tail = fmt.Sprintf("(%d new %s, %s)", opts.Uploaded, noun, FormatBytes(opts.UploadBytes))
 	}
 	discoverLine.print()
 
@@ -489,7 +489,7 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func extractObservations(ctx context.Context, client LLM, conv *conversation.Conversation, verbose bool) ([]string, inference.Usage, error) {
+func extractObservations(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]string, inference.Usage, error) {
 	refined, usage, err := extractAndRefine(ctx, client, conv)
 	if err != nil {
 		return nil, usage, err
@@ -529,7 +529,7 @@ func extractObservations(ctx context.Context, client LLM, conv *conversation.Con
 // prompt in chunks, and refines the candidates into a single text.
 // Both the map-reduce path (which wants raw text) and the clustering path
 // (which further parses into discrete items) call this function.
-func extractAndRefine(ctx context.Context, client LLM, conv *conversation.Conversation) (string, inference.Usage, error) {
+func extractAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
 	turns := extractTurns(conv)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
@@ -678,8 +678,8 @@ var irrelevantPrefixes = []string{
 	"it looks like",
 	"i'm ready",
 	"i need",
-	"[some ",    // placeholder bracket tokens from LLM
-	"[another ", // placeholder bracket tokens from LLM
+	"[some ",    // placeholder bracket tokens from inference.Client
+	"[another ", // placeholder bracket tokens from inference.Client
 	"[an extracted",
 }
 
@@ -694,7 +694,7 @@ var irrelevantExact = []string{
 }
 
 // isRelevant returns true if an observation is a genuine statement about the
-// person's thinking rather than empty output, a placeholder token, or LLM
+// person's thinking rather than empty output, a placeholder token, or inference.Client
 // meta-commentary about failing to find observations. This is a second line
 // of defense — the primary filter is structural (Observation: prefix parsing).
 func isRelevant(s string) bool {
@@ -938,7 +938,7 @@ func parseLabelResponse(resp string, count int) []string {
 func runLabel(
 	ctx context.Context,
 	store storage.Store,
-	llm LLM,
+	llm inference.Client,
 	allObs []observationEntry,
 	forceRelabel bool,
 	verbose bool,
@@ -1108,7 +1108,7 @@ func runLabel(
 func runNormalize(
 	ctx context.Context,
 	store storage.Store,
-	llm LLM,
+	llm inference.Client,
 	verbose bool,
 ) (inference.Usage, error) {
 	// Collect all unique labels
@@ -1380,7 +1380,7 @@ func runSampleWithObs(ctx context.Context, clusters []clusterResult, allObs []ob
 // runSummarize runs parallel per-cluster synthesis.
 func runSummarize(
 	ctx context.Context,
-	llm LLM,
+	llm inference.Client,
 	samples []clusterSample,
 	counter *atomic.Int32,
 ) ([]string, inference.Usage, error) {
@@ -1442,7 +1442,7 @@ func runSummarize(
 // runCompose combines cluster summaries and noise observations into muse.md.
 func runCompose(
 	ctx context.Context,
-	llm LLM,
+	llm inference.Client,
 	store storage.Store,
 	summaries []string,
 	noiseObs []string,

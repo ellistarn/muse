@@ -11,24 +11,19 @@ import (
 	"github.com/ellistarn/muse/internal/inference"
 )
 
-const defaultMaxTokens = 4096
-
 // Model family constants matching bedrock's naming.
 const (
 	ModelOpus   = "opus"
 	ModelSonnet = "sonnet"
 )
 
-type modelPricing struct {
-	inputPerToken  float64
-	outputPerToken float64
-}
+type modelPricing = inference.Pricing
 
 // Anthropic API pricing per token.
 // https://docs.anthropic.com/en/docs/about-claude/models
 var pricingTable = map[string]modelPricing{
-	"sonnet": {3.0 / 1_000_000, 15.0 / 1_000_000},
-	"opus":   {5.0 / 1_000_000, 25.0 / 1_000_000},
+	"sonnet": {InputPerToken: 3.0 / 1_000_000, OutputPerToken: 15.0 / 1_000_000},
+	"opus":   {InputPerToken: 5.0 / 1_000_000, OutputPerToken: 25.0 / 1_000_000},
 }
 
 // Client wraps the Anthropic Messages API.
@@ -135,7 +130,7 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 }
 
 func (c *Client) buildParams(system string, messages []inference.Message, opts inference.ConverseOptions) anthropic.MessageNewParams {
-	maxTokens := int64(defaultMaxTokens)
+	maxTokens := int64(inference.DefaultMaxTokens)
 	if opts.MaxTokens > 0 {
 		maxTokens = int64(opts.MaxTokens)
 	}
@@ -182,10 +177,7 @@ func extractText(msg *anthropic.Message) string {
 }
 
 func (c *Client) extractUsage(msg *anthropic.Message) inference.Usage {
-	usage := inference.Usage{
-		InputTokens:  int(msg.Usage.InputTokens),
-		OutputTokens: int(msg.Usage.OutputTokens),
-	}
-	usage.Cost_ = float64(usage.InputTokens)*c.pricing.inputPerToken + float64(usage.OutputTokens)*c.pricing.outputPerToken
-	return usage
+	in := int(msg.Usage.InputTokens)
+	out := int(msg.Usage.OutputTokens)
+	return inference.NewUsage(in, out, c.pricing.ComputeCost(in, out))
 }
