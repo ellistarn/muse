@@ -76,7 +76,8 @@ weight.
 
 ### Shallow
 
-The muse captures real signal at too low a resolution to be useful. The chef balances dishes by
+The muse captures real signal at too low a resolution to be useful — on any dimension, whether
+reasoning, awareness, or voice. The chef balances dishes by
 acidity — reaching for citrus when a plate feels flat, pulling back when brightness overwhelms the
 base. But the muse only captures "balances flavors well." When a new dish needs help, the muse knows
 the chef balances but not how. It can't apply the pattern to a dish it hasn't seen.
@@ -92,7 +93,7 @@ The extraction process turns this into polished food-writing prose. The content 
 but someone working with this muse would expect an articulate collaborator and get whiplash meeting
 the actual chef.
 
-A common form of distortion is the extraction process encoding frustration with model defaults as
+Distortion can also enter when the extraction process encodes frustration with model defaults as
 owner traits. The chef's real terseness becomes indistinguishable from a generic instruction to be
 less verbose. Manual curation carries the same risk — adding content to correct model behavior rather
 than to represent the owner. The defense is provenance: content in the muse must be traceable to
