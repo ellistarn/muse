@@ -88,10 +88,14 @@ only echo back known positions, the resolution is too low.
 ### Distorted
 
 The muse doesn't faithfully represent the person. The distillation process itself changed the signal.
+
 The chef communicates in short, blunt directives — "more acid," "kill the garnish," "plate's dead."
 The extraction process turns this into polished food-writing prose. The content is roughly preserved,
 but someone working with this muse would expect an articulate collaborator and get whiplash meeting
-the actual chef.
+the actual chef. This happens because voice can only be demonstrated, not described — it's carried by
+the specific words, and any process that restates them degrades the signal. The defense is
+preservation: voice must reach the muse as the owner's actual words, not descriptions of how they
+sound.
 
 Distortion can also enter when the extraction process encodes frustration with model defaults as
 owner traits. The chef's real terseness becomes indistinguishable from a generic instruction to be
