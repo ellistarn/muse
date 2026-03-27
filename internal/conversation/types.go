@@ -32,6 +32,7 @@ func Sources() []SourceInfo {
 		{Name: "kiro", Provider: &Kiro{}},
 		{Name: "kiro-cli", Provider: &KiroCLI{}},
 		{Name: "github", Provider: &GitHub{}, OptIn: true},
+		{Name: "slack", Provider: &Slack{}, OptIn: true},
 	}
 }
 

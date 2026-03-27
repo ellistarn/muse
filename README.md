@@ -47,6 +47,8 @@ Conversations are automatically discovered from:
   `~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/workspace-sessions/`
 - **OpenCode** — `~/.local/share/opencode/opencode.db`
 - **Codex** — `~/.codex/`
+- **Slack** (opt-in) — Reads credentials from the Slack desktop app on macOS. Include with
+  `muse compose slack`.
 
 ## Storage
 

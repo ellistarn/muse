@@ -15,6 +15,7 @@ require (
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.9.1
+	github.com/syndtr/goleveldb v1.0.0
 	modernc.org/sqlite v1.37.1
 )
 
@@ -36,6 +37,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect

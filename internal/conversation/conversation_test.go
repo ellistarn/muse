@@ -29,7 +29,7 @@ func (m *mockProvider) Conversations() ([]Conversation, error) {
 func TestProviders_ReturnsAllDefaults(t *testing.T) {
 	providers := Providers()
 	if len(providers) != 5 {
-		t.Fatalf("expected 5 providers, got %d", len(providers))
+		t.Fatalf("expected 5 default providers, got %d", len(providers))
 	}
 	names := map[string]bool{}
 	for _, p := range providers {
@@ -38,6 +38,28 @@ func TestProviders_ReturnsAllDefaults(t *testing.T) {
 	for _, want := range []string{"OpenCode", "Claude Code", "Codex", "Kiro", "Kiro CLI"} {
 		if !names[want] {
 			t.Errorf("missing provider %q", want)
+		}
+	}
+	// Opt-in sources should not be in defaults.
+	for _, notWant := range []string{"GitHub", "Slack"} {
+		if names[notWant] {
+			t.Errorf("opt-in provider %q should not be in defaults", notWant)
+		}
+	}
+}
+
+func TestSources_ReturnsAll(t *testing.T) {
+	sources := Sources()
+	if len(sources) != 7 {
+		t.Fatalf("expected 7 sources, got %d", len(sources))
+	}
+	names := map[string]bool{}
+	for _, s := range sources {
+		names[s.Name] = true
+	}
+	for _, want := range []string{"opencode", "claude-code", "codex", "kiro", "kiro-cli", "github", "slack"} {
+		if !names[want] {
+			t.Errorf("missing source %q", want)
 		}
 	}
 }

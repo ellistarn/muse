@@ -40,8 +40,8 @@ Two composition methods are available:
 
 Optionally pass one or more source names to limit discovery and observation to
 those sources. Run "muse sources" to see what's available. Network sources like
-github are opt-in — they only run when explicitly named. Pass "all" to include
-every source.
+github and slack are opt-in — they only run when explicitly named. Pass "all" to
+include every source.
 
 Use --learn to recompose the muse from existing observations without
 reprocessing conversations. Use --reobserve to reprocess conversations from scratch.`,
@@ -49,6 +49,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
   muse compose --method=map-reduce      # simpler pipeline
   muse compose codex                    # only Codex conversations
   muse compose github                   # GitHub PRs and issues (opt-in, requires gh auth)
+  muse compose slack                    # Slack threads (opt-in, reads from desktop app)
   muse compose all                      # all sources including opt-in
   muse compose kiro --reobserve         # re-observe kiro from scratch
   muse compose --learn                  # recompose from existing observations
