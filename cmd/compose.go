@@ -90,7 +90,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 	cmd.Flags().BoolVar(&reobserve, "reobserve", false, "re-observe all conversations from scratch")
 	cmd.Flags().BoolVar(&relabel, "relabel", false, "force re-label all observations")
 	cmd.Flags().BoolVar(&learn, "learn", false, "skip observe, recompose muse from existing observations (map-reduce only)")
-	cmd.Flags().IntVar(&limit, "limit", 100, "max conversations to process (0 = no limit)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "max conversations to observe per run (0 = no limit)")
 	cmd.Flags().StringVar(&method, "method", "clustering", "composition method: clustering or map-reduce")
 	return cmd
 }
