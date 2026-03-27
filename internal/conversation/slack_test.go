@@ -195,19 +195,21 @@ func TestSlackTSToTime(t *testing.T) {
 	}
 }
 
-func TestMapSlackThread(t *testing.T) {
-	ws := slackWorkspace{teamID: "T123", name: "TestWS"}
-	thread := slackThread{channelID: "C456", channelName: "general", threadTS: "1000.000"}
-
-	t.Run("basic thread mapping", func(t *testing.T) {
-		msgs := []slackMessage{
-			{User: "U999", Text: "Anyone have thoughts on the new design?", TS: "1000.000"},
-			{User: "OWNER", Text: "I think we should use a tree structure instead of flat lists", TS: "1001.000"},
-			{User: "U999", Text: "Interesting, why?", TS: "1002.000"},
-			{User: "OWNER", Text: "Because the hierarchy is load-bearing — flat lists lose the parent-child relationship", TS: "1003.000"},
+func TestAssembleSlackConversation(t *testing.T) {
+	t.Run("basic thread", func(t *testing.T) {
+		cached := cachedSlackConv{
+			TeamID: "T123", TeamName: "TestWS",
+			ChannelID: "C456", ChannelName: "general",
+			ThreadTS: "1000.000", OwnerID: "OWNER",
+			Messages: []slackMessage{
+				{User: "U999", Text: "Anyone have thoughts on the new design?", TS: "1000.000"},
+				{User: "OWNER", Text: "I think we should use a tree structure instead of flat lists", TS: "1001.000"},
+				{User: "U999", Text: "Interesting, why?", TS: "1002.000"},
+				{User: "OWNER", Text: "Because the hierarchy is load-bearing — flat lists lose the parent-child relationship", TS: "1003.000"},
+			},
 		}
 
-		conv := mapSlackThread(ws, thread, msgs, "OWNER")
+		conv := assembleSlackConversation(cached)
 		if conv == nil {
 			t.Fatal("expected conversation, got nil")
 		}
@@ -237,36 +239,67 @@ func TestMapSlackThread(t *testing.T) {
 	})
 
 	t.Run("empty messages", func(t *testing.T) {
-		conv := mapSlackThread(ws, thread, nil, "OWNER")
+		cached := cachedSlackConv{OwnerID: "OWNER"}
+		conv := assembleSlackConversation(cached)
 		if conv != nil {
 			t.Error("expected nil for empty messages")
 		}
 	})
 
 	t.Run("owner not participating", func(t *testing.T) {
-		msgs := []slackMessage{
-			{User: "U999", Text: "Some discussion", TS: "1000.000"},
-			{User: "U888", Text: "I agree", TS: "1001.000"},
+		cached := cachedSlackConv{
+			TeamID: "T123", TeamName: "TestWS",
+			ChannelID: "C456", ChannelName: "general",
+			ThreadTS: "1000.000", OwnerID: "OWNER",
+			Messages: []slackMessage{
+				{User: "U999", Text: "Some discussion", TS: "1000.000"},
+				{User: "U888", Text: "I agree", TS: "1001.000"},
+			},
 		}
-		conv := mapSlackThread(ws, thread, msgs, "OWNER")
+		conv := assembleSlackConversation(cached)
 		if conv != nil {
 			t.Error("expected nil when owner didn't participate")
 		}
 	})
 
 	t.Run("filters noise", func(t *testing.T) {
-		msgs := []slackMessage{
-			{User: "OWNER", Text: "Here's my take on this", TS: "1000.000"},
-			{BotID: "B123", Subtype: "bot_message", Text: "Deploy notification", TS: "1001.000"},
-			{Subtype: "channel_join", User: "U999", TS: "1002.000"},
-			{User: "U999", Text: "Good point", TS: "1003.000"},
+		cached := cachedSlackConv{
+			TeamID: "T123", TeamName: "TestWS",
+			ChannelID: "C456", ChannelName: "general",
+			ThreadTS: "1000.000", OwnerID: "OWNER",
+			Messages: []slackMessage{
+				{User: "OWNER", Text: "Here's my take on this", TS: "1000.000"},
+				{BotID: "B123", Subtype: "bot_message", Text: "Deploy notification", TS: "1001.000"},
+				{Subtype: "channel_join", User: "U999", TS: "1002.000"},
+				{User: "U999", Text: "Good point", TS: "1003.000"},
+			},
 		}
-		conv := mapSlackThread(ws, thread, msgs, "OWNER")
+		conv := assembleSlackConversation(cached)
 		if conv == nil {
 			t.Fatal("expected conversation")
 		}
 		if len(conv.Messages) != 2 {
 			t.Errorf("got %d messages after filtering, want 2", len(conv.Messages))
+		}
+	})
+
+	t.Run("channel window", func(t *testing.T) {
+		cached := cachedSlackConv{
+			TeamID: "T123", TeamName: "TestWS",
+			ChannelID: "C789", ChannelName: "random",
+			WindowStart: "2000.000", OwnerID: "OWNER",
+			Messages: []slackMessage{
+				{User: "U999", Text: "What do you think about X?", TS: "2000.000"},
+				{User: "OWNER", Text: "I prefer Y because of Z", TS: "2001.000"},
+				{User: "U999", Text: "Makes sense", TS: "2002.000"},
+			},
+		}
+		conv := assembleSlackConversation(cached)
+		if conv == nil {
+			t.Fatal("expected conversation")
+		}
+		if conv.ConversationID != "T123:C789:2000.000" {
+			t.Errorf("ConversationID = %q", conv.ConversationID)
 		}
 	})
 }
@@ -459,16 +492,19 @@ func TestSlackAPIIntegration(t *testing.T) {
 	// We can't easily override slackAPIBase (const), so test the components individually.
 	// The integration is validated by testing the search result → thread fetch → conversation mapping flow.
 	t.Run("end to end mapping", func(t *testing.T) {
-		ws := slackWorkspace{teamID: "T123", name: "TestCorp"}
-		thread := slackThread{channelID: "C001", channelName: "architecture", threadTS: "100.000"}
-		msgs := []slackMessage{
-			{User: "U999", Text: "What do you think about the new API design?", TS: "100.000"},
-			{User: "UOWNER", Text: "I think we should use resource-oriented design. The current RPC style leaks implementation details.", TS: "100.001"},
-			{User: "U999", Text: "Can you elaborate?", TS: "100.002"},
-			{User: "UOWNER", Text: "Resources give you a uniform interface. Operations are the verbs, resources are the nouns. It composes better.", TS: "100.003"},
+		cached := cachedSlackConv{
+			TeamID: "T123", TeamName: "TestCorp",
+			ChannelID: "C001", ChannelName: "architecture",
+			ThreadTS: "100.000", OwnerID: "UOWNER",
+			Messages: []slackMessage{
+				{User: "U999", Text: "What do you think about the new API design?", TS: "100.000"},
+				{User: "UOWNER", Text: "I think we should use resource-oriented design. The current RPC style leaks implementation details.", TS: "100.001"},
+				{User: "U999", Text: "Can you elaborate?", TS: "100.002"},
+				{User: "UOWNER", Text: "Resources give you a uniform interface. Operations are the verbs, resources are the nouns. It composes better.", TS: "100.003"},
+			},
 		}
 
-		conv := mapSlackThread(ws, thread, msgs, "UOWNER")
+		conv := assembleSlackConversation(cached)
 		if conv == nil {
 			t.Fatal("expected conversation")
 		}

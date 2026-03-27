@@ -48,9 +48,32 @@ const (
 // only). It discovers xoxc tokens from LevelDB and decrypts the d cookie from
 // the Cookies SQLite database using the macOS Keychain, then uses the Slack
 // Web API to fetch threads the user participated in.
+//
+// API results are cached locally at ~/.muse/cache/slack/ so the API cost is
+// paid once; subsequent runs only fetch conversations updated since the last sync.
 type Slack struct{}
 
 func (s *Slack) Name() string { return "Slack" }
+
+// cachedSlackConv stores raw API data for a single Slack conversation (thread
+// or channel window). Stored upstream of conversation assembly so formatting
+// changes don't require re-fetching.
+type cachedSlackConv struct {
+	TeamID      string         `json:"team_id"`
+	TeamName    string         `json:"team_name"`
+	ChannelID   string         `json:"channel_id"`
+	ChannelName string         `json:"channel_name"`
+	ThreadTS    string         `json:"thread_ts,omitempty"`    // empty for channel windows
+	WindowStart string         `json:"window_start,omitempty"` // empty for threads
+	OwnerID     string         `json:"owner_id"`
+	Messages    []slackMessage `json:"messages"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+type slackSyncState struct {
+	LastSync time.Time `json:"last_sync"`
+	UserID   string    `json:"user_id"`
+}
 
 func (s *Slack) Conversations() ([]Conversation, error) {
 	if runtime.GOOS != "darwin" {
@@ -66,25 +89,289 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 		return nil, nil // Slack not installed
 	}
 
+	cacheDir, err := slackCacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("slack: cache dir: %w", err)
+	}
+
+	// Try to sync from the API. Failures are non-fatal — we still
+	// assemble conversations from whatever is already cached.
 	creds, err := discoverSlackCredentials(appDir)
 	if err != nil {
-		return nil, fmt.Errorf("slack: credentials: %w", err)
+		fmt.Fprintf(os.Stderr, "slack: credentials: %v (using cache only)\n", err)
+	} else if len(creds.tokens) > 0 {
+		for _, ws := range creds.tokens {
+			if err := syncSlackWorkspace(cacheDir, creds.cookie, ws); err != nil {
+				fmt.Fprintf(os.Stderr, "slack: workspace %s: %v\n", ws.name, err)
+			}
+		}
 	}
-	if len(creds.tokens) == 0 {
-		return nil, nil
+
+	// Assemble conversations from everything in cache.
+	cached, err := loadAllCachedSlackConvs(cacheDir)
+	if err != nil {
+		return nil, err
 	}
 
 	var conversations []Conversation
-	for _, ws := range creds.tokens {
-		convs, err := fetchWorkspaceConversations(creds.cookie, ws)
-		if err != nil {
-			// Treat per-workspace errors as warnings — continue with others.
-			fmt.Fprintf(os.Stderr, "slack: workspace %s: %v\n", ws.name, err)
-			continue
+	for _, c := range cached {
+		conv := assembleSlackConversation(c)
+		if conv != nil {
+			conversations = append(conversations, *conv)
 		}
-		conversations = append(conversations, convs...)
 	}
 	return conversations, nil
+}
+
+// ── Cache I/O ──────────────────────────────────────────────────────────
+
+func slackCacheDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".muse", "cache", "slack")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func loadSlackSyncState(cacheDir, teamID string) slackSyncState {
+	data, err := os.ReadFile(filepath.Join(cacheDir, teamID, "state.json"))
+	if err != nil {
+		return slackSyncState{}
+	}
+	var state slackSyncState
+	json.Unmarshal(data, &state)
+	return state
+}
+
+func saveSlackSyncState(cacheDir, teamID string, state slackSyncState) {
+	dir := filepath.Join(cacheDir, teamID)
+	os.MkdirAll(dir, 0o755)
+	data, _ := json.Marshal(state)
+	os.WriteFile(filepath.Join(dir, "state.json"), data, 0o644)
+}
+
+func slackConvCachePath(cacheDir string, c *cachedSlackConv) string {
+	// Use thread_ts or window_start as the unique identifier within a channel.
+	id := c.ThreadTS
+	if id == "" {
+		id = c.WindowStart
+	}
+	// Sanitize: replace dots and colons with underscores for safe filenames.
+	id = strings.ReplaceAll(id, ".", "_")
+	return filepath.Join(cacheDir, c.TeamID, "conversations", c.ChannelID, id+".json")
+}
+
+func saveCachedSlackConv(cacheDir string, c *cachedSlackConv) error {
+	path := slackConvCachePath(cacheDir, c)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func loadAllCachedSlackConvs(cacheDir string) ([]cachedSlackConv, error) {
+	var convs []cachedSlackConv
+	filepath.Walk(cacheDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".json") {
+			return nil
+		}
+		// Skip state.json files.
+		if filepath.Base(path) == "state.json" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		var c cachedSlackConv
+		if err := json.Unmarshal(data, &c); err != nil {
+			return nil // skip corrupt cache files
+		}
+		convs = append(convs, c)
+		return nil
+	})
+	return convs, nil
+}
+
+// ── Sync ───────────────────────────────────────────────────────────────
+
+func syncSlackWorkspace(cacheDir, cookie string, ws slackWorkspace) error {
+	client := &slackClient{
+		token:  ws.token,
+		cookie: cookie,
+		http:   &http.Client{Timeout: 30 * time.Second},
+	}
+
+	userID, err := client.authTest()
+	if err != nil {
+		return fmt.Errorf("auth.test: %w", err)
+	}
+
+	teamID := ws.teamID
+	if teamID == "" {
+		teamID = "unknown"
+	}
+
+	state := loadSlackSyncState(cacheDir, teamID)
+
+	// Username changed → invalidate cache for this workspace.
+	if state.UserID != "" && state.UserID != userID {
+		os.RemoveAll(filepath.Join(cacheDir, teamID, "conversations"))
+		state = slackSyncState{}
+	}
+
+	syncStart := time.Now()
+	if err := syncSlackConversations(client, cacheDir, ws, userID, state); err != nil {
+		fmt.Fprintf(os.Stderr, "slack: %s: sync incomplete: %v\n", ws.name, err)
+	} else {
+		saveSlackSyncState(cacheDir, teamID, slackSyncState{
+			LastSync: syncStart,
+			UserID:   userID,
+		})
+	}
+	return nil
+}
+
+func syncSlackConversations(client *slackClient, cacheDir string, ws slackWorkspace, userID string, state slackSyncState) error {
+	threads, windows, err := client.searchUserMessages(userID, state.LastSync)
+	if err != nil {
+		return fmt.Errorf("search: %w", err)
+	}
+
+	var synced int
+	if !state.LastSync.IsZero() {
+		fmt.Fprintf(os.Stderr, "slack: %s: incremental sync since %s\n", ws.name, state.LastSync.Format(time.DateOnly))
+	} else {
+		fmt.Fprintf(os.Stderr, "slack: %s: initial sync — %d threads, %d windows\n", ws.name, len(threads), len(windows))
+	}
+
+	// Fetch and cache threads.
+	for _, t := range threads {
+		time.Sleep(repliesDelay)
+		msgs, err := client.conversationsReplies(t.channelID, t.threadTS)
+		if err != nil {
+			continue
+		}
+		cached := &cachedSlackConv{
+			TeamID:      ws.teamID,
+			TeamName:    ws.name,
+			ChannelID:   t.channelID,
+			ChannelName: t.channelName,
+			ThreadTS:    t.threadTS,
+			OwnerID:     userID,
+			Messages:    msgs,
+			UpdatedAt:   slackTSToTime(msgs[len(msgs)-1].TS),
+		}
+		saveCachedSlackConv(cacheDir, cached)
+		synced++
+	}
+
+	// Fetch and cache channel windows.
+	if len(windows) > maxWindows {
+		windows = windows[:maxWindows]
+	}
+	for _, w := range windows {
+		time.Sleep(repliesDelay)
+		msgs, err := client.conversationsHistory(w.channelID, w.oldest, w.latest)
+		if err != nil {
+			continue
+		}
+		if len(msgs) < 2 {
+			continue
+		}
+		cached := &cachedSlackConv{
+			TeamID:      ws.teamID,
+			TeamName:    ws.name,
+			ChannelID:   w.channelID,
+			ChannelName: w.channelName,
+			WindowStart: w.oldest,
+			OwnerID:     userID,
+			Messages:    msgs,
+			UpdatedAt:   slackTSToTime(msgs[len(msgs)-1].TS),
+		}
+		saveCachedSlackConv(cacheDir, cached)
+		synced++
+	}
+
+	if synced > 0 {
+		fmt.Fprintf(os.Stderr, "slack: %s: cached %d conversations\n", ws.name, synced)
+	}
+	return nil
+}
+
+// ── Assembly ───────────────────────────────────────────────────────────
+
+// assembleSlackConversation builds a Conversation from cached data.
+func assembleSlackConversation(c cachedSlackConv) *Conversation {
+	if len(c.Messages) < 2 {
+		return nil
+	}
+
+	var messages []Message
+	var ownerMsgCount int
+	for _, m := range c.Messages {
+		if isSlackNoise(m) {
+			continue
+		}
+		role := "assistant"
+		if m.User == c.OwnerID {
+			role = "user"
+			ownerMsgCount++
+		}
+		messages = append(messages, Message{
+			Role:      role,
+			Content:   m.Text,
+			Timestamp: slackTSToTime(m.TS),
+		})
+	}
+
+	if ownerMsgCount == 0 {
+		return nil
+	}
+
+	title := ""
+	for _, m := range messages {
+		if m.Content != "" {
+			title = truncate(m.Content, 100)
+			break
+		}
+	}
+
+	var createdAt, updatedAt time.Time
+	if len(messages) > 0 {
+		createdAt = messages[0].Timestamp
+		updatedAt = messages[len(messages)-1].Timestamp
+	}
+
+	project := c.TeamName
+	if c.ChannelName != "" {
+		project = c.TeamName + "/#" + c.ChannelName
+	}
+
+	// ConversationID uses thread_ts for threads, window_start for channel windows.
+	convKey := c.ThreadTS
+	if convKey == "" {
+		convKey = c.WindowStart
+	}
+
+	return &Conversation{
+		SchemaVersion:  1,
+		Source:         "slack",
+		ConversationID: fmt.Sprintf("%s:%s:%s", c.TeamID, c.ChannelID, convKey),
+		Project:        project,
+		Title:          title,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
+		Messages:       messages,
+	}
 }
 
 // slackCredentials holds all discovered credentials from the local Slack app.
@@ -372,64 +659,6 @@ func keychainPassword() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// fetchWorkspaceConversations fetches threads from a single Slack workspace.
-func fetchWorkspaceConversations(cookie string, ws slackWorkspace) ([]Conversation, error) {
-	client := &slackClient{
-		token:  ws.token,
-		cookie: cookie,
-		http:   &http.Client{Timeout: 30 * time.Second},
-	}
-
-	// Identify the authenticated user.
-	userID, err := client.authTest()
-	if err != nil {
-		return nil, fmt.Errorf("auth.test: %w", err)
-	}
-
-	// Search for messages the user sent across all channels.
-	threads, windows, err := client.searchUserMessages(userID)
-	if err != nil {
-		return nil, fmt.Errorf("search: %w", err)
-	}
-
-	// Fetch full thread replies and map to conversations.
-	var conversations []Conversation
-	for _, t := range threads {
-		time.Sleep(repliesDelay)
-
-		msgs, err := client.conversationsReplies(t.channelID, t.threadTS)
-		if err != nil {
-			continue // skip individual thread failures
-		}
-
-		conv := mapSlackThread(ws, t, msgs, userID)
-		if conv == nil {
-			continue
-		}
-		conversations = append(conversations, *conv)
-	}
-
-	// Fetch channel history for time-windowed conversations.
-	if len(windows) > maxWindows {
-		windows = windows[:maxWindows]
-	}
-	for _, w := range windows {
-		time.Sleep(repliesDelay)
-
-		msgs, err := client.conversationsHistory(w.channelID, w.oldest, w.latest)
-		if err != nil {
-			continue
-		}
-
-		conv := mapSlackWindow(ws, w, msgs, userID)
-		if conv == nil {
-			continue
-		}
-		conversations = append(conversations, *conv)
-	}
-	return conversations, nil
-}
-
 // slackClient wraps Slack Web API calls with xoxc token + d cookie auth.
 type slackClient struct {
 	token  string
@@ -525,7 +754,8 @@ type channelWindow struct {
 }
 
 // searchUserMessages finds threads and channel windows the user participated in.
-func (c *slackClient) searchUserMessages(userID string) ([]slackThread, []channelWindow, error) {
+// If since is non-zero, only messages after that time are searched.
+func (c *slackClient) searchUserMessages(userID string, since time.Time) ([]slackThread, []channelWindow, error) {
 	seenThreads := map[string]bool{}
 	var threads []slackThread
 
@@ -536,8 +766,12 @@ func (c *slackClient) searchUserMessages(userID string) ([]slackThread, []channe
 			time.Sleep(searchDelay)
 		}
 
+		query := fmt.Sprintf("from:<@%s>", userID)
+		if !since.IsZero() {
+			query += fmt.Sprintf(" after:%s", since.Format("2006-01-02"))
+		}
 		params := url.Values{
-			"query": {fmt.Sprintf("from:<@%s>", userID)},
+			"query": {query},
 			"sort":  {"timestamp"},
 			"count": {strconv.Itoa(searchCount)},
 			"page":  {strconv.Itoa(page)},
@@ -749,122 +983,6 @@ func (c *slackClient) conversationsHistory(channelID, oldest, latest string) ([]
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 	return msgs, nil
-}
-
-// mapSlackWindow converts a time-windowed channel conversation to a Conversation.
-func mapSlackWindow(ws slackWorkspace, w channelWindow, msgs []slackMessage, ownerID string) *Conversation {
-	if len(msgs) < 2 {
-		return nil
-	}
-
-	var messages []Message
-	var ownerMsgCount int
-	for _, m := range msgs {
-		if isSlackNoise(m) {
-			continue
-		}
-		role := "assistant"
-		if m.User == ownerID {
-			role = "user"
-			ownerMsgCount++
-		}
-		messages = append(messages, Message{
-			Role:      role,
-			Content:   m.Text,
-			Timestamp: slackTSToTime(m.TS),
-		})
-	}
-
-	if ownerMsgCount == 0 {
-		return nil
-	}
-
-	title := ""
-	for _, m := range messages {
-		if m.Role == "user" && m.Content != "" {
-			title = truncate(m.Content, 100)
-			break
-		}
-	}
-
-	var createdAt, updatedAt time.Time
-	if len(messages) > 0 {
-		createdAt = messages[0].Timestamp
-		updatedAt = messages[len(messages)-1].Timestamp
-	}
-
-	project := ws.name
-	if w.channelName != "" {
-		project = ws.name + "/#" + w.channelName
-	}
-
-	return &Conversation{
-		SchemaVersion:  1,
-		Source:         "slack",
-		ConversationID: fmt.Sprintf("%s:%s:%s", ws.teamID, w.channelID, w.oldest),
-		Project:        project,
-		Title:          title,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		Messages:       messages,
-	}
-}
-
-// mapSlackThread converts a Slack thread to a Conversation.
-func mapSlackThread(ws slackWorkspace, thread slackThread, msgs []slackMessage, ownerID string) *Conversation {
-	if len(msgs) == 0 {
-		return nil
-	}
-
-	var messages []Message
-	var ownerMsgCount int
-	for _, m := range msgs {
-		if isSlackNoise(m) {
-			continue
-		}
-		role := "assistant" // other participants
-		if m.User == ownerID {
-			role = "user"
-			ownerMsgCount++
-		}
-		messages = append(messages, Message{
-			Role:      role,
-			Content:   m.Text,
-			Timestamp: slackTSToTime(m.TS),
-		})
-	}
-
-	// Skip threads where the owner didn't contribute meaningfully.
-	if ownerMsgCount == 0 {
-		return nil
-	}
-
-	title := ""
-	if len(msgs) > 0 {
-		title = truncate(msgs[0].Text, 100)
-	}
-
-	var createdAt, updatedAt time.Time
-	if len(messages) > 0 {
-		createdAt = messages[0].Timestamp
-		updatedAt = messages[len(messages)-1].Timestamp
-	}
-
-	project := ws.name
-	if thread.channelName != "" {
-		project = ws.name + "/#" + thread.channelName
-	}
-
-	return &Conversation{
-		SchemaVersion:  1,
-		Source:         "slack",
-		ConversationID: fmt.Sprintf("%s:%s:%s", ws.teamID, thread.channelID, thread.threadTS),
-		Project:        project,
-		Title:          title,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-		Messages:       messages,
-	}
 }
 
 // isSlackNoise returns true for messages that should be filtered out.
