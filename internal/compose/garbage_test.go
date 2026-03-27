@@ -165,7 +165,7 @@ func TestParseObservationItems(t *testing.T) {
 		{
 			name:  "double dash prefix preserved",
 			input: "-- Observation: Should not lose content.",
-			want:  nil, // "-- " is not a valid list prefix
+			want:  []Observation(nil), // "-- " is not a valid list prefix
 		},
 		{
 			name:  "asterisk bullet",
@@ -211,6 +211,27 @@ func TestParseObservationItems(t *testing.T) {
 			input: "- Quote: \"Terse.\"\n- Observation: Values brevity.",
 			want: []Observation{
 				{Quote: "Terse.", Observation: "Values brevity."},
+			},
+		},
+		{
+			name:  "quote at end of input",
+			input: "Observation: First.\nQuote: \"Trailing quote with no observation.\"",
+			want: []Observation{
+				{Observation: "First."},
+			},
+		},
+		{
+			name:  "quote overwritten by second quote",
+			input: "Quote: \"First quote.\"\nQuote: \"Second quote.\"\nObservation: Pairs with the second.",
+			want: []Observation{
+				{Quote: "Second quote.", Observation: "Pairs with the second."},
+			},
+		},
+		{
+			name:  "quote survives blank line before observation",
+			input: "Quote: \"Survives blanks.\"\n\nObservation: Paired despite blank line.",
+			want: []Observation{
+				{Quote: "Survives blanks.", Observation: "Paired despite blank line."},
 			},
 		},
 	}

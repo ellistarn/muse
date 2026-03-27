@@ -251,11 +251,13 @@ func RunClustered(
 	}, nil
 }
 
-// observationBytes returns the total byte size of all observation content.
+// observationBytes returns the total byte size of all formatted observation
+// content. This reflects what downstream LLM stages actually receive via
+// Format(), including date, quote prefix, and observation prefix overhead.
 func observationBytes(obs []observationEntry) int {
 	n := 0
 	for _, o := range obs {
-		n += len(o.Text) + len(o.Quote)
+		n += len(o.Format())
 	}
 	return n
 }
@@ -750,7 +752,8 @@ const quotePrefix = "Quote: "
 
 // parseObservationItems extracts discrete observations from LLM output.
 // Lines starting with "Observation: " are extracted. An optional "Quote: " line
-// immediately preceding an "Observation: " line is paired with that observation.
+// preceding an "Observation: " line is paired with that observation — intervening
+// blank lines do not break the pairing, but any non-empty non-prefix line does.
 // All other lines (meta-commentary, blank lines, preamble) are discarded.
 func parseObservationItems(text string) []Observation {
 	text = strings.TrimSpace(text)
