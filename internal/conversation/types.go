@@ -16,23 +16,63 @@ type Provider interface {
 	Conversations() ([]Conversation, error)
 }
 
-// Providers returns the default set of conversation providers (local sources).
-// These are safe to invoke unconditionally — they read local files and databases.
-func Providers() []Provider {
-	return []Provider{
-		&OpenCode{},
-		&ClaudeCode{},
-		&Codex{},
-		&Kiro{},
-		&KiroCLI{},
+// SourceInfo describes a registered conversation source.
+type SourceInfo struct {
+	Name     string   // source name used in CLI args and conversation.Source
+	Provider Provider // the provider implementation
+	OptIn    bool     // true if the source requires explicit selection (e.g. network calls)
+}
+
+// Sources returns all registered conversation sources.
+func Sources() []SourceInfo {
+	return []SourceInfo{
+		{Name: "opencode", Provider: &OpenCode{}},
+		{Name: "claude-code", Provider: &ClaudeCode{}},
+		{Name: "codex", Provider: &Codex{}},
+		{Name: "kiro", Provider: &Kiro{}},
+		{Name: "kiro-cli", Provider: &KiroCLI{}},
+		{Name: "github", Provider: &GitHub{}, OptIn: true},
 	}
 }
 
-// OptInProviders maps source names to providers that require explicit selection
-// (e.g. because they make network calls). These are only invoked when the user
-// passes the source name to `muse compose`.
-var OptInProviders = map[string]Provider{
-	"github": &GitHub{},
+// Providers returns the default set of conversation providers (local sources).
+// These are safe to invoke unconditionally — they read local files and databases.
+func Providers() []Provider {
+	var providers []Provider
+	for _, s := range Sources() {
+		if !s.OptIn {
+			providers = append(providers, s.Provider)
+		}
+	}
+	return providers
+}
+
+// ProvidersFor returns providers matching the given source names. Includes
+// opt-in providers when explicitly named. Returns all default providers
+// when sources is empty.
+func ProvidersFor(sources []string) []Provider {
+	if len(sources) == 0 {
+		return Providers()
+	}
+	wanted := make(map[string]bool, len(sources))
+	for _, s := range sources {
+		wanted[s] = true
+	}
+	// --all: include everything
+	if wanted["all"] {
+		var providers []Provider
+		for _, s := range Sources() {
+			providers = append(providers, s.Provider)
+		}
+		return providers
+	}
+	var providers []Provider
+	for _, s := range Sources() {
+		if wanted[s.Name] {
+			providers = append(providers, s.Provider)
+		}
+	}
+	return providers
 }
 
 // Conversation is the normalized representation of a conversation from any agent.

@@ -135,13 +135,7 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 		conversations []conversation.Conversation
 		err           error
 	}
-	providers := conversation.Providers()
-	// Include opt-in providers (e.g. network sources) when explicitly requested.
-	for _, s := range sources {
-		if p, ok := conversation.OptInProviders[s]; ok {
-			providers = append(providers, p)
-		}
-	}
+	providers := conversation.ProvidersFor(sources)
 	results := make([]result, len(providers))
 	var wg sync.WaitGroup
 	for i, provider := range providers {
