@@ -94,20 +94,30 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 		return nil, fmt.Errorf("slack: cache dir: %w", err)
 	}
 
-	// Try to sync from the API. Failures are non-fatal — we still
-	// assemble conversations from whatever is already cached.
+	// Discover credentials and sync from the API. At least one workspace
+	// must authenticate successfully — the cache is a rate-limit
+	// optimization, not an offline fallback.
 	creds, err := discoverSlackCredentials(appDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "slack: credentials: %v (using cache only)\n", err)
-	} else if len(creds.tokens) > 0 {
-		for _, ws := range creds.tokens {
-			if err := syncSlackWorkspace(cacheDir, creds.cookie, ws); err != nil {
-				fmt.Fprintf(os.Stderr, "slack: workspace %s: %v\n", ws.name, err)
-			}
-		}
+		return nil, fmt.Errorf("slack: credentials: %w", err)
+	}
+	if len(creds.tokens) == 0 {
+		return nil, nil
 	}
 
-	// Assemble conversations from everything in cache.
+	var synced int
+	for _, ws := range creds.tokens {
+		if err := syncSlackWorkspace(cacheDir, creds.cookie, ws); err != nil {
+			fmt.Fprintf(os.Stderr, "slack: workspace %s: %v\n", ws.name, err)
+			continue
+		}
+		synced++
+	}
+	if synced == 0 {
+		return nil, fmt.Errorf("slack: all workspaces failed to authenticate")
+	}
+
+	// Assemble conversations from cache.
 	cached, err := loadAllCachedSlackConvs(cacheDir)
 	if err != nil {
 		return nil, err
