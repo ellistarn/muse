@@ -4,6 +4,47 @@ import (
 	"testing"
 )
 
+func TestIsEmpty(t *testing.T) {
+	tests := []struct {
+		input string
+		empty bool
+	}{
+		// Truly empty
+		{"", true},
+		{"   ", true},
+		{"\n\t", true},
+
+		// Common LLM null markers — must be caught to avoid wasted refine calls
+		{"None", true},
+		{"none", true},
+		{"None.", true},
+		{"none.", true},
+		{"N/A", true},
+		{"n/a", true},
+		{"empty", true},
+		{"(none)", true},
+		{"(empty)", true},
+		{"(empty response)", true},
+
+		// Whitespace around null markers
+		{"  None  ", true},
+		{"  N/A\n", true},
+
+		// Real content — must NOT be treated as empty
+		{"Observation: Prefers explicit error handling.", false},
+		{"Some actual text here.", false},
+		{"None of the above applies because...", false}, // starts with "None" but is real content
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isEmpty(tt.input); got != tt.empty {
+				t.Errorf("isEmpty(%q) = %v, want %v", tt.input, got, tt.empty)
+			}
+		})
+	}
+}
+
 func TestIsRelevant(t *testing.T) {
 	tests := []struct {
 		name     string

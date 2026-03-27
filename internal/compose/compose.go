@@ -276,7 +276,7 @@ type turn struct {
 }
 
 func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
-	refined, usage, err := extractAndRefine(ctx, client, conv)
+	refined, usage, err := extractAndRefine(ctx, client, conv, false)
 	if err != nil {
 		return "", usage, err
 	}
@@ -284,8 +284,19 @@ func observeConversation(ctx context.Context, client inference.Client, conv *con
 }
 
 // isEmpty checks if the LLM output has no substantive content.
+// isEmpty returns true if the LLM response is empty or a common null marker.
+// This prevents trivial responses like "None" or "N/A" from triggering
+// downstream LLM calls (e.g. a refine pass on empty extract output).
 func isEmpty(s string) bool {
-	return len(strings.TrimSpace(s)) == 0
+	s = strings.TrimSpace(s)
+	if len(s) == 0 {
+		return true
+	}
+	switch strings.ToLower(s) {
+	case "none", "none.", "n/a", "empty", "(none)", "(empty)", "(empty response)":
+		return true
+	}
+	return false
 }
 
 func learn(ctx context.Context, client inference.Client, store storage.Store, observations []string) (string, string, inference.Usage, error) {

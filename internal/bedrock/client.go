@@ -90,11 +90,12 @@ const (
 	maxBackoff  = 60 * time.Second
 
 	// Adaptive rate limiter parameters
-	initialRate     = 20.0            // starting requests per second
-	minRate         = 1.0             // floor
-	maxRate         = 50.0            // ceiling
-	backoffCooldown = 5 * time.Second // don't halve rate more than once per cooldown
-	growthThreshold = 10              // consecutive successes before rate increase
+	initialRate     = 20.0             // starting requests per second
+	minRate         = 1.0              // floor
+	maxRate         = 50.0             // ceiling
+	backoffCooldown = 5 * time.Second  // don't halve rate more than once per cooldown
+	growthThreshold = 10               // consecutive successes before rate increase
+	recoveryWindow  = 30 * time.Second // reset to initial rate after this long without throttling
 )
 
 func NewClient(ctx context.Context, model string) (*Client, error) {
@@ -434,6 +435,17 @@ func (c *Client) onThrottle() {
 func (c *Client) onSuccess() {
 	c.rateMu.Lock()
 	defer c.rateMu.Unlock()
+	// If no throttling for a sustained period and rate is depressed, jump back
+	// to initial rate. The AIMD growth (+1 per 10 successes) is too slow to
+	// recover during batch tail when few goroutines remain — the recovery
+	// speed is coupled to request volume, which monotonically decreases as a
+	// batch drains. Throttling that occurred at high concurrency is not
+	// predictive of what the API tolerates at low concurrency.
+	if !c.lastBackoff.IsZero() && time.Since(c.lastBackoff) > recoveryWindow && c.ratePerSec < initialRate {
+		c.ratePerSec = initialRate
+		c.successes = 0
+		return
+	}
 	c.successes++
 	if c.successes >= growthThreshold {
 		c.successes = 0
