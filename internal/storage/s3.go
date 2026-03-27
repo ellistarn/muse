@@ -62,6 +62,7 @@ func (c *S3Store) ListConversations(ctx context.Context) ([]ConversationEntry, e
 				ConversationID: id,
 				Key:            key,
 				LastModified:   aws.ToTime(obj.LastModified),
+				SizeBytes:      aws.ToInt64(obj.Size),
 			})
 		}
 	}

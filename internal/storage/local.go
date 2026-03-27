@@ -73,6 +73,7 @@ func (l *LocalStore) ListConversations(_ context.Context) ([]ConversationEntry, 
 			ConversationID: conversationID,
 			Key:            "conversations/" + filepath.ToSlash(rel),
 			LastModified:   info.ModTime(),
+			SizeBytes:      info.Size(),
 		})
 		return nil
 	})

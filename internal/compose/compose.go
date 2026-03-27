@@ -132,6 +132,11 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 	if opts.Limit > 0 && len(pending) > opts.Limit {
 		pending = pending[:opts.Limit]
 	}
+	// Re-sort largest first so the most expensive conversations start
+	// processing immediately rather than landing in the tail.
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].SizeBytes > pending[j].SizeBytes
+	})
 
 	var mu sync.Mutex
 	var firstErr error

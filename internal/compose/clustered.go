@@ -339,7 +339,7 @@ func runObserve(
 		pending = append(pending, e)
 	}
 
-	// Sort newest first, apply limit
+	// Sort newest first so the limit keeps the most recent conversations.
 	sort.Slice(pending, func(i, j int) bool {
 		return pending[i].LastModified.After(pending[j].LastModified)
 	})
@@ -347,6 +347,11 @@ func runObserve(
 	if opts.Limit > 0 && len(pending) > opts.Limit {
 		pending = pending[:opts.Limit]
 	}
+	// Re-sort largest first so the most expensive conversations start
+	// processing immediately rather than landing in the tail.
+	sort.Slice(pending, func(i, j int) bool {
+		return pending[i].SizeBytes > pending[j].SizeBytes
+	})
 
 	var mu sync.Mutex
 	var firstErr error

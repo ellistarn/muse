@@ -65,6 +65,7 @@ type ConversationEntry struct {
 	ConversationID string
 	Key            string
 	LastModified   time.Time
+	SizeBytes      int64 // file size; used to schedule large conversations first
 }
 
 // NotFoundError is returned when a requested resource does not exist.
