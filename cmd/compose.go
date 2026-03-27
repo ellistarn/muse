@@ -39,7 +39,8 @@ Two composition methods are available:
   smaller observation sets.
 
 Optionally pass one or more source names (codex, kiro, kiro-cli, claude-code, opencode) to limit
-discovery and observation to those sources.
+discovery and observation to those sources. Network sources like github are opt-in — they only
+run when explicitly named.
 
 Use --learn to recompose the muse from existing observations without
 reprocessing conversations. Use --reobserve to reprocess conversations from scratch.`,
@@ -48,6 +49,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
   muse compose codex                    # only Codex conversations
   muse compose kiro                     # only kiro conversations
   muse compose kiro opencode            # kiro and opencode
+  muse compose github                   # GitHub PRs and issues (opt-in, requires gh auth)
   muse compose kiro --reobserve         # re-observe kiro from scratch
   muse compose --learn                  # recompose muse from existing observations
   muse compose --limit 50              # process at most 50 conversations

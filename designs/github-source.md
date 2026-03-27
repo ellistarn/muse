@@ -4,6 +4,10 @@ Captures the owner's back-and-forth on GitHub PRs and issues — code review, de
 bug triage — as conversations for the observation pipeline. This is the first network source;
 existing sources read local files and databases.
 
+GitHub is opt-in: `muse compose github`. It does not run on bare `muse compose` because the
+initial sync makes thousands of API calls. Default providers read local files and are free to
+invoke unconditionally.
+
 ## What we fetch
 
 PRs and issues where the owner participated, across all repos accessible to the token. Each

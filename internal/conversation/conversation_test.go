@@ -28,14 +28,14 @@ func (m *mockProvider) Conversations() ([]Conversation, error) {
 
 func TestProviders_ReturnsAllDefaults(t *testing.T) {
 	providers := Providers()
-	if len(providers) != 6 {
-		t.Fatalf("expected 6 providers, got %d", len(providers))
+	if len(providers) != 5 {
+		t.Fatalf("expected 5 providers, got %d", len(providers))
 	}
 	names := map[string]bool{}
 	for _, p := range providers {
 		names[p.Name()] = true
 	}
-	for _, want := range []string{"OpenCode", "Claude Code", "Codex", "Kiro", "Kiro CLI", "GitHub"} {
+	for _, want := range []string{"OpenCode", "Claude Code", "Codex", "Kiro", "Kiro CLI"} {
 		if !names[want] {
 			t.Errorf("missing provider %q", want)
 		}
@@ -47,9 +47,6 @@ func TestProviders_ImplementInterface(t *testing.T) {
 	// returns gracefully when data doesn't exist on this machine.
 	for _, p := range Providers() {
 		t.Run(p.Name(), func(t *testing.T) {
-			if testing.Short() && p.Name() == "GitHub" {
-				t.Skip("skipping GitHub provider in short mode (makes network calls)")
-			}
 			conversations, err := p.Conversations()
 			// Either returns conversations or nil — should not error when
 			// the source simply doesn't exist on this machine.

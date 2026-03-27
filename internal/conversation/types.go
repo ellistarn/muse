@@ -16,7 +16,8 @@ type Provider interface {
 	Conversations() ([]Conversation, error)
 }
 
-// Providers returns the default set of conversation providers.
+// Providers returns the default set of conversation providers (local sources).
+// These are safe to invoke unconditionally — they read local files and databases.
 func Providers() []Provider {
 	return []Provider{
 		&OpenCode{},
@@ -24,8 +25,14 @@ func Providers() []Provider {
 		&Codex{},
 		&Kiro{},
 		&KiroCLI{},
-		&GitHub{},
 	}
+}
+
+// OptInProviders maps source names to providers that require explicit selection
+// (e.g. because they make network calls). These are only invoked when the user
+// passes the source name to `muse compose`.
+var OptInProviders = map[string]Provider{
+	"github": &GitHub{},
 }
 
 // Conversation is the normalized representation of a conversation from any agent.
