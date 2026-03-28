@@ -65,8 +65,9 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 	}
 
 	client := &slackClient{
-		token: token,
-		http:  &http.Client{Timeout: 30 * time.Second},
+		token:  token,
+		cookie: os.Getenv("MUSE_SLACK_COOKIE"), // required for xoxc- tokens, optional for xoxp-
+		http:   &http.Client{Timeout: 30 * time.Second},
 	}
 
 	// Identify the authenticated user and workspace.
@@ -326,8 +327,9 @@ func assembleSlackConversation(c cachedSlackConv) *Conversation {
 // ── Slack API client ───────────────────────────────────────────────────
 
 type slackClient struct {
-	token string
-	http  *http.Client
+	token  string
+	cookie string // optional, required for xoxc- tokens
+	http   *http.Client
 }
 
 func (c *slackClient) do(method string, params url.Values) (json.RawMessage, error) {
@@ -337,6 +339,9 @@ func (c *slackClient) do(method string, params url.Values) (json.RawMessage, err
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.cookie != "" {
+		req.Header.Set("Cookie", "d="+c.cookie)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
