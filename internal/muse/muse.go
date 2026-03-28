@@ -152,6 +152,10 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 	var warnings []string
 	for _, r := range results {
 		if r.err != nil {
+			// If the user explicitly requested this source, fail hard.
+			if len(sources) > 0 {
+				return nil, fmt.Errorf("%s: %w", r.name, r.err)
+			}
 			warnings = append(warnings, fmt.Sprintf("failed to read %s conversations: %v", r.name, r.err))
 			continue
 		}

@@ -33,27 +33,6 @@ func TestIsSlackNoise(t *testing.T) {
 	}
 }
 
-func TestIsURLOnly(t *testing.T) {
-	tests := []struct {
-		text string
-		want bool
-	}{
-		{"<https://example.com>", true},
-		{"  <https://example.com/path?q=1>  ", true},
-		{"check this <https://example.com>", false},
-		{"<https://example.com> thoughts?", false},
-		{"just plain text", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.text, func(t *testing.T) {
-			if got := isURLOnly(tt.text); got != tt.want {
-				t.Errorf("isURLOnly(%q) = %v, want %v", tt.text, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSlackTSToTime(t *testing.T) {
 	tests := []struct {
 		ts   string
@@ -73,12 +52,13 @@ func TestSlackTSToTime(t *testing.T) {
 	}
 }
 
-func TestAssembleSlackConversation(t *testing.T) {
-	t.Run("basic thread", func(t *testing.T) {
-		cached := cachedSlackConv{
+func TestChunkChannel(t *testing.T) {
+	t.Run("basic chunking with attribution", func(t *testing.T) {
+		ch := cachedChannel{
 			TeamID: "T123", TeamName: "TestWS",
 			ChannelID: "C456", ChannelName: "general",
-			ThreadTS: "1000.000", OwnerID: "OWNER",
+			OwnerID: "OWNER",
+			Users:   map[string]string{"OWNER": "Ellis", "U999": "Alice"},
 			Messages: []slackMessage{
 				{User: "U999", Text: "Anyone have thoughts on the new design?", TS: "1000.000"},
 				{User: "OWNER", Text: "I think we should use a tree structure instead of flat lists", TS: "1001.000"},
@@ -86,15 +66,16 @@ func TestAssembleSlackConversation(t *testing.T) {
 				{User: "OWNER", Text: "Because the hierarchy is load-bearing", TS: "1003.000"},
 			},
 		}
-		conv := assembleSlackConversation(cached)
-		if conv == nil {
-			t.Fatal("expected conversation, got nil")
+		convs := chunkChannel(ch)
+		if len(convs) != 1 {
+			t.Fatalf("got %d conversations, want 1", len(convs))
 		}
+		conv := convs[0]
 		if conv.Source != "slack" {
 			t.Errorf("Source = %q, want %q", conv.Source, "slack")
 		}
-		if conv.ConversationID != "T123:C456:1000.000" {
-			t.Errorf("ConversationID = %q, want %q", conv.ConversationID, "T123:C456:1000.000")
+		if conv.ConversationID != "T123:C456:0" {
+			t.Errorf("ConversationID = %q, want %q", conv.ConversationID, "T123:C456:0")
 		}
 		if conv.Project != "TestWS/#general" {
 			t.Errorf("Project = %q, want %q", conv.Project, "TestWS/#general")
@@ -102,38 +83,47 @@ func TestAssembleSlackConversation(t *testing.T) {
 		if len(conv.Messages) != 4 {
 			t.Fatalf("got %d messages, want 4", len(conv.Messages))
 		}
-		if conv.Messages[1].Role != "user" {
-			t.Errorf("owner message role = %q, want %q", conv.Messages[1].Role, "user")
-		}
+		// Verify roles
 		if conv.Messages[0].Role != "assistant" {
-			t.Errorf("other message role = %q, want %q", conv.Messages[0].Role, "assistant")
+			t.Errorf("peer role = %q, want assistant", conv.Messages[0].Role)
+		}
+		if conv.Messages[1].Role != "user" {
+			t.Errorf("owner role = %q, want user", conv.Messages[1].Role)
+		}
+		// Verify attribution
+		if got := conv.Messages[0].Content; got != "@Alice: Anyone have thoughts on the new design?" {
+			t.Errorf("peer content = %q", got)
+		}
+		if got := conv.Messages[1].Content; got != "@Ellis: I think we should use a tree structure instead of flat lists" {
+			t.Errorf("owner content = %q", got)
 		}
 	})
 
 	t.Run("empty messages", func(t *testing.T) {
-		if conv := assembleSlackConversation(cachedSlackConv{OwnerID: "OWNER"}); conv != nil {
-			t.Error("expected nil for empty messages")
+		ch := cachedChannel{OwnerID: "OWNER"}
+		if convs := chunkChannel(ch); len(convs) != 0 {
+			t.Errorf("expected 0 conversations for empty channel, got %d", len(convs))
 		}
 	})
 
 	t.Run("owner not participating", func(t *testing.T) {
-		cached := cachedSlackConv{
+		ch := cachedChannel{
 			TeamID: "T123", TeamName: "TestWS", ChannelID: "C456",
-			ThreadTS: "1000.000", OwnerID: "OWNER",
+			OwnerID: "OWNER",
 			Messages: []slackMessage{
 				{User: "U999", Text: "Some discussion", TS: "1000.000"},
 				{User: "U888", Text: "I agree", TS: "1001.000"},
 			},
 		}
-		if conv := assembleSlackConversation(cached); conv != nil {
-			t.Error("expected nil when owner didn't participate")
+		if convs := chunkChannel(ch); len(convs) != 0 {
+			t.Errorf("expected 0 conversations when owner didn't participate, got %d", len(convs))
 		}
 	})
 
 	t.Run("filters noise", func(t *testing.T) {
-		cached := cachedSlackConv{
+		ch := cachedChannel{
 			TeamID: "T123", TeamName: "TestWS", ChannelID: "C456",
-			ThreadTS: "1000.000", OwnerID: "OWNER",
+			OwnerID: "OWNER",
 			Messages: []slackMessage{
 				{User: "OWNER", Text: "Here's my take", TS: "1000.000"},
 				{BotID: "B123", Subtype: "bot_message", Text: "Deploy notification", TS: "1001.000"},
@@ -141,36 +131,61 @@ func TestAssembleSlackConversation(t *testing.T) {
 				{User: "U999", Text: "Good point", TS: "1003.000"},
 			},
 		}
-		conv := assembleSlackConversation(cached)
-		if conv == nil {
-			t.Fatal("expected conversation")
+		convs := chunkChannel(ch)
+		if len(convs) != 1 {
+			t.Fatalf("expected 1 conversation, got %d", len(convs))
 		}
-		if len(conv.Messages) != 2 {
-			t.Errorf("got %d messages after filtering, want 2", len(conv.Messages))
+		if len(convs[0].Messages) != 2 {
+			t.Errorf("got %d messages after filtering, want 2", len(convs[0].Messages))
 		}
 	})
 
-	t.Run("channel window", func(t *testing.T) {
-		cached := cachedSlackConv{
-			TeamID: "T123", TeamName: "TestWS", ChannelID: "C789",
-			ChannelName: "random", WindowStart: "2000.000", OwnerID: "OWNER",
-			Messages: []slackMessage{
-				{User: "U999", Text: "What do you think?", TS: "2000.000"},
-				{User: "OWNER", Text: "I prefer Y because of Z", TS: "2001.000"},
-				{User: "U999", Text: "Makes sense", TS: "2002.000"},
-			},
+	t.Run("splits large channels into chunks", func(t *testing.T) {
+		ch := cachedChannel{
+			TeamID: "T123", TeamName: "TestWS", ChannelID: "C456",
+			ChannelName: "design", OwnerID: "OWNER",
 		}
-		conv := assembleSlackConversation(cached)
-		if conv == nil {
-			t.Fatal("expected conversation")
+		// Generate enough messages to exceed chunkSize.
+		for i := 0; i < 500; i++ {
+			user := "U999"
+			if i%3 == 0 {
+				user = "OWNER"
+			}
+			ch.Messages = append(ch.Messages, slackMessage{
+				User: user,
+				Text: fmt.Sprintf("Message %d with enough text to take up space in the chunk budget for testing purposes", i),
+				TS:   fmt.Sprintf("%d.000", 1000+i),
+			})
 		}
-		if conv.ConversationID != "T123:C789:2000.000" {
-			t.Errorf("ConversationID = %q", conv.ConversationID)
+		convs := chunkChannel(ch)
+		if len(convs) < 2 {
+			t.Errorf("expected multiple chunks for 500 messages, got %d", len(convs))
 		}
-		if err := conv.Validate(); err != nil {
-			t.Errorf("Validate() failed: %v", err)
+		// Second chunk should have [part N] prefix in title.
+		if len(convs) > 1 && !contains(convs[1].Title, "[part") {
+			t.Errorf("chunk 2 title = %q, expected [part N] prefix", convs[1].Title)
+		}
+		// Verify chunk IDs are sequential.
+		for i, conv := range convs {
+			wantID := fmt.Sprintf("T123:C456:%d", i)
+			if conv.ConversationID != wantID {
+				t.Errorf("chunk %d ID = %q, want %q", i, conv.ConversationID, wantID)
+			}
 		}
 	})
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSearchResultParsing(t *testing.T) {
@@ -199,30 +214,6 @@ func TestSearchResultParsing(t *testing.T) {
 	}
 }
 
-func TestConversationsRepliesParsing(t *testing.T) {
-	raw := []byte(`{
-		"ok": true,
-		"messages": [
-			{"user": "U123", "text": "Thread root", "ts": "1000.000"},
-			{"user": "U456", "text": "A reply", "ts": "1001.000"}
-		],
-		"has_more": false
-	}`)
-	var result struct {
-		Messages []slackMessage `json:"messages"`
-		HasMore  bool           `json:"has_more"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Messages) != 2 {
-		t.Fatalf("got %d messages, want 2", len(result.Messages))
-	}
-	if result.HasMore {
-		t.Error("expected has_more=false")
-	}
-}
-
 func TestSlackAPIIntegration(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth.test", func(w http.ResponseWriter, r *http.Request) {
@@ -230,8 +221,15 @@ func TestSlackAPIIntegration(t *testing.T) {
 	})
 	mux.HandleFunc("/search.messages", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ok":true,"messages":{"matches":[
-			{"ts":"100.001","thread_ts":"100.000","text":"reply","user":"UOWNER","channel":{"id":"C001","name":"arch"}}
+			{"ts":"100.001","thread_ts":"100.000","text":"reply","user":"UOWNER","channel":{"id":"C001","name":"arch"}},
+			{"ts":"200.001","text":"standalone","user":"UOWNER","channel":{"id":"C001","name":"arch"}}
 		],"pagination":{"page_count":1}}}`)
+	})
+	mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ok":true,"messages":[
+			{"user":"UOWNER","text":"standalone msg","ts":"200.001"},
+			{"user":"U999","text":"What about the API?","ts":"100.000","reply_count":2}
+		],"has_more":false}`)
 	})
 	mux.HandleFunc("/conversations.replies", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ok":true,"messages":[
@@ -244,32 +242,55 @@ func TestSlackAPIIntegration(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	t.Run("end to end assembly", func(t *testing.T) {
-		cached := cachedSlackConv{
+	t.Run("flat channel assembly", func(t *testing.T) {
+		client := &slackClient{
+			token:   "xoxp-test",
+			apiBase: server.URL,
+			http:    &http.Client{Timeout: 5 * time.Second},
+		}
+
+		activity, err := client.searchUserActivity("UOWNER", time.Time{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(activity) != 1 {
+			t.Fatalf("got %d channels, want 1", len(activity))
+		}
+		ch := activity[0]
+		if ch.channelID != "C001" {
+			t.Errorf("channelID = %q", ch.channelID)
+		}
+		if len(ch.threads) != 1 || !ch.threads["100.000"] {
+			t.Errorf("threads = %v, want {100.000}", ch.threads)
+		}
+
+		msgs, err := client.fetchChannelFlat(ch.channelID, ch.oldest, ch.latest, ch.threads)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Should have: 100.000 (thread parent), 100.001 (reply), 100.002 (reply),
+		// 100.003 (reply), 200.001 (standalone) = 5 messages, sorted.
+		if len(msgs) != 5 {
+			t.Fatalf("got %d messages, want 5", len(msgs))
+		}
+		if msgs[0].TS != "100.000" || msgs[4].TS != "200.001" {
+			t.Errorf("messages not sorted: first=%s last=%s", msgs[0].TS, msgs[4].TS)
+		}
+
+		// Chunk into conversations.
+		cached := cachedChannel{
 			TeamID: "T123", TeamName: "TestCorp",
 			ChannelID: "C001", ChannelName: "arch",
-			ThreadTS: "100.000", OwnerID: "UOWNER",
-			Messages: []slackMessage{
-				{User: "U999", Text: "What about the API?", TS: "100.000"},
-				{User: "UOWNER", Text: "Resource-oriented design.", TS: "100.001"},
-				{User: "U999", Text: "Elaborate?", TS: "100.002"},
-				{User: "UOWNER", Text: "Uniform interface. Composes better.", TS: "100.003"},
-			},
+			OwnerID: "UOWNER", Messages: msgs,
 		}
-		conv := assembleSlackConversation(cached)
-		if conv == nil {
-			t.Fatal("expected conversation")
+		convs := chunkChannel(cached)
+		if len(convs) == 0 {
+			t.Fatal("expected at least 1 conversation")
 		}
-		if conv.Source != "slack" {
-			t.Errorf("Source = %q", conv.Source)
+		if convs[0].Source != "slack" {
+			t.Errorf("Source = %q", convs[0].Source)
 		}
-		expectedRoles := []string{"assistant", "user", "assistant", "user"}
-		for i, want := range expectedRoles {
-			if conv.Messages[i].Role != want {
-				t.Errorf("message[%d].Role = %q, want %q", i, conv.Messages[i].Role, want)
-			}
-		}
-		if err := conv.Validate(); err != nil {
+		if err := convs[0].Validate(); err != nil {
 			t.Errorf("Validate() failed: %v", err)
 		}
 	})

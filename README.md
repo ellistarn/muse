@@ -48,7 +48,8 @@ Conversations are automatically discovered from:
 - **OpenCode** — `~/.local/share/opencode/opencode.db`
 - **Codex** — `~/.codex/`
 - **Slack** (opt-in) — Set `MUSE_SLACK_TOKEN` to a cookie file path for SAML SSO
-  (e.g. `~/.midway/cookie`) or a raw token (`xoxp-`/`xoxc-`). Run `muse compose slack`.
+  or a raw token (`xoxp-`/`xoxc-`). Set `MUSE_SLACK_WORKSPACE` to your workspace
+  (e.g. `mycompany.enterprise.slack.com`). Run `muse compose slack`.
 
 ## Storage
 

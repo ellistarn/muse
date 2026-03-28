@@ -370,8 +370,9 @@ const maxChunkChars = 200_000
 
 // extractTurns extracts human/assistant pairs from a conversation. Each turn pairs
 // the assistant message that preceded a human response with that human message.
-// Conversations with fewer than 2 human turns are skipped (no corrections or
-// preferences were expressed).
+// For AI conversations, requires at least 2 human turns (corrections/preferences).
+// For peer conversations (e.g. Slack), a single human turn suffices since even
+// one substantive statement reveals reasoning and voice.
 func extractTurns(conv *conversation.Conversation) []turn {
 	var userTurns int
 	for _, msg := range conv.Messages {
@@ -379,7 +380,11 @@ func extractTurns(conv *conversation.Conversation) []turn {
 			userTurns++
 		}
 	}
-	if userTurns < 2 {
+	minTurns := 2
+	if conv.Source == "slack" {
+		minTurns = 1
+	}
+	if userTurns < minTurns {
 		return nil
 	}
 
