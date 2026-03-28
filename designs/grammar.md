@@ -7,23 +7,22 @@ them. The document evolves with the system.
 
 ```
 Conversation   — messages between a human and an assistant or peer
-Observation    — identity or knowledge: how the owner thinks, what they know, how they sound
-Corpus         — the collection of all observations, indexed by thematic labels
-Identity Core  — muse.md; the relational structure of the owner's thinking (~2k tokens)
+Memory         — identity or knowledge: how the owner thinks, what they know, how they sound
+Identity       — muse.md; the relational structure of the owner's thinking (~2k tokens)
 ```
 
 ## Operations
 
 ```
-observe  : (Source, Text) → [Observation]
-ingest   : [Conversation] → Corpus
-compose  : Corpus → Identity Core
-recall   : (Identity Core, Corpus, Question) → Answer
+observe  : (Source, Text) → [Memory]
+ingest   : [Conversation] → [Memory]
+compose  : [Memory] → Identity
+recall   : (Identity, [Memory], Question) → Answer
 ```
 
 ### observe
 
-Extracts observations from text. The source type tells the prompt where to find signal:
+Extracts memories from text. The source type tells the prompt where to find signal:
 
 | Source | Signal |
 |---|---|
@@ -32,43 +31,42 @@ Extracts observations from text. The source type tells the prompt where to find 
 | Slack | Arguments, decisions, persuasion between peers |
 | Personal notes | Everything (first-person by default) |
 
-The output is always `[Observation]`. Source affects the extraction prompt, not the output type.
+The output is always `[Memory]`. Source affects the extraction prompt, not the output type.
 
-Observations capture identity (reasoning patterns, awareness, voice) and knowledge (positions,
-domain expertise, organizational models, learned lessons, outcomes). An observation about etcd write
-amplification is knowledge; the reasoning move "check substrate constraints first" is identity.
-A design review that resolved an API ownership question is an outcome. All are extracted.
-Multi-labeling preserves the connections.
+Memories capture identity (reasoning patterns, awareness, voice) and knowledge (positions, domain
+expertise, organizational models, learned lessons, outcomes). A memory about etcd write amplification
+is knowledge; the reasoning move "check substrate constraints first" is identity. A design review
+that resolved an API ownership question is an outcome. All are extracted. Multi-labeling preserves
+the connections.
 
-Observations include relational knowledge — "my boss insists on test coverage," "the team resists
-ORMs" — because the owner's thinking includes their model of the people and constraints around them.
+Memories include relational knowledge — "my boss insists on test coverage," "the team resists ORMs"
+— because the owner's thinking includes their model of the people and constraints around them.
 
 ### ingest
 
 Discovers new conversations, runs observe, filters for quality, assigns thematic labels, normalizes
-the label vocabulary, and stores observations in the corpus. Incremental — only processes what has
-changed.
+the label vocabulary, and stores memories. Incremental — only processes what has changed.
 
 ### compose
 
-Produces the identity core from the corpus. Editorial judgment — decides what's central, how patterns
-relate, what voice to demonstrate. The identity core is small (~2k tokens), stable between
-compositions, and always loaded as a system instruction.
+Produces the identity from memories. Editorial judgment — decides what's central, how patterns
+relate, what voice to demonstrate. The identity is small (~2k tokens), stable between compositions,
+and always loaded as a system instruction.
 
 ### recall
 
-Assembles a context-appropriate prompt from the identity core and relevant observations, then
-responds. Classifies the query into thematic labels (expanded through the identity core's relational
-structure), retrieves matching observations — both reasoning patterns and domain knowledge — and
-accumulates them across turns within a session.
+Assembles a context-appropriate prompt from the identity and relevant memories, then responds.
+Classifies the query into thematic labels (expanded through the identity's relational structure),
+retrieves matching memories — both reasoning patterns and domain knowledge — and accumulates them
+across turns within a session.
 
 ## Commands
 
 ```
-muse compose [source...]        # ingest new conversations, compose identity core
+muse compose [source...]        # ingest new conversations, compose identity
 muse ask <question>             # single-turn recall
 muse listen                     # MCP server, multi-turn recall
-muse show                       # print identity core + corpus stats
+muse show                       # print identity + memory stats
 muse sync <src> <dst>           # copy data between local and S3
 ```
 
