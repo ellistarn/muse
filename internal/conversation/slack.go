@@ -64,7 +64,7 @@ type slackSyncState struct {
 }
 
 func (s *Slack) Conversations(ctx context.Context, progress func(SyncProgress)) ([]Conversation, error) {
-	allCreds, err := resolveSlackCredentials()
+	allCreds, err := resolveSlackCredentials(progress)
 	if err != nil {
 		return nil, fmt.Errorf("slack: %w", err)
 	}
@@ -255,7 +255,7 @@ func syncSlackChannels(ctx context.Context, client *slackClient, cacheDir string
 	for i, ch := range activity {
 		msgs, err := client.fetchChannelFlat(ctx, ch.channelID, ch.oldest, ch.latest, ch.threads)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: slack %s/#%s: fetch failed: %v\n", ws.name, ch.channelName, err)
+			progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("warning: %s/#%s fetch failed: %v", ws.name, ch.channelName, err)})
 			continue
 		}
 		if len(msgs) == 0 {
@@ -886,7 +886,7 @@ type slackCreds struct {
 //     run SAML SSO for each. MUSE_SLACK_WORKSPACE overrides discovery with a
 //     single workspace.
 //   - Token (starts with xox): use directly as a single credential
-func resolveSlackCredentials() ([]slackCreds, error) {
+func resolveSlackCredentials(progress func(SyncProgress)) ([]slackCreds, error) {
 	val := os.Getenv("MUSE_SLACK_TOKEN")
 	if val == "" {
 		return nil, fmt.Errorf("MUSE_SLACK_TOKEN not set (set to a SAML cookie file path for SSO, or a raw xoxp-/xoxc- token)")
@@ -898,7 +898,7 @@ func resolveSlackCredentials() ([]slackCreds, error) {
 	}
 
 	if strings.HasPrefix(val, "/") {
-		return resolveSlackSSO(val)
+		return resolveSlackSSO(val, progress)
 	}
 
 	return []slackCreds{{
@@ -907,7 +907,7 @@ func resolveSlackCredentials() ([]slackCreds, error) {
 	}}, nil
 }
 
-func resolveSlackSSO(cookiePath string) ([]slackCreds, error) {
+func resolveSlackSSO(cookiePath string, progress func(SyncProgress)) ([]slackCreds, error) {
 	ws := os.Getenv("MUSE_SLACK_WORKSPACE")
 	if ws == "" {
 		return nil, fmt.Errorf("MUSE_SLACK_WORKSPACE not set (e.g. mycompany.enterprise.slack.com, comma-separated for multiple)")
@@ -920,10 +920,10 @@ func resolveSlackSSO(cookiePath string) ([]slackCreds, error) {
 		if workspace == "" {
 			continue
 		}
-		cred, err := ssoForWorkspace(cookiePath, workspace)
+		cred, err := ssoForWorkspace(cookiePath, workspace, progress)
 		if err != nil {
 			if len(workspaces) > 1 {
-				fmt.Fprintf(os.Stderr, "warning: slack %s: SSO failed, skipping: %v\n", workspace, err)
+				progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("warning: %s SSO failed, skipping: %v", workspace, err)})
 				continue
 			}
 			return nil, err
@@ -936,12 +936,12 @@ func resolveSlackSSO(cookiePath string) ([]slackCreds, error) {
 	return creds, nil
 }
 
-func ssoForWorkspace(cookiePath, workspace string) (*slackCreds, error) {
+func ssoForWorkspace(cookiePath, workspace string, progress func(SyncProgress)) (*slackCreds, error) {
 	sso, err := slackSAMLAuth(cookiePath, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("SSO via %s for %s: %w", cookiePath, workspace, err)
 	}
-	fmt.Fprintf(os.Stderr, "slack: authenticated via SSO (%s → %s)\n", cookiePath, workspace)
+	progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("authenticated via SSO (%s → %s)", cookiePath, workspace)})
 	return &slackCreds{
 		token:   sso.token,
 		cookie:  sso.cookie,

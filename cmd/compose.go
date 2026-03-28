@@ -288,6 +288,13 @@ func syncProgressRenderer() muse.SyncProgressFunc {
 				bar := output.RenderBar(p.Current, p.Total, output.BarWidth)
 				fmt.Fprintf(os.Stderr, "\r%-*s%s %s %d/%d", output.StageWidth, "", bar, name, p.Current, p.Total)
 			}
+		case "log":
+			// Persistent one-line event (e.g. auth success). Clear any
+			// transient status, print on its own line.
+			if tty {
+				output.ClearLine()
+			}
+			output.LogStage("sync", "%s: %s", name, p.Detail).Print()
 		case "done":
 			if !st.done {
 				st.done = true

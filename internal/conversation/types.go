@@ -9,8 +9,14 @@ import (
 
 // SyncProgress reports progress from a source sync operation. Sources call
 // the progress callback to report what's happening; the caller renders it.
+//
+// Phases:
+//   - "discovering" — transient status, overwritten in place on TTY
+//   - "fetching"    — transient progress bar, overwritten in place on TTY
+//   - "log"         — persistent one-line event (e.g. auth success), printed with newline
+//   - "done"        — final summary, printed with newline
 type SyncProgress struct {
-	Phase   string // "discovering", "fetching"
+	Phase   string // "discovering", "fetching", "log", "done"
 	Total   int    // total items to process (0 if unknown yet)
 	Current int    // items processed so far
 	Detail  string // human-readable detail, e.g. "533 PRs"

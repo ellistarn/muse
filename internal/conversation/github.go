@@ -26,6 +26,10 @@ const (
 	// Concurrency for parallel thread fetching.
 	fetchWorkers  = 8
 	maxRetries429 = 3
+
+	// maxHTTPCacheEntries bounds the on-disk HTTP ETag cache. Each entry is
+	// a single API response (~1-50KB). 10,000 entries ≈ 50-500MB worst case.
+	maxHTTPCacheEntries = 10_000
 )
 
 // ── Rate-limited transport ─────────────────────────────────────────────
@@ -41,11 +45,15 @@ type githubTransport struct {
 	base   http.RoundTripper
 	core   *throttle.AIMDLimiter
 	search *throttle.AIMDLimiter
+	cache  *httpCache
+	logFn  func(string) // persistent log messages routed through progress
 }
 
-func newGitHubTransport(ctx context.Context) *githubTransport {
+func newGitHubTransport(ctx context.Context, cache *httpCache, logFn func(string)) *githubTransport {
 	return &githubTransport{
-		base: http.DefaultTransport,
+		base:  http.DefaultTransport,
+		cache: cache,
+		logFn: logFn,
 		core: throttle.NewAIMDLimiter(ctx, throttle.Config{
 			SeedRate: 1.3, // ~80/min
 			MaxRate:  1.4, // ~83/min (5000/hr)
@@ -76,6 +84,11 @@ func (t *githubTransport) limiterFor(req *http.Request) *throttle.AIMDLimiter {
 func (t *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	limiter := t.limiterFor(req)
 
+	// Add If-None-Match from cache — 304 responses are free (no rate limit cost).
+	if t.cache != nil {
+		req = t.cache.wrapRequest(req)
+	}
+
 	for attempt := range maxRetries429 + 1 {
 		report, err := limiter.Acquire(req.Context())
 		if err != nil {
@@ -87,8 +100,19 @@ func (t *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			report(throttle.Error)
 			return nil, err
 		}
+
+		// 304 Not Modified — free request, return cached response
+		if resp.StatusCode == http.StatusNotModified && t.cache != nil {
+			report(throttle.Success)
+			return t.cache.handleResponse(req, resp), nil
+		}
+
 		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusForbidden {
 			report(throttle.Success)
+			// Cache 200 responses with ETags
+			if t.cache != nil {
+				resp = t.cache.handleResponse(req, resp)
+			}
 			return resp, nil
 		}
 
@@ -111,8 +135,10 @@ func (t *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		// fall through to re-acquire from the (now slower) limiter.
 		wait := retryAfterDuration(resp)
 		if wait > 0 {
-			fmt.Fprintf(os.Stderr, "github: rate limited, waiting %s (attempt %d/%d)\n",
-				wait.Round(time.Millisecond), attempt+1, maxRetries429)
+			if t.logFn != nil {
+				t.logFn(fmt.Sprintf("rate limited, waiting %s (attempt %d/%d)",
+					wait.Round(time.Millisecond), attempt+1, maxRetries429))
+			}
 			select {
 			case <-time.After(wait):
 			case <-req.Context().Done():
@@ -199,17 +225,25 @@ func (g *GitHub) Conversations(ctx context.Context, progress func(SyncProgress))
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	transport := newGitHubTransport(ctx)
+	cacheDir, err := githubCacheDir()
+	if err != nil {
+		return nil, err
+	}
+
+	httpResponseCache, err := newHTTPCache(cacheDir)
+	if err != nil {
+		return nil, err
+	}
+
+	logFn := func(msg string) {
+		progress(SyncProgress{Phase: "log", Detail: msg})
+	}
+	transport := newGitHubTransport(ctx, httpResponseCache, logFn)
 	defer transport.Close()
 	httpClient := &http.Client{Transport: transport}
 	client := github.NewClient(httpClient).WithAuthToken(token)
 
 	username, err := resolveGitHubUsername(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-
-	cacheDir, err := githubCacheDir()
 	if err != nil {
 		return nil, err
 	}
@@ -227,13 +261,16 @@ func (g *GitHub) Conversations(ctx context.Context, progress func(SyncProgress))
 	if err := syncGitHubThreads(ctx, client, username, cacheDir, state, progress); err != nil {
 		// Partial sync is fine — cache what we got. Don't advance the sync
 		// timestamp so the next run retries.
-		fmt.Fprintf(os.Stderr, "warning: github sync incomplete: %v\n", err)
+		progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("warning: sync incomplete: %v", err)})
 	} else {
 		saveGitHubSyncState(cacheDir, githubSyncState{
 			LastSync: syncStart,
 			Username: username,
 		})
 	}
+
+	// Prune old HTTP cache entries to bound disk growth.
+	httpResponseCache.prune(maxHTTPCacheEntries)
 
 	// Assemble conversations from everything in cache
 	threads, err := loadAllCachedThreads(cacheDir)
