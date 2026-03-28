@@ -35,9 +35,10 @@ Extracts observations from text. The source type tells the prompt where to find 
 The output is always `[Observation]`. Source affects the extraction prompt, not the output type.
 
 Observations capture identity (reasoning patterns, awareness, voice) and knowledge (positions,
-domain expertise, organizational models, learned lessons). An observation about etcd write
-amplification is knowledge; the reasoning move "check substrate constraints first" is identity. Both
-are extracted. Multi-labeling preserves the connection.
+domain expertise, organizational models, learned lessons, outcomes). An observation about etcd write
+amplification is knowledge; the reasoning move "check substrate constraints first" is identity.
+A design review that resolved an API ownership question is an outcome. All are extracted.
+Multi-labeling preserves the connections.
 
 Observations include relational knowledge — "my boss insists on test coverage," "the team resists
 ORMs" — because the owner's thinking includes their model of the people and constraints around them.

@@ -41,8 +41,11 @@ person.
 Knowledge that qualifies: positions the owner has taken, domain expertise that shapes how they
 evaluate tradeoffs, mental models of their ecosystem (who owns what, what's competing with what),
 organizational knowledge (how their team works, institutional dynamics they navigate, where bandwidth
-is scarce). Organizational knowledge is high-leverage — it's invisible to everyone outside the room
-and changes recommendations substantially.
+is scarce), and outcomes — what was built, decided, shipped, influenced, and fixed. Conversations are
+the work artifact. A design review is evidence of technical judgment applied to a specific problem. A
+Slack thread where the owner redirects a team is evidence of leadership. A debugging session that
+identifies a root cause is evidence of problem-solving. The corpus sees outcomes because the
+conversations contain them.
 
 An observation is the atomic unit. Each observation stores:
 
