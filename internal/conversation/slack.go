@@ -17,12 +17,12 @@ import (
 const (
 	slackAPIBase = "https://slack.com/api"
 
-	// Rate limiting — stay well under Slack's tier limits.
-	searchDelay  = 3 * time.Second // Tier 2: ~20/min
-	repliesDelay = time.Second     // Tier 3: ~50/min
-	searchPages  = 5               // max pages to fetch (500 messages)
-	searchCount  = 100             // results per page
-	maxWindows   = 50              // max channel windows to fetch
+	// Rate limiting — respect Slack's tier limits, back off on 429.
+	searchDelay  = 2 * time.Second        // Tier 2: ~20/min → 30 req/min headroom
+	repliesDelay = 500 * time.Millisecond // Tier 3: ~50/min → comfortable
+	searchPages  = 100                    // max pages (10,000 messages)
+	searchCount  = 100                    // results per page
+	maxWindows   = 1000                   // max channel windows to fetch
 )
 
 // Slack fetches conversations from the Slack Web API. Authentication is
