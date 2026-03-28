@@ -55,13 +55,17 @@ Coverage spans all repos accessible to the token, historical and incremental. PR
 single source — they share authentication, API client, and filtering logic. The only difference is
 whether review comments are fetched.
 
+Recent threads are synced first so partial runs prioritize current content. An interrupted sync after
+processing 2026–2023 has the most valuable threads cached; the next run skips them and continues
+with older history.
+
+Sync respects GitHub's published rate limits and recovers from throttling without data loss. Throttled
+requests are retried with backoff. The sync timestamp advances only on full success — nothing is
+permanently lost.
+
 Raw API data is cached locally, upstream of conversation assembly. The cache stores thread metadata
 plus full comment payloads from each API endpoint, including untruncated diff hunks and review states.
 Assembly changes (formatting, filtering, role mapping) rebuild from cache without re-fetching.
-
-Interrupted syncs make incremental progress. Already-cached threads are skipped on re-run. The sync
-timestamp advances only on full success. Nothing is permanently lost — the next run re-discovers
-threads that failed on the previous run.
 
 ## Decisions
 
@@ -96,9 +100,5 @@ engineer's pushback is different from an AI's response. The attribution prefix i
 A proper third role (`peer`) would require pipeline changes to `extractTurns` and
 `compressConversation`. **Revisit when:** observation quality from GitHub conversations shows
 empirical signal loss.
-
-**Automatic rate limit backoff**: Currently relies on skip-and-retry-next-run. Proper sleep-on-429
-would make the initial sync more robust. **Revisit when:** users report incomplete syncs that don't
-converge.
 
 **GitHub Discussions**: Different API surface, different interaction pattern. Not in scope.
