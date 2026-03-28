@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -73,13 +74,29 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 		return nil, fmt.Errorf("slack: cache dir: %w", err)
 	}
 
+	// Sync workspaces in parallel — each has its own API token and rate limits.
+	type result struct {
+		convs []Conversation
+		err   error
+	}
+	results := make([]result, len(allCreds))
+	var wg sync.WaitGroup
+	for i, creds := range allCreds {
+		wg.Add(1)
+		go func(i int, creds slackCreds) {
+			defer wg.Done()
+			convs, err := syncWorkspace(creds, cacheDir)
+			results[i] = result{convs, err}
+		}(i, creds)
+	}
+	wg.Wait()
+
 	var conversations []Conversation
-	for _, creds := range allCreds {
-		convs, err := syncWorkspace(creds, cacheDir)
-		if err != nil {
-			return nil, err
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		conversations = append(conversations, convs...)
+		conversations = append(conversations, r.convs...)
 	}
 	return conversations, nil
 }
