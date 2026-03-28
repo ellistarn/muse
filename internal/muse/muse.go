@@ -192,10 +192,7 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 	uploadCounts := map[string]int{}
 
 	// Separate conversations that need uploading from those that can be skipped.
-	type uploadItem struct {
-		sess *conversation.Conversation
-	}
-	var toUpload []uploadItem
+	var toUpload []*conversation.Conversation
 	for i := range local {
 		sess := &local[i]
 		key := fmt.Sprintf("conversations/%s/%s.json", sess.Source, sess.ConversationID)
@@ -205,22 +202,22 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 				continue
 			}
 		}
-		toUpload = append(toUpload, uploadItem{sess: sess})
+		toUpload = append(toUpload, sess)
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(20)
-	for _, item := range toUpload {
+	for _, sess := range toUpload {
 		g.Go(func() error {
-			n, err := store.PutConversation(ctx, item.sess)
+			n, err := store.PutConversation(ctx, sess)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", item.sess.ConversationID, err))
+				warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", sess.ConversationID, err))
 				return nil
 			}
 			uploaded++
-			uploadCounts[item.sess.Source]++
+			uploadCounts[sess.Source]++
 			totalBytes += n
 			return nil
 		})

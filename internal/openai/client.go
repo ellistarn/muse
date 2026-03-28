@@ -63,6 +63,8 @@ const (
 )
 
 // Client wraps the OpenAI Chat Completions API with adaptive rate limiting.
+// Rate limiting: applied via throttle.Retry around each API call, same pattern
+// as Anthropic — the SDK lacks typed status code errors.
 type Client struct {
 	client  openai.Client
 	model   string
@@ -125,6 +127,11 @@ func (c *Client) ConverseMessages(ctx context.Context, system string, messages [
 	return result, err
 }
 
+// NOTE: Retry wraps the entire stream. If a throttle error occurs mid-stream
+// after fn has already received partial deltas, the retry will re-deliver from
+// the beginning. This is acceptable for interactive/terminal use (the compose
+// pipeline uses ConverseMessages, not streaming). Do not use this in batch
+// pipelines without buffering or idempotent delivery.
 func (c *Client) ConverseMessagesStream(ctx context.Context, system string, messages []inference.Message, fn inference.StreamFunc, opts ...inference.ConverseOption) (*inference.Response, error) {
 	o := inference.Apply(opts)
 	params := c.buildParams(system, messages, o)

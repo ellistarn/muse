@@ -2,9 +2,7 @@ package anthropic
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -36,6 +34,8 @@ const (
 )
 
 // Client wraps the Anthropic Messages API with adaptive rate limiting.
+// Rate limiting: applied via throttle.Retry around each API call. The Anthropic
+// SDK lacks typed error responses, so throttle detection uses string matching.
 type Client struct {
 	client  anthropic.Client
 	model   string
@@ -102,6 +102,11 @@ func (c *Client) ConverseMessages(ctx context.Context, system string, messages [
 	return result, err
 }
 
+// NOTE: Retry wraps the entire stream. If a throttle error occurs mid-stream
+// after fn has already received partial deltas, the retry will re-deliver from
+// the beginning. This is acceptable for interactive/terminal use (the compose
+// pipeline uses ConverseMessages, not streaming). Do not use this in batch
+// pipelines without buffering or idempotent delivery.
 func (c *Client) ConverseMessagesStream(ctx context.Context, system string, messages []inference.Message, fn inference.StreamFunc, opts ...inference.ConverseOption) (*inference.Response, error) {
 	o := inference.Apply(opts)
 	params := c.buildParams(system, messages, o)
@@ -151,20 +156,10 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 }
 
 // isThrottled checks if an Anthropic SDK error is a rate limit (HTTP 429).
+// The Anthropic Go SDK does not expose a typed error with status code, so we
+// fall back to string matching. This is fragile but sufficient — the SDK
+// includes the HTTP status in the error message.
 func isThrottled(err error) bool {
-	// The Anthropic SDK wraps HTTP errors. Check for 429 via the response.
-	type statusCoder interface {
-		Error() string
-	}
-	// Walk the error chain looking for an HTTP response with 429
-	var httpErr interface{ DumpResponse(bool) []byte }
-	if errors.As(err, &httpErr) {
-		// Check the error message for 429 status
-		if strings.Contains(err.Error(), fmt.Sprintf("%d", http.StatusTooManyRequests)) {
-			return true
-		}
-	}
-	// Fallback: check error text
 	return strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "rate_limit")
 }
 

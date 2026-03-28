@@ -1039,6 +1039,13 @@ func runLabel(
 			for _, e := range entries {
 				obsTexts = append(obsTexts, e.Text)
 			}
+			// Cache key: observation texts + prompt hash. The label vocabulary is
+			// intentionally excluded — it grows across runs as new labels emerge,
+			// which caused spurious cache invalidation on warm runs. The vocabulary
+			// is an output of labeling, not an input: the LLM assigns labels based
+			// on the prompt and observation text, not the current vocabulary. Stale
+			// cached labels are acceptable because compose is re-run frequently and
+			// the vocabulary stabilizes quickly.
 			fp := Fingerprint(append(obsTexts, labelPromptHash)...)
 
 			existing, err := GetLabels(ctx, store, key.source, key.conversationID)

@@ -41,6 +41,11 @@ type Limiter interface {
 	// The returned function MUST be called exactly once with the call's
 	// outcome. Failing to call it leaks a rate-limiter token.
 	Acquire(ctx context.Context) (func(Outcome), error)
+
+	// OnThrottle signals a throttle without acquiring a token. Use this when
+	// throttle feedback arrives outside the normal Acquire/Report flow (e.g.
+	// an HTTP 429 detected in a shared transport layer).
+	OnThrottle()
 }
 
 // Config holds the parameters for an [AIMDLimiter].
@@ -164,6 +169,11 @@ func (l *AIMDLimiter) Close() {
 	}
 }
 
+// OnThrottle signals a throttle event without acquiring a token.
+func (l *AIMDLimiter) OnThrottle() {
+	l.onThrottle()
+}
+
 func rateToInterval(rate float64) time.Duration {
 	if rate <= 0 {
 		return time.Second
@@ -245,3 +255,6 @@ type Nop struct{}
 func (Nop) Acquire(context.Context) (func(Outcome), error) {
 	return func(Outcome) {}, nil
 }
+
+// OnThrottle is a no-op.
+func (Nop) OnThrottle() {}

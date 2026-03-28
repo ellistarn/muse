@@ -401,6 +401,10 @@ type slackClient struct {
 	userNames      map[string]string // cached user ID → display name
 	searchLimiter  throttle.Limiter  // Tier 2: search.messages (~0.5 req/s)
 	repliesLimiter throttle.Limiter  // Tier 3: conversations.* (~2 req/s)
+	// Rate limiting: applied at call sites via Acquire before each API call.
+	// Slack has no SDK — the slackClient.do() method is a raw HTTP wrapper, so
+	// pacing is done by callers (searchUserActivity, fetchChannelFlat, etc.).
+	// 429 responses detected in do() signal OnThrottle directly.
 }
 
 // limiterFor returns the appropriate rate limiter for a Slack API method.
@@ -444,12 +448,8 @@ func (c *slackClient) do(method string, params url.Values) (json.RawMessage, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		// Report throttle to the appropriate limiter so AIMD backs off.
-		if lim := c.limiterFor(method); lim != nil {
-			if report, err := lim.Acquire(context.Background()); err == nil {
-				report(throttle.Throttled)
-			}
-		}
+		// Signal the limiter to back off without acquiring a token.
+		c.limiterFor(method).OnThrottle()
 		retryAfter := 5 * time.Second
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
 			if secs, err := strconv.Atoi(ra); err == nil {

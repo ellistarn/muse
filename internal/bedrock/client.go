@@ -362,6 +362,10 @@ func (c *Client) converseStreamOnce(ctx context.Context, sr StreamingRuntime, in
 // Rate limiting and retry
 // ---------------------------------------------------------------------------
 
+// Rate limiting: applied via retryThrottled wrapper around each Converse call.
+// Bedrock has a client-level wrapper because the SDK provides typed error
+// responses (smithyhttp.ResponseError) for reliable throttle detection.
+
 func isThrottling(err error) bool {
 	var respErr *smithyhttp.ResponseError
 	if errors.As(err, &respErr) && respErr.HTTPStatusCode() == 429 {

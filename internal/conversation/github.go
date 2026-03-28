@@ -31,10 +31,12 @@ const (
 // ── Rate-limited transport ─────────────────────────────────────────────
 
 // githubTransport wraps http.RoundTripper with adaptive rate limiting for
-// both the core and search GitHub APIs. Requests are classified by URL path
-// and metered through the appropriate AIMDLimiter. 429 responses trigger
-// throttle feedback that halves the rate; retries re-acquire from the limiter
-// at the reduced rate.
+// both the core and search GitHub APIs. Rate limiting: applied at the HTTP
+// transport layer via Acquire/Report per request. This is the natural
+// integration point because the go-github SDK doesn't expose retry hooks,
+// but all requests flow through a shared http.RoundTripper. 429 responses
+// trigger throttle feedback that halves the rate; retries re-acquire from
+// the limiter at the reduced rate.
 type githubTransport struct {
 	base   http.RoundTripper
 	core   *throttle.AIMDLimiter
