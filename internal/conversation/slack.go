@@ -709,38 +709,53 @@ type slackCreds struct {
 	apiBase string
 }
 
-// resolveSlackCredentials tries SAML SSO first, then env vars.
-// Returns nil if no credentials are available.
+// resolveSlackCredentials interprets MUSE_SLACK_TOKEN:
+//   - Empty: return nil (source not configured)
+//   - File path (starts with / or ~/): load cookies from file, run SAML SSO
+//     to get xoxc token. Example: MUSE_SLACK_TOKEN=~/.midway/cookie
+//   - Token (xoxc-/xoxp-/xoxb-): use directly. For xoxc- tokens,
+//     MUSE_SLACK_COOKIE must also be set.
 func resolveSlackCredentials() (*slackCreds, error) {
-	// Try SAML SSO (zero config).
-	sso, ssoErr := slackSAMLAuth()
-	if sso != nil {
-		workspace := os.Getenv("MUSE_SLACK_WORKSPACE")
-		if workspace == "" {
-			workspace = "amazon.enterprise.slack.com"
-		}
-		fmt.Fprintf(os.Stderr, "slack: authenticated via SSO\n")
-		return &slackCreds{
-			token:   sso.token,
-			cookie:  sso.cookie,
-			jar:     sso.jar,
-			apiBase: fmt.Sprintf("https://%s/api", workspace),
-		}, nil
+	val := os.Getenv("MUSE_SLACK_TOKEN")
+	if val == "" {
+		return nil, nil
 	}
 
-	// Fall back to env vars.
-	token := os.Getenv("MUSE_SLACK_TOKEN")
-	if token != "" {
-		return &slackCreds{
-			token:  token,
-			cookie: os.Getenv("MUSE_SLACK_COOKIE"),
-		}, nil
+	// Expand ~ to home directory.
+	if strings.HasPrefix(val, "~/") {
+		home, _ := os.UserHomeDir()
+		val = filepath.Join(home, val[2:])
 	}
 
-	// If SSO was attempted but failed, surface that error.
-	if ssoErr != nil {
-		return nil, fmt.Errorf("SSO failed: %w (set MUSE_SLACK_TOKEN as fallback)", ssoErr)
+	// If it looks like a file path, load cookies and chase SAML.
+	if strings.HasPrefix(val, "/") {
+		return resolveSlackSSO(val)
 	}
 
-	return nil, nil
+	// Otherwise treat as a raw token.
+	return &slackCreds{
+		token:  val,
+		cookie: os.Getenv("MUSE_SLACK_COOKIE"),
+	}, nil
+}
+
+// resolveSlackSSO loads cookies from a file and runs the SAML SSO flow.
+func resolveSlackSSO(cookiePath string) (*slackCreds, error) {
+	workspace := os.Getenv("MUSE_SLACK_WORKSPACE")
+	if workspace == "" {
+		workspace = "amazon.enterprise.slack.com"
+	}
+
+	sso, err := slackSAMLAuth(cookiePath, workspace)
+	if err != nil {
+		return nil, fmt.Errorf("SSO via %s: %w", cookiePath, err)
+	}
+
+	fmt.Fprintf(os.Stderr, "slack: authenticated via SSO (%s)\n", cookiePath)
+	return &slackCreds{
+		token:   sso.token,
+		cookie:  sso.cookie,
+		jar:     sso.jar,
+		apiBase: fmt.Sprintf("https://%s/api", workspace),
+	}, nil
 }

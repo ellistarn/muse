@@ -49,7 +49,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
   muse compose --method=map-reduce      # simpler pipeline
   muse compose codex                    # only Codex conversations
   muse compose github                   # GitHub PRs and issues (opt-in, requires gh auth)
-  muse compose slack                    # Slack threads (opt-in, reads from desktop app)
+  muse compose slack                    # Slack (opt-in, set MUSE_SLACK_TOKEN)
   muse compose all                      # all sources including opt-in
   muse compose kiro --reobserve         # re-observe kiro from scratch
   muse compose --learn                  # recompose from existing observations

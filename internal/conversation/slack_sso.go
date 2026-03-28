@@ -7,7 +7,6 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -20,25 +19,21 @@ type slackSSO struct {
 	jar    http.CookieJar // full session cookie jar
 }
 
-// slackSAMLAuth attempts to obtain Slack credentials via SAML SSO.
-// It loads cookies from well-known credential stores (e.g. ~/.midway/cookie),
-// initiates the Slack SSO flow, follows redirects through whatever IDP the
-// workspace uses, submits any SAML forms encountered, and extracts the
-// xoxc token and d cookie from the final response.
-//
-// Returns nil if SSO prerequisites aren't met (no cookie file, no workspace URL).
-func slackSAMLAuth() (*slackSSO, error) {
+// slackSAMLAuth obtains Slack credentials by following the workspace's SAML
+// SSO redirect chain. It loads cookies from cookiePath (Netscape format),
+// follows redirects through whatever IDP the workspace uses, submits SAML
+// forms, and extracts the xoxc token from the final response.
+func slackSAMLAuth(cookiePath, workspace string) (*slackSSO, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
 	}
-	if loadKnownCookies(jar) == 0 {
-		return nil, nil
+	n, err := loadNetscapeCookies(jar, cookiePath)
+	if err != nil {
+		return nil, fmt.Errorf("load cookies from %s: %w", cookiePath, err)
 	}
-
-	workspace := os.Getenv("MUSE_SLACK_WORKSPACE")
-	if workspace == "" {
-		workspace = "amazon.enterprise.slack.com"
+	if n == 0 {
+		return nil, fmt.Errorf("no cookies found in %s", cookiePath)
 	}
 
 	ssoURL := fmt.Sprintf("https://%s/sso/saml/start?redir=%%2Fssb%%2Fsignin_redirect&action=login", workspace)
@@ -151,15 +146,6 @@ func submitFormChain(client *http.Client, baseURL, html string) (nextURL, finalB
 }
 
 // ── Cookie loading ─────────────────────────────────────────────────────
-
-func loadKnownCookies(jar http.CookieJar) int {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return 0
-	}
-	n, _ := loadNetscapeCookies(jar, filepath.Join(home, ".midway", "cookie"))
-	return n
-}
 
 // loadNetscapeCookies reads a Netscape-format cookie file into an http.CookieJar.
 func loadNetscapeCookies(jar http.CookieJar, path string) (int, error) {

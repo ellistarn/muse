@@ -47,8 +47,8 @@ Conversations are automatically discovered from:
   `~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/workspace-sessions/`
 - **OpenCode** — `~/.local/share/opencode/opencode.db`
 - **Codex** — `~/.codex/`
-- **Slack** (opt-in) — Authenticates via SAML SSO (zero config with `mwinit`), or set
-  `MUSE_SLACK_TOKEN`. Run `muse compose slack`.
+- **Slack** (opt-in) — Set `MUSE_SLACK_TOKEN` to a cookie file path for SAML SSO
+  (e.g. `~/.midway/cookie`) or a raw token (`xoxp-`/`xoxc-`). Run `muse compose slack`.
 
 ## Storage
 
