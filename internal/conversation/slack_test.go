@@ -1,12 +1,15 @@
 package conversation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/ellistarn/muse/internal/throttle"
 )
 
 func TestIsSlackNoise(t *testing.T) {
@@ -244,12 +247,14 @@ func TestSlackAPIIntegration(t *testing.T) {
 
 	t.Run("flat channel assembly", func(t *testing.T) {
 		client := &slackClient{
-			token:   "xoxp-test",
-			apiBase: server.URL,
-			http:    &http.Client{Timeout: 5 * time.Second},
+			token:          "xoxp-test",
+			apiBase:        server.URL,
+			http:           &http.Client{Timeout: 5 * time.Second},
+			searchLimiter:  throttle.Nop{},
+			repliesLimiter: throttle.Nop{},
 		}
 
-		activity, err := client.searchUserActivity("UOWNER", time.Time{})
+		activity, err := client.searchUserActivity(context.Background(), "UOWNER", time.Time{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -264,7 +269,7 @@ func TestSlackAPIIntegration(t *testing.T) {
 			t.Errorf("threads = %v, want {100.000}", ch.threads)
 		}
 
-		msgs, err := client.fetchChannelFlat(ch.channelID, ch.oldest, ch.latest, ch.threads)
+		msgs, err := client.fetchChannelFlat(context.Background(), ch.channelID, ch.oldest, ch.latest, ch.threads)
 		if err != nil {
 			t.Fatal(err)
 		}

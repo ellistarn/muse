@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/storage"
@@ -356,14 +358,8 @@ func runObserve(
 	})
 
 	var mu sync.Mutex
-	var firstErr error
 	var usage inference.Usage
 	var dataSize int
-
-	// errCtx is cancelled when the first error occurs, preventing remaining
-	// goroutines from starting expensive LLM calls.
-	errCtx, cancelOnErr := context.WithCancel(ctx)
-	defer cancelOnErr()
 
 	// Print discover line now that we know totals
 	discoverLine := logStage("discover", "%d sources → %d conversations %s",
@@ -391,32 +387,15 @@ func runObserve(
 		logBefore("observe", "%d %s%s", len(pending), noun, cacheNote)
 		prog := startProgress(len(pending), counter)
 
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, 50)
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(50)
 
 		for _, entry := range pending {
-			wg.Add(1)
-			go func(entry storage.ConversationEntry) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				// Check if another goroutine already failed
-				if errCtx.Err() != nil {
-					counter.Add(1)
-					return
-				}
-
+			g.Go(func() error {
 				conv, err := store.GetConversation(ctx, entry.Source, entry.ConversationID)
 				if err != nil {
 					counter.Add(1)
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("load conversation %s: %w", entry.Key, err)
-						cancelOnErr()
-					}
-					mu.Unlock()
-					return
+					return fmt.Errorf("load conversation %s: %w", entry.Key, err)
 				}
 
 				convBytes := conversationDataSize(conv)
@@ -425,13 +404,7 @@ func runObserve(
 				items, u, err := extractObservations(ctx, llm, conv, opts.Verbose)
 				n := counter.Add(1)
 				if err != nil {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("observe %s: %w", entry.Key, err)
-						cancelOnErr()
-					}
-					mu.Unlock()
-					return
+					return fmt.Errorf("observe %s: %w", entry.Key, err)
 				}
 
 				fp := Fingerprint(entry.LastModified.Format(time.RFC3339Nano), promptHash)
@@ -441,13 +414,7 @@ func runObserve(
 					Items:       items,
 				}
 				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, obs); err != nil {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("save observations for %s: %w", entry.Key, err)
-						cancelOnErr()
-					}
-					mu.Unlock()
-					return
+					return fmt.Errorf("save observations for %s: %w", entry.Key, err)
 				}
 
 				if opts.Verbose {
@@ -459,13 +426,14 @@ func runObserve(
 				usage = usage.Add(u)
 				dataSize += convBytes
 				mu.Unlock()
-			}(entry)
+				return nil
+			})
 		}
-		wg.Wait()
+		if err := g.Wait(); err != nil {
+			prog.stop()
+			return nil, err
+		}
 		prog.stop()
-		if firstErr != nil {
-			return nil, firstErr
-		}
 	}
 
 	return &observeResult{
@@ -864,19 +832,14 @@ func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]
 	}
 	results := make([]result, len(convList))
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 20)
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(20)
 	for i, ss := range convList {
-		wg.Add(1)
-		go func(i int, ss SourceConversation) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
+		g.Go(func() error {
 			obs, err := GetObservations(ctx, store, ss.Source, ss.ConversationID)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("get observations %s/%s: %w", ss.Source, ss.ConversationID, err)}
-				return
+				return results[i].err
 			}
 			var entries []observationEntry
 			for j, item := range obs.Items {
@@ -890,9 +853,12 @@ func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]
 				})
 			}
 			results[i] = result{entries: entries}
-		}(i, ss)
+			return nil
+		})
 	}
-	wg.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
 
 	var all []observationEntry
 	for _, r := range results {
@@ -1042,36 +1008,38 @@ func runLabel(
 		groups[key] = append(groups[key], obs)
 	}
 
+	// Sort conversation keys by observation count descending (longest pole first)
+	type conversationWork struct {
+		key     conversationKey
+		entries []observationEntry
+	}
+	work := make([]conversationWork, 0, len(groups))
+	for key, entries := range groups {
+		work = append(work, conversationWork{key, entries})
+	}
+	sort.Slice(work, func(i, j int) bool {
+		return len(work[i].entries) > len(work[j].entries)
+	})
+
 	var mu sync.Mutex
 	var totalUsage inference.Usage
-	var firstErr error
 	var hits, misses atomic.Int32
 	total := len(groups)
 
-	errCtx, cancelOnErr := context.WithCancel(ctx)
-	defer cancelOnErr()
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(50)
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 50)
-
-	for key, entries := range groups {
-		wg.Add(1)
-		go func(key conversationKey, entries []observationEntry) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			if errCtx.Err() != nil {
-				counter.Add(1)
-				return
-			}
+	for _, w := range work {
+		g.Go(func() error {
+			key := w.key
+			entries := w.entries
 
 			// Check cache
 			var obsTexts []string
 			for _, e := range entries {
 				obsTexts = append(obsTexts, e.Text)
 			}
-			fp := Fingerprint(append(obsTexts, labelPromptHash, Fingerprint(labels.list()...))...)
+			fp := Fingerprint(append(obsTexts, labelPromptHash)...)
 
 			existing, err := GetLabels(ctx, store, key.source, key.conversationID)
 			if err == nil && existing.Fingerprint == fp {
@@ -1085,7 +1053,7 @@ func runLabel(
 				if verbose {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] Cached labels for %s/%s\n", n, total, key.source, key.conversationID)
 				}
-				return
+				return nil
 			}
 			misses.Add(1)
 
@@ -1106,16 +1074,10 @@ func runLabel(
 
 				prompt := buildLabelPrompt(labels.list())
 				input := buildLabelInput(batchTexts)
-				resp, u, err := inference.Converse(errCtx, llm, prompt, input, inference.WithMaxTokens(1024))
+				resp, u, err := inference.Converse(ctx, llm, prompt, input, inference.WithMaxTokens(1024))
 				usage = usage.Add(u)
 				if err != nil {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("label batch for %s/%s: %w", key.source, key.conversationID, err)
-						cancelOnErr()
-					}
-					mu.Unlock()
-					return
+					return fmt.Errorf("label batch for %s/%s: %w", key.source, key.conversationID, err)
 				}
 
 				batchLabels := parseLabelResponse(resp, len(batch))
@@ -1137,13 +1099,7 @@ func runLabel(
 				Items:       items,
 			}
 			if err := PutLabels(ctx, store, key.source, key.conversationID, lblResult); err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("save labels for %s/%s: %w", key.source, key.conversationID, err)
-					cancelOnErr()
-				}
-				mu.Unlock()
-				return
+				return fmt.Errorf("save labels for %s/%s: %w", key.source, key.conversationID, err)
 			}
 
 			n := counter.Add(1)
@@ -1155,12 +1111,11 @@ func runLabel(
 			mu.Lock()
 			totalUsage = totalUsage.Add(usage)
 			mu.Unlock()
-		}(key, entries)
+			return nil
+		})
 	}
-	wg.Wait()
-
-	if firstErr != nil {
-		return inference.Usage{}, HitMiss{}, 0, firstErr
+	if err := g.Wait(); err != nil {
+		return inference.Usage{}, HitMiss{}, 0, err
 	}
 
 	return totalUsage, HitMiss{Hit: int(hits.Load()), Miss: int(misses.Load())}, len(labels.list()), nil
@@ -1450,29 +1405,19 @@ func runSummarize(
 	samples []clusterSample,
 	counter *atomic.Int32,
 ) ([]string, inference.Usage, error) {
+	// Sort clusters by observation count descending (longest pole first)
+	sort.Slice(samples, func(i, j int) bool {
+		return len(samples[i].Observations) > len(samples[j].Observations)
+	})
+
 	summaries := make([]string, len(samples))
-	errs := make([]error, len(samples))
 	usages := make([]inference.Usage, len(samples))
 
-	// errCtx is cancelled on first error to short-circuit remaining goroutines.
-	errCtx, cancelOnErr := context.WithCancel(ctx)
-	defer cancelOnErr()
-
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 50)
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(50)
 
 	for i, sample := range samples {
-		wg.Add(1)
-		go func(i int, sample clusterSample) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			if errCtx.Err() != nil {
-				counter.Add(1)
-				return
-			}
-
+		g.Go(func() error {
 			var input strings.Builder
 			fmt.Fprintf(&input, "Cluster theme: %s\n\nObservations:\n", sample.Theme)
 			for _, obs := range sample.Observations {
@@ -1483,21 +1428,20 @@ func runSummarize(
 			resp, usage, err := inference.Converse(ctx, llm, prompts.Summarize, input.String(), inference.WithMaxTokens(4096))
 			summaries[i] = strings.TrimSpace(resp)
 			usages[i] = usage
-			if err != nil {
-				errs[i] = err
-				cancelOnErr()
-			}
 			counter.Add(1)
-		}(i, sample)
+			if err != nil {
+				return fmt.Errorf("summarize cluster %d: %w", i, err)
+			}
+			return nil
+		})
 	}
-	wg.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, inference.Usage{}, err
+	}
 
 	var totalUsage inference.Usage
-	for i, err := range errs {
-		if err != nil {
-			return nil, totalUsage, fmt.Errorf("summarize cluster %d: %w", i, err)
-		}
-		totalUsage = totalUsage.Add(usages[i])
+	for _, u := range usages {
+		totalUsage = totalUsage.Add(u)
 	}
 
 	return summaries, totalUsage, nil

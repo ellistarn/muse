@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,16 +15,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ellistarn/muse/internal/throttle"
 )
 
 const (
 	slackAPIBase = "https://slack.com/api"
 
-	// Rate limiting — respect Slack's tier limits, back off on 429.
-	searchDelay  = 2 * time.Second        // Tier 2: ~20/min → 30 req/min headroom
-	repliesDelay = 500 * time.Millisecond // Tier 3: ~50/min → comfortable
-	searchPages  = 100                    // max pages (10,000 messages)
-	searchCount  = 100                    // results per page
+	searchPages = 100 // max pages (10,000 messages)
+	searchCount = 100 // results per page
 
 	// chunkSize is the target character budget per conversation chunk.
 	// ~20k chars ≈ 5k tokens. Large enough for meaningful context,
@@ -102,12 +102,30 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 }
 
 func syncWorkspace(creds slackCreds, cacheDir string) ([]Conversation, error) {
+	ctx := context.Background()
+
+	searchLimiter := throttle.NewAIMDLimiter(ctx, throttle.Config{
+		SeedRate: 0.5,
+		MaxRate:  0.5,
+		Label:    "slack-search",
+	})
+	defer searchLimiter.Close()
+
+	repliesLimiter := throttle.NewAIMDLimiter(ctx, throttle.Config{
+		SeedRate: 2,
+		MaxRate:  2,
+		Label:    "slack-replies",
+	})
+	defer repliesLimiter.Close()
+
 	client := &slackClient{
-		token:   creds.token,
-		cookie:  creds.cookie,
-		jar:     creds.jar,
-		apiBase: creds.apiBase,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		token:          creds.token,
+		cookie:         creds.cookie,
+		jar:            creds.jar,
+		apiBase:        creds.apiBase,
+		http:           &http.Client{Timeout: 30 * time.Second},
+		searchLimiter:  searchLimiter,
+		repliesLimiter: repliesLimiter,
 	}
 
 	userID, teamID, teamName, err := client.authTest()
@@ -125,7 +143,7 @@ func syncWorkspace(creds slackCreds, cacheDir string) ([]Conversation, error) {
 
 	syncStart := time.Now()
 	ws := slackWorkspace{teamID: teamID, name: teamName}
-	if err := syncSlackChannels(client, cacheDir, ws, userID, state); err != nil {
+	if err := syncSlackChannels(ctx, client, cacheDir, ws, userID, state); err != nil {
 		return nil, fmt.Errorf("slack: %s: sync failed: %w", teamName, err)
 	}
 	saveSlackSyncState(cacheDir, teamID, slackSyncState{
@@ -222,8 +240,8 @@ func loadCachedChannels(cacheDir, teamID string) ([]cachedChannel, error) {
 
 // ── Sync ───────────────────────────────────────────────────────────────
 
-func syncSlackChannels(client *slackClient, cacheDir string, ws slackWorkspace, userID string, state slackSyncState) error {
-	activity, err := client.searchUserActivity(userID, state.LastSync)
+func syncSlackChannels(ctx context.Context, client *slackClient, cacheDir string, ws slackWorkspace, userID string, state slackSyncState) error {
+	activity, err := client.searchUserActivity(ctx, userID, state.LastSync)
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
 	}
@@ -236,7 +254,7 @@ func syncSlackChannels(client *slackClient, cacheDir string, ws slackWorkspace, 
 
 	var synced, totalMsgs int
 	for _, ch := range activity {
-		msgs, err := client.fetchChannelFlat(ch.channelID, ch.oldest, ch.latest, ch.threads)
+		msgs, err := client.fetchChannelFlat(ctx, ch.channelID, ch.oldest, ch.latest, ch.threads)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "slack: %s/#%s: fetch failed: %v\n", ws.name, ch.channelName, err)
 			continue
@@ -375,12 +393,23 @@ func chunkChannel(ch cachedChannel) []Conversation {
 // ── Slack API client ───────────────────────────────────────────────────
 
 type slackClient struct {
-	token     string
-	cookie    string         // optional, required for xoxc- tokens (manual auth)
-	jar       http.CookieJar // optional, used for SSO auth (sends all session cookies)
-	apiBase   string
-	http      *http.Client
-	userNames map[string]string // cached user ID → display name
+	token          string
+	cookie         string         // optional, required for xoxc- tokens (manual auth)
+	jar            http.CookieJar // optional, used for SSO auth (sends all session cookies)
+	apiBase        string
+	http           *http.Client
+	userNames      map[string]string // cached user ID → display name
+	searchLimiter  throttle.Limiter  // Tier 2: search.messages (~0.5 req/s)
+	repliesLimiter throttle.Limiter  // Tier 3: conversations.* (~2 req/s)
+}
+
+// limiterFor returns the appropriate rate limiter for a Slack API method.
+// search.messages is Tier 2 (stricter); everything else uses the Tier 3 limiter.
+func (c *slackClient) limiterFor(method string) throttle.Limiter {
+	if strings.HasPrefix(method, "search.") {
+		return c.searchLimiter
+	}
+	return c.repliesLimiter
 }
 
 func (c *slackClient) do(method string, params url.Values) (json.RawMessage, error) {
@@ -415,6 +444,12 @@ func (c *slackClient) do(method string, params url.Values) (json.RawMessage, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
+		// Report throttle to the appropriate limiter so AIMD backs off.
+		if lim := c.limiterFor(method); lim != nil {
+			if report, err := lim.Acquire(context.Background()); err == nil {
+				report(throttle.Throttled)
+			}
+		}
 		retryAfter := 5 * time.Second
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
 			if secs, err := strconv.Atoi(ra); err == nil {
@@ -540,12 +575,16 @@ type channelActivity struct {
 // searchUserActivity searches for all messages from the user and returns
 // per-channel activity summaries. Both threaded and non-threaded messages
 // contribute to the same channel — there's no separate thread path.
-func (c *slackClient) searchUserActivity(userID string, since time.Time) ([]channelActivity, error) {
+func (c *slackClient) searchUserActivity(ctx context.Context, userID string, since time.Time) ([]channelActivity, error) {
 	byChannel := map[string]*channelActivity{}
 
 	for page := 1; page <= searchPages; page++ {
 		if page > 1 {
-			time.Sleep(searchDelay)
+			report, err := c.searchLimiter.Acquire(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("search rate limit: %w", err)
+			}
+			report(throttle.Success) // pacing; actual 429s handled in do()
 		}
 
 		query := fmt.Sprintf("from:<@%s>", userID)
@@ -639,9 +678,9 @@ type slackMessage struct {
 
 // fetchChannelFlat returns all messages in a channel's time range with thread
 // replies inlined chronologically. The result is a single flat timeline.
-func (c *slackClient) fetchChannelFlat(channelID, oldest, latest string, threads map[string]bool) ([]slackMessage, error) {
+func (c *slackClient) fetchChannelFlat(ctx context.Context, channelID, oldest, latest string, threads map[string]bool) ([]slackMessage, error) {
 	// 1. Fetch channel history for the time range.
-	history, err := c.channelHistory(channelID, oldest, latest)
+	history, err := c.channelHistory(ctx, channelID, oldest, latest)
 	if err != nil {
 		return nil, fmt.Errorf("history: %w", err)
 	}
@@ -667,11 +706,16 @@ func (c *slackClient) fetchChannelFlat(channelID, oldest, latest string, threads
 
 	var threadMsgs []slackMessage
 	for threadTS := range allThreads {
-		time.Sleep(repliesDelay)
-		replies, err := c.conversationsReplies(channelID, threadTS)
+		report, err := c.repliesLimiter.Acquire(ctx)
 		if err != nil {
+			return nil, fmt.Errorf("replies rate limit: %w", err)
+		}
+		replies, err := c.conversationsReplies(ctx, channelID, threadTS)
+		if err != nil {
+			report(throttle.Error)
 			continue // skip failed threads, keep going
 		}
+		report(throttle.Success)
 		for _, r := range replies {
 			if !seen[r.TS] {
 				seen[r.TS] = true
@@ -688,7 +732,7 @@ func (c *slackClient) fetchChannelFlat(channelID, oldest, latest string, threads
 	return all, nil
 }
 
-func (c *slackClient) channelHistory(channelID, oldest, latest string) ([]slackMessage, error) {
+func (c *slackClient) channelHistory(ctx context.Context, channelID, oldest, latest string) ([]slackMessage, error) {
 	oldestTime := slackTSToTime(oldest).Add(-5 * time.Minute)
 	latestTime := slackTSToTime(latest).Add(5 * time.Minute)
 
@@ -727,7 +771,11 @@ func (c *slackClient) channelHistory(channelID, oldest, latest string) ([]slackM
 			break
 		}
 		cursor = result.ResponseMetadata.NextCursor
-		time.Sleep(repliesDelay)
+		report, err := c.repliesLimiter.Acquire(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("history rate limit: %w", err)
+		}
+		report(throttle.Success) // pacing; actual 429s handled in do()
 	}
 
 	// Reverse to chronological order (Slack returns newest-first).
@@ -737,7 +785,7 @@ func (c *slackClient) channelHistory(channelID, oldest, latest string) ([]slackM
 	return all, nil
 }
 
-func (c *slackClient) conversationsReplies(channelID, threadTS string) ([]slackMessage, error) {
+func (c *slackClient) conversationsReplies(ctx context.Context, channelID, threadTS string) ([]slackMessage, error) {
 	var all []slackMessage
 	cursor := ""
 
@@ -772,7 +820,11 @@ func (c *slackClient) conversationsReplies(channelID, threadTS string) ([]slackM
 			break
 		}
 		cursor = result.ResponseMetadata.NextCursor
-		time.Sleep(repliesDelay)
+		report, err := c.repliesLimiter.Acquire(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("replies rate limit: %w", err)
+		}
+		report(throttle.Success) // pacing; actual 429s handled in do()
 	}
 	return all, nil
 }

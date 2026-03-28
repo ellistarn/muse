@@ -3,12 +3,14 @@ package openai
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 
 	"github.com/ellistarn/muse/internal/inference"
+	"github.com/ellistarn/muse/internal/throttle"
 )
 
 type modelPricing = inference.Pricing
@@ -53,11 +55,19 @@ func reasoningEffortForBudget(budget int32) openai.ReasoningEffort {
 	}
 }
 
-// Client wraps the OpenAI Chat Completions API.
+// OpenAI rate limits vary by tier. Tier 5: 10,000 RPM ≈ 166 req/s.
+// Seed conservatively — AIMD will find the real ceiling.
+const (
+	openaiSeedRate = 50.0
+	openaiMaxRate  = 166.0
+)
+
+// Client wraps the OpenAI Chat Completions API with adaptive rate limiting.
 type Client struct {
 	client  openai.Client
 	model   string
 	pricing modelPricing
+	limiter throttle.Limiter
 }
 
 const (
@@ -66,14 +76,20 @@ const (
 	ModelReasoning = "o3"
 )
 
-// NewClient creates an OpenAI API client. Reads OPENAI_API_KEY from env
-// by default. model should be a concrete OpenAI model ID like "gpt-4.1".
-func NewClient(model string, opts ...option.RequestOption) (*Client, error) {
+// NewClient creates an OpenAI API client with adaptive rate limiting.
+// Reads OPENAI_API_KEY from env by default. model should be a concrete
+// OpenAI model ID like "gpt-4.1".
+func NewClient(ctx context.Context, model string, opts ...option.RequestOption) (*Client, error) {
 	sdk := openai.NewClient(opts...)
 	return &Client{
 		client:  sdk,
 		model:   model,
 		pricing: lookupPricing(model),
+		limiter: throttle.NewAIMDLimiter(ctx, throttle.Config{
+			SeedRate: openaiSeedRate,
+			MaxRate:  openaiMaxRate,
+			Label:    "openai",
+		}),
 	}, nil
 }
 
@@ -85,25 +101,28 @@ func (c *Client) ConverseMessages(ctx context.Context, system string, messages [
 	o := inference.Apply(opts)
 	params := c.buildParams(system, messages, o)
 
-	completion, err := c.client.Chat.Completions.New(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("openai chat.completions.new: %w", err)
-	}
+	var result *inference.Response
+	err := throttle.Retry(ctx, c.limiter, throttle.DefaultRetryConfig(), isThrottled, func() error {
+		completion, err := c.client.Chat.Completions.New(ctx, params)
+		if err != nil {
+			return fmt.Errorf("openai chat.completions.new: %w", err)
+		}
 
-	text := ""
-	finishReason := ""
-	if len(completion.Choices) > 0 {
-		text = completion.Choices[0].Message.Content
-		finishReason = completion.Choices[0].FinishReason
-	}
-	usage := c.extractUsage(completion.Usage)
+		text := ""
+		finishReason := ""
+		if len(completion.Choices) > 0 {
+			text = completion.Choices[0].Message.Content
+			finishReason = completion.Choices[0].FinishReason
+		}
+		usage := c.extractUsage(completion.Usage)
+		result = &inference.Response{Text: text, Usage: usage}
 
-	if finishReason == "length" {
-		return &inference.Response{Text: text, Usage: usage},
-			fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
-	}
-
-	return &inference.Response{Text: text, Usage: usage}, nil
+		if finishReason == "length" {
+			return fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+		}
+		return nil
+	})
+	return result, err
 }
 
 func (c *Client) ConverseMessagesStream(ctx context.Context, system string, messages []inference.Message, fn inference.StreamFunc, opts ...inference.ConverseOption) (*inference.Response, error) {
@@ -113,44 +132,52 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 		IncludeUsage: openai.Bool(true),
 	}
 
-	stream := c.client.Chat.Completions.NewStreaming(ctx, params)
+	var result *inference.Response
+	err := throttle.Retry(ctx, c.limiter, throttle.DefaultRetryConfig(), isThrottled, func() error {
+		stream := c.client.Chat.Completions.NewStreaming(ctx, params)
 
-	var text strings.Builder
-	var usage inference.Usage
-	var finishReason string
+		var text strings.Builder
+		var usage inference.Usage
+		var finishReason string
 
-	for stream.Next() {
-		chunk := stream.Current()
-		if len(chunk.Choices) > 0 {
-			delta := chunk.Choices[0].Delta.Content
-			if delta != "" {
-				text.WriteString(delta)
-				if fn != nil {
-					fn(inference.StreamDelta{Text: delta})
+		for stream.Next() {
+			chunk := stream.Current()
+			if len(chunk.Choices) > 0 {
+				delta := chunk.Choices[0].Delta.Content
+				if delta != "" {
+					text.WriteString(delta)
+					if fn != nil {
+						fn(inference.StreamDelta{Text: delta})
+					}
+				}
+				if chunk.Choices[0].FinishReason != "" {
+					finishReason = chunk.Choices[0].FinishReason
 				}
 			}
-			if chunk.Choices[0].FinishReason != "" {
-				finishReason = chunk.Choices[0].FinishReason
+			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
+				usage = c.extractUsage(chunk.Usage)
 			}
 		}
-		// Usage comes in the final chunk when stream_options.include_usage is true.
-		if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
-			usage = c.extractUsage(chunk.Usage)
+
+		if err := stream.Err(); err != nil {
+			return fmt.Errorf("openai stream: %w", err)
 		}
-	}
 
-	if err := stream.Err(); err != nil {
-		return nil, fmt.Errorf("openai stream: %w", err)
-	}
+		fullText := text.String()
+		result = &inference.Response{Text: fullText, Usage: usage}
 
-	fullText := text.String()
+		if finishReason == "length" {
+			return fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+		}
+		return nil
+	})
+	return result, err
+}
 
-	if finishReason == "length" {
-		return &inference.Response{Text: fullText, Usage: usage},
-			fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
-	}
-
-	return &inference.Response{Text: fullText, Usage: usage}, nil
+// isThrottled checks if an OpenAI SDK error is a rate limit (HTTP 429).
+func isThrottled(err error) bool {
+	return strings.Contains(err.Error(), fmt.Sprintf("%d", http.StatusTooManyRequests)) ||
+		strings.Contains(err.Error(), "rate_limit")
 }
 
 func (c *Client) buildParams(system string, messages []inference.Message, opts inference.ConverseOptions) openai.ChatCompletionNewParams {
@@ -162,7 +189,6 @@ func (c *Client) buildParams(system string, messages []inference.Message, opts i
 		maxTokens += int64(opts.ThinkingBudget)
 	}
 
-	// Build message list: system message first, then conversation.
 	msgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
 	msgs = append(msgs, openai.SystemMessage(system))
 	for _, m := range messages {

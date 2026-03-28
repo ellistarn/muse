@@ -98,9 +98,9 @@ func newLLMClient(ctx context.Context, tier string) (inference.Client, error) {
 	provider := detectProvider()
 	switch provider {
 	case "anthropic":
-		return anthropic.NewClient(anthropicModel(tier))
+		return anthropic.NewClient(ctx, anthropicModel(tier))
 	case "openai":
-		return museOpenAI.NewClient(openaiModel(tier))
+		return museOpenAI.NewClient(ctx, openaiModel(tier))
 	case "bedrock":
 		return bedrock.NewClient(ctx, bedrockModel(tier))
 	default:

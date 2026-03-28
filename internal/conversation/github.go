@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,18 +15,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ellistarn/muse/internal/throttle"
 	"github.com/google/go-github/v72/github"
 )
 
 const (
 	githubSource     = "github"
 	maxDiffHunkLines = 8
-
-	// Rate limit budgets. Slightly under the actual limits to leave margin.
-	coreTokenRate    = 750 * time.Millisecond // ~80/min (limit: 5000/hr ≈ 83/min)
-	coreTokenBurst   = 10
-	searchTokenRate  = 2200 * time.Millisecond // ~27/min (limit: 30/min)
-	searchTokenBurst = 2
 
 	// Concurrency for parallel thread fetching.
 	fetchWorkers  = 8
@@ -36,57 +30,41 @@ const (
 
 // ── Rate-limited transport ─────────────────────────────────────────────
 
-// githubTransport wraps http.RoundTripper with token-bucket rate limiting
-// for both the core and search GitHub APIs. Requests are classified by URL
-// path and metered through the appropriate bucket. 429 responses are retried
-// with backoff, respecting the Retry-After header.
+// githubTransport wraps http.RoundTripper with adaptive rate limiting for
+// both the core and search GitHub APIs. Requests are classified by URL path
+// and metered through the appropriate AIMDLimiter. 429 responses trigger
+// throttle feedback that halves the rate; retries re-acquire from the limiter
+// at the reduced rate.
 type githubTransport struct {
 	base   http.RoundTripper
-	core   chan struct{}
-	search chan struct{}
-	done   chan struct{} // closed to stop refill goroutines
+	core   *throttle.AIMDLimiter
+	search *throttle.AIMDLimiter
 }
 
 func newGitHubTransport(ctx context.Context) *githubTransport {
-	t := &githubTransport{
-		base:   http.DefaultTransport,
-		core:   make(chan struct{}, coreTokenBurst),
-		search: make(chan struct{}, searchTokenBurst),
-		done:   make(chan struct{}),
-	}
-	// Pre-fill buckets
-	for range coreTokenBurst {
-		t.core <- struct{}{}
-	}
-	for range searchTokenBurst {
-		t.search <- struct{}{}
-	}
-	go t.refill(ctx, t.core, coreTokenRate)
-	go t.refill(ctx, t.search, searchTokenRate)
-	return t
-}
-
-func (t *githubTransport) refill(ctx context.Context, bucket chan struct{}, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.done:
-			return
-		case <-ticker.C:
-			select {
-			case bucket <- struct{}{}:
-			default: // bucket full
-			}
-		}
+	return &githubTransport{
+		base: http.DefaultTransport,
+		core: throttle.NewAIMDLimiter(ctx, throttle.Config{
+			SeedRate: 1.3, // ~80/min
+			MaxRate:  1.4, // ~83/min (5000/hr)
+			MinRate:  0.1,
+			Label:    "github-core",
+		}),
+		search: throttle.NewAIMDLimiter(ctx, throttle.Config{
+			SeedRate: 0.45, // ~27/min
+			MaxRate:  0.5,  // ~30/min
+			MinRate:  0.05,
+			Label:    "github-search",
+		}),
 	}
 }
 
-func (t *githubTransport) Close() { close(t.done) }
+func (t *githubTransport) Close() {
+	t.core.Close()
+	t.search.Close()
+}
 
-func (t *githubTransport) bucketFor(req *http.Request) chan struct{} {
+func (t *githubTransport) limiterFor(req *http.Request) *throttle.AIMDLimiter {
 	if strings.Contains(req.URL.Path, "/search/") {
 		return t.search
 	}
@@ -94,21 +72,21 @@ func (t *githubTransport) bucketFor(req *http.Request) chan struct{} {
 }
 
 func (t *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	bucket := t.bucketFor(req)
+	limiter := t.limiterFor(req)
 
 	for attempt := range maxRetries429 + 1 {
-		// Wait for a rate-limit token
-		select {
-		case <-bucket:
-		case <-req.Context().Done():
-			return nil, req.Context().Err()
+		report, err := limiter.Acquire(req.Context())
+		if err != nil {
+			return nil, err
 		}
 
 		resp, err := t.base.RoundTrip(req)
 		if err != nil {
+			report(throttle.Error)
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusForbidden {
+			report(throttle.Success)
 			return resp, nil
 		}
 
@@ -116,28 +94,28 @@ func (t *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if resp.StatusCode == http.StatusForbidden {
 			remaining := resp.Header.Get("X-RateLimit-Remaining")
 			if remaining != "" && remaining != "0" {
+				report(throttle.Success)
 				return resp, nil // real 403, not rate limit
 			}
 		}
 
+		report(throttle.Throttled)
 		resp.Body.Close()
 		if attempt == maxRetries429 {
 			return resp, fmt.Errorf("github: rate limited after %d retries", maxRetries429)
 		}
 
-		// Backoff: use Retry-After header or X-RateLimit-Reset, or exponential
+		// Backoff: use Retry-After header or X-RateLimit-Reset, then
+		// fall through to re-acquire from the (now slower) limiter.
 		wait := retryAfterDuration(resp)
-		if wait == 0 {
-			wait = time.Duration(1<<attempt) * time.Second
-			wait += time.Duration(rand.Intn(1000)) * time.Millisecond // jitter
-		}
-		fmt.Fprintf(os.Stderr, "github: rate limited, waiting %s (attempt %d/%d)\n",
-			wait.Round(time.Millisecond), attempt+1, maxRetries429)
-
-		select {
-		case <-time.After(wait):
-		case <-req.Context().Done():
-			return nil, req.Context().Err()
+		if wait > 0 {
+			fmt.Fprintf(os.Stderr, "github: rate limited, waiting %s (attempt %d/%d)\n",
+				wait.Round(time.Millisecond), attempt+1, maxRetries429)
+			select {
+			case <-time.After(wait):
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			}
 		}
 	}
 	panic("unreachable")

@@ -3,7 +3,10 @@ package muse
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/inference"
@@ -136,6 +139,16 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 		err           error
 	}
 	providers := conversation.ProvidersFor(sources)
+	// Sort providers so API sources (slower, network-bound) start first.
+	apiSources := map[string]bool{"GitHub": true, "Slack": true}
+	sort.SliceStable(providers, func(i, j int) bool {
+		iAPI := apiSources[providers[i].Name()]
+		jAPI := apiSources[providers[j].Name()]
+		if iAPI != jAPI {
+			return iAPI
+		}
+		return false
+	})
 	results := make([]result, len(providers))
 	var wg sync.WaitGroup
 	for i, provider := range providers {
@@ -175,7 +188,14 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 
 	var uploaded, skipped int
 	var totalBytes int
+	var mu sync.Mutex
 	uploadCounts := map[string]int{}
+
+	// Separate conversations that need uploading from those that can be skipped.
+	type uploadItem struct {
+		sess *conversation.Conversation
+	}
+	var toUpload []uploadItem
 	for i := range local {
 		sess := &local[i]
 		key := fmt.Sprintf("conversations/%s/%s.json", sess.Source, sess.ConversationID)
@@ -185,15 +205,27 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 				continue
 			}
 		}
-		n, err := store.PutConversation(ctx, sess)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", sess.ConversationID, err))
-			continue
-		}
-		uploaded++
-		uploadCounts[sess.Source]++
-		totalBytes += n
+		toUpload = append(toUpload, uploadItem{sess: sess})
 	}
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(20)
+	for _, item := range toUpload {
+		g.Go(func() error {
+			n, err := store.PutConversation(ctx, item.sess)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("failed to upload %s: %v", item.sess.ConversationID, err))
+				return nil
+			}
+			uploaded++
+			uploadCounts[item.sess.Source]++
+			totalBytes += n
+			return nil
+		})
+	}
+	g.Wait()
 	return &UploadResult{
 		Sources:      len(sourceSet),
 		SourceCounts: uploadCounts,
