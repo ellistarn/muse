@@ -25,10 +25,15 @@ const (
 	maxWindows   = 50              // max channel windows to fetch
 )
 
-// Slack fetches conversations from the Slack Web API using a user token
-// (MUSE_SLACK_TOKEN). API results are cached locally at ~/.muse/cache/slack/
-// so the API cost is paid once; subsequent runs only fetch conversations
-// updated since the last sync.
+// Slack fetches conversations from the Slack Web API. Authentication is
+// attempted in order:
+//  1. SAML SSO — follows the workspace's SSO redirect chain using cookies
+//     from known credential stores (e.g. ~/.midway/cookie). Zero config.
+//  2. Environment variables — MUSE_SLACK_TOKEN (required) and optionally
+//     MUSE_SLACK_COOKIE (needed for xoxc- tokens).
+//
+// API results are cached locally at ~/.muse/cache/slack/ so the API cost is
+// paid once; subsequent runs only fetch conversations updated since the last sync.
 type Slack struct{}
 
 func (s *Slack) Name() string { return "Slack" }
@@ -54,8 +59,12 @@ type slackSyncState struct {
 }
 
 func (s *Slack) Conversations() ([]Conversation, error) {
-	token := os.Getenv("MUSE_SLACK_TOKEN")
-	if token == "" {
+	// Try SAML SSO first (zero config), then fall back to env vars.
+	creds, err := resolveSlackCredentials()
+	if err != nil {
+		return nil, fmt.Errorf("slack: %w", err)
+	}
+	if creds == nil {
 		return nil, nil
 	}
 
@@ -65,9 +74,11 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 	}
 
 	client := &slackClient{
-		token:  token,
-		cookie: os.Getenv("MUSE_SLACK_COOKIE"), // required for xoxc- tokens, optional for xoxp-
-		http:   &http.Client{Timeout: 30 * time.Second},
+		token:   creds.token,
+		cookie:  creds.cookie,
+		jar:     creds.jar,
+		apiBase: creds.apiBase,
+		http:    &http.Client{Timeout: 30 * time.Second},
 	}
 
 	// Identify the authenticated user and workspace.
@@ -327,23 +338,43 @@ func assembleSlackConversation(c cachedSlackConv) *Conversation {
 // ── Slack API client ───────────────────────────────────────────────────
 
 type slackClient struct {
-	token  string
-	cookie string // optional, required for xoxc- tokens
-	http   *http.Client
+	token   string
+	cookie  string         // optional, required for xoxc- tokens (manual auth)
+	jar     http.CookieJar // optional, used for SSO auth (sends all session cookies)
+	apiBase string
+	http    *http.Client
 }
 
 func (c *slackClient) do(method string, params url.Values) (json.RawMessage, error) {
-	u := fmt.Sprintf("%s/%s?%s", slackAPIBase, method, params.Encode())
-	req, err := http.NewRequest("GET", u, nil)
-	if err != nil {
-		return nil, err
+	base := c.apiBase
+	if base == "" {
+		base = slackAPIBase
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	if c.cookie != "" {
+	u := fmt.Sprintf("%s/%s", base, method)
+
+	// For xoxc- tokens, send token as a form field (required by enterprise Slack).
+	// For xoxp-/xoxb- tokens, use Authorization header.
+	var req *http.Request
+	if strings.HasPrefix(c.token, "xoxc-") {
+		params.Set("token", c.token)
+		req, _ = http.NewRequest("POST", u, strings.NewReader(params.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		u += "?" + params.Encode()
+		req, _ = http.NewRequest("POST", u, nil)
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	if c.jar == nil && c.cookie != "" {
 		req.Header.Set("Cookie", "d="+c.cookie)
 	}
+	// If we have a cookie jar (from SSO), let the HTTP client use it
+	// directly — it carries all session cookies from the SAML flow.
+	httpClient := c.http
+	if c.jar != nil {
+		httpClient = &http.Client{Timeout: c.http.Timeout, Jar: c.jar}
+	}
 
-	resp, err := c.http.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +389,7 @@ func (c *slackClient) do(method string, params url.Values) (json.RawMessage, err
 		}
 		time.Sleep(retryAfter)
 
-		resp2, err := c.http.Do(req)
+		resp2, err := httpClient.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -668,4 +699,48 @@ func slackTSToTime(ts string) time.Time {
 		micros, _ = strconv.ParseInt(parts[1], 10, 64)
 	}
 	return time.Unix(secs, micros*1000)
+}
+
+// slackCreds holds resolved Slack credentials.
+type slackCreds struct {
+	token   string
+	cookie  string
+	jar     http.CookieJar // from SSO, carries all session cookies
+	apiBase string
+}
+
+// resolveSlackCredentials tries SAML SSO first, then env vars.
+// Returns nil if no credentials are available.
+func resolveSlackCredentials() (*slackCreds, error) {
+	// Try SAML SSO (zero config).
+	sso, ssoErr := slackSAMLAuth()
+	if sso != nil {
+		workspace := os.Getenv("MUSE_SLACK_WORKSPACE")
+		if workspace == "" {
+			workspace = "amazon.enterprise.slack.com"
+		}
+		fmt.Fprintf(os.Stderr, "slack: authenticated via SSO\n")
+		return &slackCreds{
+			token:   sso.token,
+			cookie:  sso.cookie,
+			jar:     sso.jar,
+			apiBase: fmt.Sprintf("https://%s/api", workspace),
+		}, nil
+	}
+
+	// Fall back to env vars.
+	token := os.Getenv("MUSE_SLACK_TOKEN")
+	if token != "" {
+		return &slackCreds{
+			token:  token,
+			cookie: os.Getenv("MUSE_SLACK_COOKIE"),
+		}, nil
+	}
+
+	// If SSO was attempted but failed, surface that error.
+	if ssoErr != nil {
+		return nil, fmt.Errorf("SSO failed: %w (set MUSE_SLACK_TOKEN as fallback)", ssoErr)
+	}
+
+	return nil, nil
 }
