@@ -6,7 +6,8 @@ not between a human and an AI assistant. This is where people argue, decide, per
 coordinate — the signal is different from what shows up in tool-assisted work.
 
 Slack is opt-in: `muse compose slack`. It requires `MUSE_SLACK_TOKEN` (a SAML cookie file path or
-raw token) and `MUSE_SLACK_WORKSPACE` (for SSO). It does not run on bare `muse compose`.
+raw token) and `MUSE_SLACK_WORKSPACE` (for SSO, comma-separated for multiple workspaces). It does
+not run on bare `muse compose`.
 
 ## Model
 
@@ -79,9 +80,13 @@ order is: profile display name → profile real name → real name → username 
 `xoxc-` tokens must be sent as POST form fields, not Bearer headers. Enterprise Slack rejects
 Bearer auth for these tokens.
 
-`MUSE_SLACK_WORKSPACE` is required for SSO (e.g. `mycompany.enterprise.slack.com`). The SSO
-implementation is IDP-agnostic — it follows redirects and submits HTML forms regardless of whether
-the IDP is Okta, Azure AD, or anything else.
+`MUSE_SLACK_WORKSPACE` is required for SSO. It supports comma-separated values for multiple
+workspaces (e.g. `company.enterprise.slack.com,community.slack.com`). Each workspace gets its
+own SSO flow with the same cookie file. If one workspace fails SSO, it's skipped and the rest
+continue. The cache namespaces by `teamID` so multiple workspaces don't collide.
+
+The SSO implementation is IDP-agnostic — it follows HTTP redirects and submits HTML forms
+regardless of whether the IDP is Okta, Azure AD, or anything else.
 
 ## Cache
 
@@ -169,6 +174,13 @@ The pipeline contract. `extractTurns`, `compressConversation`, and the extract p
 on `[human]`/`[assistant]` pairs. Adding a third role would require changes across the pipeline.
 The `@displayname:` prefix in message content carries the actual attribution — the role field is
 structural plumbing, not semantic meaning.
+
+### Why not auto-discover workspaces from the cookie file?
+
+The cookie file contains IDP cookies (e.g. for an SSO provider), not Slack cookies. Slack session
+cookies are created during the SSO flow itself — they don't exist in the cookie file beforehand.
+Scanning the cookie file for `*.slack.com` domains yields nothing useful. The workspace must be
+specified explicitly via `MUSE_SLACK_WORKSPACE`.
 
 ## Deferred
 

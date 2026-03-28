@@ -49,7 +49,8 @@ Conversations are automatically discovered from:
 - **Codex** — `~/.codex/`
 - **Slack** (opt-in) — Set `MUSE_SLACK_TOKEN` to a cookie file path for SAML SSO
   or a raw token (`xoxp-`/`xoxc-`). Set `MUSE_SLACK_WORKSPACE` to your workspace
-  (e.g. `mycompany.enterprise.slack.com`). Run `muse compose slack`.
+  (comma-separated for multiple, e.g. `company.enterprise.slack.com`).
+  Run `muse compose slack`.
 
 ## Storage
 
