@@ -63,7 +63,7 @@ type slackSyncState struct {
 	UserID   string    `json:"user_id"`
 }
 
-func (s *Slack) Conversations() ([]Conversation, error) {
+func (s *Slack) Conversations(ctx context.Context, progress func(SyncProgress)) ([]Conversation, error) {
 	allCreds, err := resolveSlackCredentials()
 	if err != nil {
 		return nil, fmt.Errorf("slack: %w", err)
@@ -85,7 +85,7 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 		wg.Add(1)
 		go func(i int, creds slackCreds) {
 			defer wg.Done()
-			convs, err := syncWorkspace(creds, cacheDir)
+			convs, err := syncWorkspace(ctx, creds, cacheDir, progress)
 			results[i] = result{convs, err}
 		}(i, creds)
 	}
@@ -101,8 +101,7 @@ func (s *Slack) Conversations() ([]Conversation, error) {
 	return conversations, nil
 }
 
-func syncWorkspace(creds slackCreds, cacheDir string) ([]Conversation, error) {
-	ctx := context.Background()
+func syncWorkspace(ctx context.Context, creds slackCreds, cacheDir string, progress func(SyncProgress)) ([]Conversation, error) {
 
 	searchLimiter := throttle.NewAIMDLimiter(ctx, throttle.Config{
 		SeedRate: 0.5,
@@ -143,7 +142,7 @@ func syncWorkspace(creds slackCreds, cacheDir string) ([]Conversation, error) {
 
 	syncStart := time.Now()
 	ws := slackWorkspace{teamID: teamID, name: teamName}
-	if err := syncSlackChannels(ctx, client, cacheDir, ws, userID, state); err != nil {
+	if err := syncSlackChannels(ctx, client, cacheDir, ws, userID, state, progress); err != nil {
 		return nil, fmt.Errorf("slack: %s: sync failed: %w", teamName, err)
 	}
 	saveSlackSyncState(cacheDir, teamID, slackSyncState{
@@ -240,23 +239,23 @@ func loadCachedChannels(cacheDir, teamID string) ([]cachedChannel, error) {
 
 // ── Sync ───────────────────────────────────────────────────────────────
 
-func syncSlackChannels(ctx context.Context, client *slackClient, cacheDir string, ws slackWorkspace, userID string, state slackSyncState) error {
+func syncSlackChannels(ctx context.Context, client *slackClient, cacheDir string, ws slackWorkspace, userID string, state slackSyncState, progress func(SyncProgress)) error {
 	activity, err := client.searchUserActivity(ctx, userID, state.LastSync)
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
 	}
 
 	if !state.LastSync.IsZero() {
-		fmt.Fprintf(os.Stderr, "slack: %s: incremental sync since %s\n", ws.name, state.LastSync.Format(time.DateOnly))
+		progress(SyncProgress{Phase: "discovering", Detail: fmt.Sprintf("%s: since %s", ws.name, state.LastSync.Format(time.DateOnly))})
 	} else {
-		fmt.Fprintf(os.Stderr, "slack: %s: initial sync — %d channels\n", ws.name, len(activity))
+		progress(SyncProgress{Phase: "discovering", Detail: fmt.Sprintf("%s: %d channels", ws.name, len(activity))})
 	}
 
 	var synced, totalMsgs int
-	for _, ch := range activity {
+	for i, ch := range activity {
 		msgs, err := client.fetchChannelFlat(ctx, ch.channelID, ch.oldest, ch.latest, ch.threads)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "slack: %s/#%s: fetch failed: %v\n", ws.name, ch.channelName, err)
+			fmt.Fprintf(os.Stderr, "warning: slack %s/#%s: fetch failed: %v\n", ws.name, ch.channelName, err)
 			continue
 		}
 		if len(msgs) == 0 {
@@ -275,9 +274,10 @@ func syncSlackChannels(ctx context.Context, client *slackClient, cacheDir string
 		saveChannel(cacheDir, cached)
 		synced++
 		totalMsgs += len(msgs)
+		progress(SyncProgress{Phase: "fetching", Total: len(activity), Current: i + 1, Detail: fmt.Sprintf("%s: %d channels", ws.name, synced)})
 	}
 
-	fmt.Fprintf(os.Stderr, "slack: %s: cached %d channels (%d messages)\n", ws.name, synced, totalMsgs)
+	progress(SyncProgress{Phase: "fetching", Total: len(activity), Current: len(activity), Detail: fmt.Sprintf("%s: %d channels, %d messages", ws.name, synced, totalMsgs)})
 	return nil
 }
 
@@ -923,7 +923,7 @@ func resolveSlackSSO(cookiePath string) ([]slackCreds, error) {
 		cred, err := ssoForWorkspace(cookiePath, workspace)
 		if err != nil {
 			if len(workspaces) > 1 {
-				fmt.Fprintf(os.Stderr, "slack: %s: SSO failed, skipping: %v\n", workspace, err)
+				fmt.Fprintf(os.Stderr, "warning: slack %s: SSO failed, skipping: %v\n", workspace, err)
 				continue
 			}
 			return nil, err

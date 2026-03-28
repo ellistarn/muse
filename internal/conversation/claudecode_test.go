@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ func mustConversations(t *testing.T) []Conversation {
 	t.Helper()
 	t.Setenv("MUSE_CLAUDE_DIR", "testdata/claude")
 	cc := &ClaudeCode{}
-	conversations, err := cc.Conversations()
+	conversations, err := cc.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() returned error: %v", err)
 	}
@@ -165,7 +166,7 @@ func TestClaudeCode_EmptySessionSkipped(t *testing.T) {
 func TestClaudeCode_MissingDirectory(t *testing.T) {
 	t.Setenv("MUSE_CLAUDE_DIR", "testdata/nonexistent-path")
 	cc := &ClaudeCode{}
-	conversations, err := cc.Conversations()
+	conversations, err := cc.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() returned error for missing dir: %v", err)
 	}

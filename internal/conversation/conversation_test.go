@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -18,7 +19,7 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Name() string { return m.name }
-func (m *mockProvider) Conversations() ([]Conversation, error) {
+func (m *mockProvider) Conversations(_ context.Context, _ func(SyncProgress)) ([]Conversation, error) {
 	m.called.Store(true)
 	if m.delay > 0 {
 		time.Sleep(m.delay)
@@ -69,7 +70,7 @@ func TestProviders_ImplementInterface(t *testing.T) {
 	// returns gracefully when data doesn't exist on this machine.
 	for _, p := range Providers() {
 		t.Run(p.Name(), func(t *testing.T) {
-			conversations, err := p.Conversations()
+			conversations, err := p.Conversations(context.Background(), nil)
 			// Either returns conversations or nil — should not error when
 			// the source simply doesn't exist on this machine.
 			if err != nil {
@@ -123,7 +124,7 @@ func TestParallelProviderLoading(t *testing.T) {
 		wg.Add(1)
 		go func(i int, p Provider) {
 			defer wg.Done()
-			conversations, err := p.Conversations()
+			conversations, err := p.Conversations(context.Background(), nil)
 			results[i] = result{name: p.Name(), conversations: conversations, err: err}
 		}(i, p)
 	}
@@ -183,7 +184,7 @@ func TestParallelProviderLoading_ErrorHandling(t *testing.T) {
 		wg.Add(1)
 		go func(i int, p Provider) {
 			defer wg.Done()
-			conversations, err := p.Conversations()
+			conversations, err := p.Conversations(context.Background(), nil)
 			results[i] = result{name: p.Name(), conversations: conversations, err: err}
 		}(i, p)
 	}

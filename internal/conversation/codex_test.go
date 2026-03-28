@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ func TestCodex_BasicConversation(t *testing.T) {
 
 	t.Setenv("MUSE_CODEX_DIR", dir)
 	c := &Codex{}
-	conversations, err := c.Conversations()
+	conversations, err := c.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestCodex_ToolCallsAttachToAssistantTurn(t *testing.T) {
 
 	t.Setenv("MUSE_CODEX_DIR", dir)
 	c := &Codex{}
-	conversations, err := c.Conversations()
+	conversations, err := c.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestCodex_FallbackToResponseItemMessages(t *testing.T) {
 
 	t.Setenv("MUSE_CODEX_DIR", dir)
 	c := &Codex{}
-	conversations, err := c.Conversations()
+	conversations, err := c.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestCodex_DeduplicatesSessionsByConversationID(t *testing.T) {
 
 	t.Setenv("MUSE_CODEX_DIR", dir)
 	c := &Codex{}
-	conversations, err := c.Conversations()
+	conversations, err := c.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestCodex_DeduplicatesSessionsByConversationID(t *testing.T) {
 func TestCodex_MissingDirectory(t *testing.T) {
 	t.Setenv("MUSE_CODEX_DIR", filepath.Join(t.TempDir(), "missing"))
 	c := &Codex{}
-	conversations, err := c.Conversations()
+	conversations, err := c.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}

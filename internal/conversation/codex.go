@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -23,7 +24,7 @@ type Codex struct{}
 
 func (c *Codex) Name() string { return "Codex" }
 
-func (c *Codex) Conversations() ([]Conversation, error) {
+func (c *Codex) Conversations(_ context.Context, _ func(SyncProgress)) ([]Conversation, error) {
 	codexDir := os.Getenv("MUSE_CODEX_DIR")
 	if codexDir == "" {
 		home, err := os.UserHomeDir()

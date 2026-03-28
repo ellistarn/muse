@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
@@ -66,7 +67,7 @@ func TestKiroCLI_BasicConversation(t *testing.T) {
 
 	t.Setenv("MUSE_KIRO_CLI_DB", dbPath)
 	k := &KiroCLI{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestKiroCLI_ToolUseSession(t *testing.T) {
 
 	t.Setenv("MUSE_KIRO_CLI_DB", dbPath)
 	k := &KiroCLI{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestKiroCLI_EmptyConversationSkipped(t *testing.T) {
 
 	t.Setenv("MUSE_KIRO_CLI_DB", dbPath)
 	k := &KiroCLI{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -201,7 +202,7 @@ func TestKiroCLI_EmptyConversationSkipped(t *testing.T) {
 func TestKiroCLI_MissingDatabase(t *testing.T) {
 	t.Setenv("MUSE_KIRO_CLI_DB", filepath.Join(t.TempDir(), "nonexistent.db"))
 	k := &KiroCLI{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected nil error, got: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestKiroCLI_EmptyDatabase(t *testing.T) {
 
 	t.Setenv("MUSE_KIRO_CLI_DB", dbPath)
 	k := &KiroCLI{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}

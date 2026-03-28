@@ -80,7 +80,7 @@ func RunClustered(
 	}
 	logAfter("%d observations%s",
 		len(allObs), observeNote,
-	).cost(time.Since(observeStart), observeResult.usage).print()
+	).Cost(time.Since(observeStart), observeResult.usage.Cost()).Print()
 
 	if len(allObs) == 0 {
 		return &Result{
@@ -109,7 +109,7 @@ func RunClustered(
 	logBefore("label", "%d observations%s", len(allObs), labelBeforeNote)
 	prog := startProgress(labelTotal, &labelCounter)
 	labelUsage, labelCache, numLabels, err := runLabel(ctx, store, labelLLM, allObs, opts.Relabel, opts.Verbose, &labelCounter)
-	prog.stop()
+	prog.Stop()
 	if err != nil {
 		return nil, fmt.Errorf("label: %w", err)
 	}
@@ -125,7 +125,7 @@ func RunClustered(
 	if labelCache.Hit > 0 {
 		labelNote = fmt.Sprintf(" [%d conversations cached]", labelCache.Hit)
 	}
-	logAfter("%d labels%s", numLabels, labelNote).cost(time.Since(labelStart), labelUsage).print()
+	logAfter("%d labels%s", numLabels, labelNote).Cost(time.Since(labelStart), labelUsage.Cost()).Print()
 
 	// ── NORMALIZE ──────────────────────────────────────────────────────
 	normalizeStart := time.Now()
@@ -141,7 +141,7 @@ func RunClustered(
 		Duration: time.Since(normalizeStart),
 		Usage:    normalizeUsage,
 	})
-	logAfter("normalized").cost(time.Since(normalizeStart), normalizeUsage).print()
+	logAfter("normalized").Cost(time.Since(normalizeStart), normalizeUsage.Cost()).Print()
 
 	// ── GROUP ───────────────────────────────────────────────────────────
 	groupStart := time.Now()
@@ -156,7 +156,7 @@ func RunClustered(
 		DataSize: obsDataSize,
 	})
 	logStage("cluster", "%d observations → %d clusters + %d outliers",
-		len(allObs), len(clusters), len(noiseObs)).print()
+		len(allObs), len(clusters), len(noiseObs)).Print()
 
 	// ── SAMPLE ──────────────────────────────────────────────────────────
 	sampleStart := time.Now()
@@ -180,7 +180,7 @@ func RunClustered(
 		DataSize: sampleDataSize,
 	})
 	logStage("sample", "%d clusters → %d observations sampled",
-		len(samples), totalSampled).print()
+		len(samples), totalSampled).Print()
 
 	// ── SUMMARIZE ──────────────────────────────────────────────────────
 	var synthCounter atomic.Int32
@@ -188,7 +188,7 @@ func RunClustered(
 	logBefore("summarize", "%d clusters", len(samples))
 	prog = startProgress(len(samples), &synthCounter)
 	summaries, synthUsage, err := runSummarize(ctx, summarizeLLM, samples, &synthCounter)
-	prog.stop()
+	prog.Stop()
 	if err != nil {
 		return nil, fmt.Errorf("summarize: %w", err)
 	}
@@ -204,7 +204,7 @@ func RunClustered(
 		Usage:    synthUsage,
 		DataSize: sampleDataSize,
 	})
-	logAfter("%d summaries", len(summaries)).cost(time.Since(synthStart), synthUsage).print()
+	logAfter("%d summaries", len(summaries)).Cost(time.Since(synthStart), synthUsage.Cost()).Print()
 
 	// ── COMPOSE ────────────────────────────────────────────────────────
 	composeStart := time.Now()
@@ -229,11 +229,11 @@ func RunClustered(
 		Usage:    composeUsage,
 		DataSize: composeDataSize,
 	})
-	logAfter("muse.md").cost(time.Since(composeStart), composeUsage).print()
+	logAfter("muse.md").Cost(time.Since(composeStart), composeUsage.Cost()).Print()
 
 	// ── DONE ────────────────────────────────────────────────────────────
 	logStage("done", "%d patterns → muse.md", len(clusters)).
-		cost(time.Since(pipelineStart), totalUsage).print()
+		Cost(time.Since(pipelineStart), totalUsage.Cost()).Print()
 
 	processed := observeResult.processed
 	return &Result{
@@ -370,9 +370,9 @@ func runObserve(
 		if opts.Uploaded == 1 {
 			noun = "conversation"
 		}
-		discoverLine.tail = fmt.Sprintf("(%d new %s, %s)", opts.Uploaded, noun, FormatBytes(opts.UploadBytes))
+		discoverLine.Tail = fmt.Sprintf("(%d new %s, %s)", opts.Uploaded, noun, FormatBytes(opts.UploadBytes))
 	}
-	discoverLine.print()
+	discoverLine.Print()
 
 	if len(pending) > 0 {
 		// Print observe before-line: pending count + cached note
@@ -430,10 +430,10 @@ func runObserve(
 			})
 		}
 		if err := g.Wait(); err != nil {
-			prog.stop()
+			prog.Stop()
 			return nil, err
 		}
-		prog.stop()
+		prog.Stop()
 	}
 
 	return &observeResult{

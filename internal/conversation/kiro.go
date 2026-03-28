@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,7 +19,7 @@ type Kiro struct{}
 
 func (k *Kiro) Name() string { return "Kiro" }
 
-func (k *Kiro) Conversations() ([]Conversation, error) {
+func (k *Kiro) Conversations(_ context.Context, _ func(SyncProgress)) ([]Conversation, error) {
 	kiroDir := os.Getenv("MUSE_KIRO_DIR")
 	if kiroDir == "" {
 		dir, err := defaultKiroDir()

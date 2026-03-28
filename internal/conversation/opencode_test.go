@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -59,7 +60,7 @@ func TestOpenCode_BasicConversation(t *testing.T) {
 
 	t.Setenv("MUSE_OPENCODE_DB", dbPath)
 	oc := &OpenCode{}
-	conversations, err := oc.Conversations()
+	conversations, err := oc.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestOpenCode_ParentChildRelationship(t *testing.T) {
 
 	t.Setenv("MUSE_OPENCODE_DB", dbPath)
 	oc := &OpenCode{}
-	conversations, err := oc.Conversations()
+	conversations, err := oc.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestOpenCode_EmptyDatabase(t *testing.T) {
 
 	t.Setenv("MUSE_OPENCODE_DB", dbPath)
 	oc := &OpenCode{}
-	conversations, err := oc.Conversations()
+	conversations, err := oc.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Conversations() error: %v", err)
 	}
@@ -203,7 +204,7 @@ func TestOpenCode_MissingDatabase(t *testing.T) {
 
 	t.Setenv("MUSE_OPENCODE_DB", dbPath)
 	oc := &OpenCode{}
-	conversations, err := oc.Conversations()
+	conversations, err := oc.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected nil error for missing db, got: %v", err)
 	}

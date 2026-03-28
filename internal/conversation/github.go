@@ -190,13 +190,13 @@ type githubMessage struct {
 
 // ── Provider ───────────────────────────────────────────────────────────
 
-func (g *GitHub) Conversations() ([]Conversation, error) {
+func (g *GitHub) Conversations(ctx context.Context, progress func(SyncProgress)) ([]Conversation, error) {
 	token := resolveGitHubToken()
 	if token == "" {
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	transport := newGitHubTransport(ctx)
@@ -224,10 +224,10 @@ func (g *GitHub) Conversations() ([]Conversation, error) {
 
 	// Sync: discover and fetch threads from the API
 	syncStart := time.Now()
-	if err := syncGitHubThreads(ctx, client, username, cacheDir, state); err != nil {
+	if err := syncGitHubThreads(ctx, client, username, cacheDir, state, progress); err != nil {
 		// Partial sync is fine — cache what we got. Don't advance the sync
 		// timestamp so the next run retries.
-		fmt.Fprintf(os.Stderr, "github: sync incomplete: %v\n", err)
+		fmt.Fprintf(os.Stderr, "warning: github sync incomplete: %v\n", err)
 	} else {
 		saveGitHubSyncState(cacheDir, githubSyncState{
 			LastSync: syncStart,
@@ -367,15 +367,15 @@ func loadAllCachedThreads(cacheDir string) ([]cachedThread, error) {
 
 // ── Sync ───────────────────────────────────────────────────────────────
 
-func syncGitHubThreads(ctx context.Context, client *github.Client, username, cacheDir string, state githubSyncState) error {
+func syncGitHubThreads(ctx context.Context, client *github.Client, username, cacheDir string, state githubSyncState, progress func(SyncProgress)) error {
 	if state.LastSync.IsZero() {
-		return syncGitHubFull(ctx, client, username, cacheDir)
+		return syncGitHubFull(ctx, client, username, cacheDir, progress)
 	}
-	return syncGitHubIncremental(ctx, client, username, cacheDir, state.LastSync)
+	return syncGitHubIncremental(ctx, client, username, cacheDir, state.LastSync, progress)
 }
 
-func syncGitHubFull(ctx context.Context, client *github.Client, username, cacheDir string) error {
-	fmt.Fprintf(os.Stderr, "github: initial sync — discovering all threads\n")
+func syncGitHubFull(ctx context.Context, client *github.Client, username, cacheDir string, progress func(SyncProgress)) error {
+	progress(SyncProgress{Phase: "discovering"})
 
 	for _, isPR := range []bool{true, false} {
 		kind := "pr"
@@ -389,18 +389,17 @@ func syncGitHubFull(ctx context.Context, client *github.Client, username, cacheD
 		if err != nil {
 			return fmt.Errorf("count %ss: %w", kind, err)
 		}
-		fmt.Fprintf(os.Stderr, "github: %d %ss total\n", total, kind)
 
 		if total <= 1000 {
 			issues, err := searchAllGitHubIssues(ctx, client, baseQuery)
 			if err != nil {
 				return fmt.Errorf("search %ss: %w", kind, err)
 			}
-			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR); err != nil {
+			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
 				return err
 			}
 		} else {
-			if err := dateSegmentedSearch(ctx, client, username, kind, isPR, cacheDir); err != nil {
+			if err := dateSegmentedSearch(ctx, client, username, kind, isPR, cacheDir, progress); err != nil {
 				return err
 			}
 		}
@@ -408,11 +407,10 @@ func syncGitHubFull(ctx context.Context, client *github.Client, username, cacheD
 	return nil
 }
 
-func syncGitHubIncremental(ctx context.Context, client *github.Client, username, cacheDir string, since time.Time) error {
+func syncGitHubIncremental(ctx context.Context, client *github.Client, username, cacheDir string, since time.Time, progress func(SyncProgress)) error {
 	sinceStr := since.Format("2006-01-02T15:04:05Z")
-	fmt.Fprintf(os.Stderr, "github: incremental sync since %s\n", since.Format(time.DateOnly))
+	progress(SyncProgress{Phase: "discovering"})
 
-	var updated int
 	for _, isPR := range []bool{true, false} {
 		kind := "pr"
 		if !isPR {
@@ -423,13 +421,9 @@ func syncGitHubIncremental(ctx context.Context, client *github.Client, username,
 		if err != nil {
 			return fmt.Errorf("incremental %ss: %w", kind, err)
 		}
-		if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR); err != nil {
+		if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
 			return err
 		}
-		updated += len(issues)
-	}
-	if updated > 0 {
-		fmt.Fprintf(os.Stderr, "github: updated %d threads\n", updated)
 	}
 	return nil
 }
@@ -438,7 +432,7 @@ func syncGitHubIncremental(ctx context.Context, client *github.Client, username,
 // into months when a year exceeds the 1000-result search API limit.
 // Recent-first means interrupted syncs capture the most valuable content
 // first, and already-cached threads are skipped on re-run.
-func dateSegmentedSearch(ctx context.Context, client *github.Client, username, kind string, isPR bool, cacheDir string) error {
+func dateSegmentedSearch(ctx context.Context, client *github.Client, username, kind string, isPR bool, cacheDir string, progress func(SyncProgress)) error {
 	now := time.Now()
 	for year := now.Year(); year >= 2008; year-- {
 		start := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -464,10 +458,9 @@ func dateSegmentedSearch(ctx context.Context, client *github.Client, username, k
 			if err != nil {
 				return err
 			}
-			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR); err != nil {
+			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "github: %d %ss from %d\n", len(issues), kind, year)
 		} else {
 			// Subdivide into months, most recent first
 			for month := time.December; month >= time.January; month-- {
@@ -489,11 +482,9 @@ func dateSegmentedSearch(ctx context.Context, client *github.Client, username, k
 					return err
 				}
 				if len(issues) > 0 {
-					if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR); err != nil {
+					if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
 						return err
 					}
-					fmt.Fprintf(os.Stderr, "github: %d %ss from %s %d\n",
-						len(issues), kind, month, year)
 				}
 			}
 		}
@@ -551,7 +542,7 @@ func parseRepoURL(url string) (string, string) {
 
 // fetchAndCacheIssues fetches comments for each issue in parallel and writes to cache.
 // Threads already cached with the same UpdatedAt are skipped.
-func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir string, issues []*github.Issue, isPR bool) error {
+func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir string, issues []*github.Issue, isPR bool, progress func(SyncProgress)) error {
 	errCtx, cancelOnErr := context.WithCancel(ctx)
 	defer cancelOnErr()
 
@@ -610,9 +601,8 @@ func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir st
 			}
 			saveCachedThread(cacheDir, t)
 
-			if n := fetched.Add(1); n%50 == 0 {
-				fmt.Fprintf(os.Stderr, "github: fetched %d threads\n", n)
-			}
+			n := fetched.Add(1)
+			progress(SyncProgress{Phase: "fetching", Total: len(issues), Current: int(n)})
 		}(issue)
 	}
 	wg.Wait()

@@ -121,9 +121,14 @@ func (m *Muse) Document() string {
 	return m.document
 }
 
+// SyncProgressFunc receives sync progress from source providers during Upload.
+// The source parameter identifies which provider sent the update.
+type SyncProgressFunc func(source string, p conversation.SyncProgress)
+
 // Upload scans local sources, diffs against storage, and uploads changed conversations.
-// If sources are specified, only those providers are scanned.
-func Upload(ctx context.Context, store storage.Store, sources ...string) (*UploadResult, error) {
+// If sources are specified, only those providers are scanned. The optional progress
+// callback receives structured sync updates from network sources.
+func Upload(ctx context.Context, store storage.Store, progress SyncProgressFunc, sources ...string) (*UploadResult, error) {
 	existing, err := store.ListConversations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list remote conversations: %w", err)
@@ -155,8 +160,22 @@ func Upload(ctx context.Context, store storage.Store, sources ...string) (*Uploa
 		wg.Add(1)
 		go func(i int, p conversation.Provider) {
 			defer wg.Done()
-			convs, err := p.Conversations()
+			progressFn := func(conversation.SyncProgress) {} // no-op default
+			if progress != nil {
+				name := p.Name()
+				progressFn = func(sp conversation.SyncProgress) {
+					progress(name, sp)
+				}
+			}
+			convs, err := p.Conversations(ctx, progressFn)
 			results[i] = result{name: p.Name(), conversations: convs, err: err}
+			// Signal completion so the renderer can print the summary line.
+			if progress != nil {
+				progress(p.Name(), conversation.SyncProgress{
+					Phase:  "done",
+					Detail: fmt.Sprintf("%d conversations", len(convs)),
+				})
+			}
 		}(i, provider)
 	}
 	wg.Wait()

@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,7 +18,7 @@ type KiroCLI struct{}
 
 func (k *KiroCLI) Name() string { return "Kiro CLI" }
 
-func (k *KiroCLI) Conversations() ([]Conversation, error) {
+func (k *KiroCLI) Conversations(_ context.Context, _ func(SyncProgress)) ([]Conversation, error) {
 	dbPath := os.Getenv("MUSE_KIRO_CLI_DB")
 	if dbPath == "" {
 		p, err := defaultKiroCLIDB()

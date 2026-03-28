@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -18,7 +19,7 @@ type OpenCode struct{}
 
 func (o *OpenCode) Name() string { return "OpenCode" }
 
-func (o *OpenCode) Conversations() ([]Conversation, error) {
+func (o *OpenCode) Conversations(_ context.Context, _ func(SyncProgress)) ([]Conversation, error) {
 	dbPath := os.Getenv("MUSE_OPENCODE_DB")
 	if dbPath == "" {
 		home, err := os.UserHomeDir()

@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -448,7 +449,7 @@ func TestGitHub_NoTokenReturnsNil(t *testing.T) {
 	t.Setenv("PATH", "")
 
 	g := &GitHub{}
-	convs, err := g.Conversations()
+	convs, err := g.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
 	}

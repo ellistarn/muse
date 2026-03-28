@@ -1,10 +1,20 @@
 package conversation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 )
+
+// SyncProgress reports progress from a source sync operation. Sources call
+// the progress callback to report what's happening; the caller renders it.
+type SyncProgress struct {
+	Phase   string // "discovering", "fetching"
+	Total   int    // total items to process (0 if unknown yet)
+	Current int    // items processed so far
+	Detail  string // human-readable detail, e.g. "533 PRs"
+}
 
 // Provider is the interface for conversation sources. Each provider knows how to
 // discover and normalize conversations from a specific agent or platform.
@@ -12,8 +22,10 @@ type Provider interface {
 	// Name returns a human-readable name for this source (e.g. "OpenCode").
 	Name() string
 	// Conversations returns all conversations available from this source.
-	// Returns (nil, nil) if the source data doesn't exist on this machine.
-	Conversations() ([]Conversation, error)
+	// The progress callback reports sync progress for slow (network) sources.
+	// Local sources may ignore it. Returns (nil, nil) if the source data
+	// doesn't exist on this machine.
+	Conversations(ctx context.Context, progress func(SyncProgress)) ([]Conversation, error)
 }
 
 // SourceInfo describes a registered conversation source.

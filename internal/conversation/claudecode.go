@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,7 +18,7 @@ type ClaudeCode struct{}
 
 func (c *ClaudeCode) Name() string { return "Claude Code" }
 
-func (c *ClaudeCode) Conversations() ([]Conversation, error) {
+func (c *ClaudeCode) Conversations(_ context.Context, _ func(SyncProgress)) ([]Conversation, error) {
 	claudeDir := os.Getenv("MUSE_CLAUDE_DIR")
 	if claudeDir == "" {
 		home, err := os.UserHomeDir()

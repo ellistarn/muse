@@ -5,12 +5,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/compose"
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/muse"
+	"github.com/ellistarn/muse/internal/output"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -67,7 +72,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 			// only recomposes from existing observations)
 			var uploaded, uploadBytes int
 			if !learn {
-				result, err := muse.Upload(ctx, store, sources...)
+				result, err := muse.Upload(ctx, store, syncProgressRenderer(), sources...)
 				if err != nil {
 					return err
 				}
@@ -242,4 +247,61 @@ func runCompose(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 		return err
 	}
 	return printResult(stdout, result, opts.Learn)
+}
+
+// syncProgressRenderer returns a SyncProgressFunc that renders source sync
+// progress using the stage log system. Each source gets a "sync" stage line
+// that updates as discovery and fetching progress. The renderer is safe for
+// concurrent use by multiple providers.
+func syncProgressRenderer() muse.SyncProgressFunc {
+	var mu sync.Mutex
+	tty := output.IsTTY()
+	// Track per-source state to show meaningful summary on completion.
+	type sourceState struct {
+		start  time.Time
+		detail string
+		done   bool
+	}
+	sources := map[string]*sourceState{}
+
+	return func(source string, p conversation.SyncProgress) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		name := strings.ToLower(source)
+		st, exists := sources[name]
+		if !exists {
+			st = &sourceState{start: time.Now()}
+			sources[name] = st
+		}
+		if p.Detail != "" {
+			st.detail = p.Detail
+		}
+
+		switch p.Phase {
+		case "discovering":
+			if tty {
+				fmt.Fprintf(os.Stderr, "\r%-*ssync %s: discovering...", output.StageWidth, "", name)
+			}
+		case "fetching":
+			if p.Total > 0 && p.Current > 0 && tty {
+				bar := output.RenderBar(p.Current, p.Total, output.BarWidth)
+				fmt.Fprintf(os.Stderr, "\r%-*s%s %s %d/%d", output.StageWidth, "", bar, name, p.Current, p.Total)
+			}
+		case "done":
+			if !st.done {
+				st.done = true
+				if tty {
+					output.ClearLine()
+				}
+				detail := st.detail
+				if p.Detail != "" {
+					detail = p.Detail
+				}
+				if detail != "" {
+					output.LogStage("sync", "%s: %s", name, detail).Duration(time.Since(st.start)).Print()
+				}
+			}
+		}
+	}
 }

@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ func TestKiro_ChatFileContent(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", kiroTestDir)
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestKiro_ChatFileModel(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", kiroTestDir)
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestKiro_ChatFileFiltering(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", kiroTestDir)
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,7 +111,7 @@ func TestKiro_FallbackToSessionJSON(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", kiroTestDir)
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestKiro_EmptyConversationSkipped(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", kiroTestDir)
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestKiro_MissingDirectory(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", filepath.Join(t.TempDir(), "nonexistent"))
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("expected nil error for missing directory, got: %v", err)
 	}
@@ -160,7 +161,7 @@ func TestKiro_ConversationMetadata(t *testing.T) {
 	t.Setenv("MUSE_KIRO_DIR", kiroTestDir)
 
 	k := &Kiro{}
-	conversations, err := k.Conversations()
+	conversations, err := k.Conversations(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
