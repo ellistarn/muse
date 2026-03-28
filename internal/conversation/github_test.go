@@ -187,11 +187,12 @@ func TestAssembleCachedConversation(t *testing.T) {
 		thread := cachedThread{
 			Owner: "org", Repo: "repo", Number: 5, IsPR: true,
 			Title: "PR with review", Author: "owner", Body: "my pr",
-			CreatedAt: base, UpdatedAt: base.Add(2 * time.Hour),
+			CreatedAt: base, UpdatedAt: base.Add(3 * time.Hour),
 			Messages: []cachedMessage{
 				{Author: "reviewer", Body: "fix this", CreatedAt: base.Add(time.Hour),
 					Path: "main.go", DiffHunk: "+ bad code"},
 				{Author: "owner", Body: "fixed", CreatedAt: base.Add(2 * time.Hour)},
+				{Author: "owner", Body: "anything else?", CreatedAt: base.Add(3 * time.Hour)},
 			},
 		}
 		conv := assembleCachedConversation("owner", thread)
@@ -215,11 +216,12 @@ func TestAssembleCachedConversation(t *testing.T) {
 		thread := cachedThread{
 			Owner: "org", Repo: "repo", Number: 6, IsPR: true,
 			Title: "PR with approval", Author: "owner", Body: "my pr",
-			CreatedAt: base, UpdatedAt: base.Add(2 * time.Hour),
+			CreatedAt: base, UpdatedAt: base.Add(3 * time.Hour),
 			Messages: []cachedMessage{
 				{Author: "reviewer", Body: "looks good", CreatedAt: base.Add(time.Hour),
 					ReviewState: "APPROVED"},
 				{Author: "owner", Body: "thanks", CreatedAt: base.Add(2 * time.Hour)},
+				{Author: "owner", Body: "merging", CreatedAt: base.Add(3 * time.Hour)},
 			},
 		}
 		conv := assembleCachedConversation("owner", thread)
@@ -235,6 +237,103 @@ func TestAssembleCachedConversation(t *testing.T) {
 		}
 		if !found {
 			t.Error("expected review message to include state")
+		}
+	})
+
+	t.Run("PR body annotated as auto-generated", func(t *testing.T) {
+		thread := cachedThread{
+			Owner: "org", Repo: "repo", Number: 7, IsPR: true,
+			Title: "PR with body", Author: "owner", Body: "## Summary\nAdded feature X",
+			CreatedAt: base, UpdatedAt: base.Add(3 * time.Hour),
+			Messages: []cachedMessage{
+				{Author: "owner", Body: "ready for review", CreatedAt: base.Add(time.Hour)},
+				{Author: "reviewer", Body: "lgtm", CreatedAt: base.Add(2 * time.Hour)},
+				{Author: "owner", Body: "thanks", CreatedAt: base.Add(3 * time.Hour)},
+			},
+		}
+		conv := assembleCachedConversation("owner", thread)
+		if conv == nil {
+			t.Fatal("expected non-nil conversation")
+		}
+		// First message should be annotated PR body
+		first := conv.Messages[0]
+		if !strings.HasPrefix(first.Content, "[Auto-generated PR description") {
+			t.Errorf("PR body should be annotated, got %q", first.Content[:min(80, len(first.Content))])
+		}
+		if !strings.Contains(first.Content, "## Summary\nAdded feature X") {
+			t.Error("PR body content should be preserved after annotation")
+		}
+		// Body should have user role (owner authored the PR)
+		if first.Role != "user" {
+			t.Errorf("owner-authored PR body role = %q, want %q", first.Role, "user")
+		}
+	})
+
+	t.Run("PR body excluded from owner threshold", func(t *testing.T) {
+		// Owner wrote the PR body + 1 comment = only 1 real owner message
+		thread := cachedThread{
+			Owner: "org", Repo: "repo", Number: 8, IsPR: true,
+			Title: "Thin PR", Author: "owner", Body: "auto-generated description",
+			CreatedAt: base, UpdatedAt: base.Add(2 * time.Hour),
+			Messages: []cachedMessage{
+				{Author: "reviewer", Body: "looks fine", CreatedAt: base.Add(time.Hour)},
+				{Author: "owner", Body: "thanks", CreatedAt: base.Add(2 * time.Hour)},
+			},
+		}
+		conv := assembleCachedConversation("owner", thread)
+		if conv != nil {
+			t.Error("expected nil: PR body should not count toward 2+ owner threshold")
+		}
+	})
+
+	t.Run("issue body unchanged and counts toward threshold", func(t *testing.T) {
+		thread := cachedThread{
+			Owner: "org", Repo: "repo", Number: 9, IsPR: false,
+			Title: "Bug report", Author: "owner", Body: "Found a bug in X",
+			CreatedAt: base, UpdatedAt: base.Add(2 * time.Hour),
+			Messages: []cachedMessage{
+				{Author: "reviewer", Body: "can reproduce", CreatedAt: base.Add(time.Hour)},
+				{Author: "owner", Body: "here's a fix", CreatedAt: base.Add(2 * time.Hour)},
+			},
+		}
+		conv := assembleCachedConversation("owner", thread)
+		if conv == nil {
+			t.Fatal("expected non-nil: issue body should count toward threshold")
+		}
+		// Issue body should NOT be annotated
+		first := conv.Messages[0]
+		if strings.Contains(first.Content, "Auto-generated") {
+			t.Error("issue body should not have auto-generated annotation")
+		}
+		if first.Content != "Found a bug in X" {
+			t.Errorf("issue body = %q, want %q", first.Content, "Found a bug in X")
+		}
+	})
+
+	t.Run("PR body by non-owner gets attribution prefix", func(t *testing.T) {
+		thread := cachedThread{
+			Owner: "org", Repo: "repo", Number: 10, IsPR: true,
+			Title: "Someone else's PR", Author: "other-dev", Body: "their description",
+			CreatedAt: base, UpdatedAt: base.Add(3 * time.Hour),
+			Messages: []cachedMessage{
+				{Author: "owner", Body: "review comment 1", CreatedAt: base.Add(time.Hour)},
+				{Author: "other-dev", Body: "updated", CreatedAt: base.Add(2 * time.Hour)},
+				{Author: "owner", Body: "review comment 2", CreatedAt: base.Add(3 * time.Hour)},
+			},
+		}
+		conv := assembleCachedConversation("owner", thread)
+		if conv == nil {
+			t.Fatal("expected non-nil conversation")
+		}
+		first := conv.Messages[0]
+		if first.Role != "assistant" {
+			t.Errorf("non-owner PR body role = %q, want %q", first.Role, "assistant")
+		}
+		if !strings.Contains(first.Content, "[GitHub comment by @other-dev]") {
+			t.Error("non-owner PR body should have attribution prefix")
+		}
+		if !strings.Contains(first.Content, "[Auto-generated PR description") {
+			t.Error("non-owner PR body should still have auto-generated annotation")
 		}
 	})
 }
@@ -398,21 +497,22 @@ func TestAssembleCachedConversation_FiltersBots(t *testing.T) {
 	thread := cachedThread{
 		Owner: "org", Repo: "repo", Number: 1, IsPR: true,
 		Title: "PR", Author: "owner", Body: "my pr",
-		CreatedAt: base, UpdatedAt: base.Add(4 * time.Hour),
+		CreatedAt: base, UpdatedAt: base.Add(5 * time.Hour),
 		Messages: []cachedMessage{
 			{Author: "reviewer", Body: "needs work", CreatedAt: base.Add(time.Hour)},
 			{Author: "k8s-ci-robot", Body: "CI passed", CreatedAt: base.Add(2 * time.Hour)},
 			{Author: "owner", Body: "fixed", CreatedAt: base.Add(3 * time.Hour)},
 			{Author: "dependabot[bot]", Body: "bump deps", CreatedAt: base.Add(4 * time.Hour)},
+			{Author: "owner", Body: "done", CreatedAt: base.Add(5 * time.Hour)},
 		},
 	}
 	conv := assembleCachedConversation("owner", thread)
 	if conv == nil {
 		t.Fatal("expected non-nil conversation")
 	}
-	// Should have 3 messages: body + reviewer + owner reply (bots filtered)
-	if len(conv.Messages) != 3 {
-		t.Errorf("expected 3 messages (bots filtered), got %d", len(conv.Messages))
+	// Should have 4 messages: annotated body + reviewer + 2 owner replies (bots filtered)
+	if len(conv.Messages) != 4 {
+		t.Errorf("expected 4 messages (bots filtered), got %d", len(conv.Messages))
 		for i, m := range conv.Messages {
 			t.Logf("  msg %d: role=%s content=%q", i, m.Role, m.Content[:min(50, len(m.Content))])
 		}
@@ -424,21 +524,22 @@ func TestAssembleCachedConversation_FiltersProwCommands(t *testing.T) {
 	thread := cachedThread{
 		Owner: "org", Repo: "repo", Number: 1, IsPR: true,
 		Title: "PR", Author: "owner", Body: "my pr",
-		CreatedAt: base, UpdatedAt: base.Add(4 * time.Hour),
+		CreatedAt: base, UpdatedAt: base.Add(5 * time.Hour),
 		Messages: []cachedMessage{
 			{Author: "reviewer", Body: "needs tests", CreatedAt: base.Add(time.Hour)},
 			{Author: "reviewer", Body: "/lgtm", CreatedAt: base.Add(2 * time.Hour)},
 			{Author: "owner", Body: "/retest", CreatedAt: base.Add(3 * time.Hour)},
 			{Author: "owner", Body: "added tests", CreatedAt: base.Add(4 * time.Hour)},
+			{Author: "owner", Body: "ready for review", CreatedAt: base.Add(5 * time.Hour)},
 		},
 	}
 	conv := assembleCachedConversation("owner", thread)
 	if conv == nil {
 		t.Fatal("expected non-nil conversation")
 	}
-	// Should have 3 messages: body + "needs tests" + "added tests" (prow filtered)
-	if len(conv.Messages) != 3 {
-		t.Errorf("expected 3 messages (prow filtered), got %d", len(conv.Messages))
+	// Should have 4 messages: annotated body + "needs tests" + "added tests" + "ready for review" (prow filtered)
+	if len(conv.Messages) != 4 {
+		t.Errorf("expected 4 messages (prow filtered), got %d", len(conv.Messages))
 		for i, m := range conv.Messages {
 			t.Logf("  msg %d: role=%s content=%q", i, m.Role, m.Content[:min(50, len(m.Content))])
 		}

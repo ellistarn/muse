@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/go-github/v72/github"
@@ -17,7 +22,143 @@ import (
 const (
 	githubSource     = "github"
 	maxDiffHunkLines = 8
+
+	// Rate limit budgets. Slightly under the actual limits to leave margin.
+	coreTokenRate    = 750 * time.Millisecond // ~80/min (limit: 5000/hr ≈ 83/min)
+	coreTokenBurst   = 10
+	searchTokenRate  = 2200 * time.Millisecond // ~27/min (limit: 30/min)
+	searchTokenBurst = 2
+
+	// Concurrency for parallel thread fetching.
+	fetchWorkers  = 8
+	maxRetries429 = 3
 )
+
+// ── Rate-limited transport ─────────────────────────────────────────────
+
+// githubTransport wraps http.RoundTripper with token-bucket rate limiting
+// for both the core and search GitHub APIs. Requests are classified by URL
+// path and metered through the appropriate bucket. 429 responses are retried
+// with backoff, respecting the Retry-After header.
+type githubTransport struct {
+	base   http.RoundTripper
+	core   chan struct{}
+	search chan struct{}
+	done   chan struct{} // closed to stop refill goroutines
+}
+
+func newGitHubTransport(ctx context.Context) *githubTransport {
+	t := &githubTransport{
+		base:   http.DefaultTransport,
+		core:   make(chan struct{}, coreTokenBurst),
+		search: make(chan struct{}, searchTokenBurst),
+		done:   make(chan struct{}),
+	}
+	// Pre-fill buckets
+	for range coreTokenBurst {
+		t.core <- struct{}{}
+	}
+	for range searchTokenBurst {
+		t.search <- struct{}{}
+	}
+	go t.refill(ctx, t.core, coreTokenRate)
+	go t.refill(ctx, t.search, searchTokenRate)
+	return t
+}
+
+func (t *githubTransport) refill(ctx context.Context, bucket chan struct{}, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.done:
+			return
+		case <-ticker.C:
+			select {
+			case bucket <- struct{}{}:
+			default: // bucket full
+			}
+		}
+	}
+}
+
+func (t *githubTransport) Close() { close(t.done) }
+
+func (t *githubTransport) bucketFor(req *http.Request) chan struct{} {
+	if strings.Contains(req.URL.Path, "/search/") {
+		return t.search
+	}
+	return t.core
+}
+
+func (t *githubTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	bucket := t.bucketFor(req)
+
+	for attempt := range maxRetries429 + 1 {
+		// Wait for a rate-limit token
+		select {
+		case <-bucket:
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+
+		resp, err := t.base.RoundTrip(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusForbidden {
+			return resp, nil
+		}
+
+		// Check if this is actually a rate limit (not an auth failure)
+		if resp.StatusCode == http.StatusForbidden {
+			remaining := resp.Header.Get("X-RateLimit-Remaining")
+			if remaining != "" && remaining != "0" {
+				return resp, nil // real 403, not rate limit
+			}
+		}
+
+		resp.Body.Close()
+		if attempt == maxRetries429 {
+			return resp, fmt.Errorf("github: rate limited after %d retries", maxRetries429)
+		}
+
+		// Backoff: use Retry-After header or X-RateLimit-Reset, or exponential
+		wait := retryAfterDuration(resp)
+		if wait == 0 {
+			wait = time.Duration(1<<attempt) * time.Second
+			wait += time.Duration(rand.Intn(1000)) * time.Millisecond // jitter
+		}
+		fmt.Fprintf(os.Stderr, "github: rate limited, waiting %s (attempt %d/%d)\n",
+			wait.Round(time.Millisecond), attempt+1, maxRetries429)
+
+		select {
+		case <-time.After(wait):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	}
+	panic("unreachable")
+}
+
+func retryAfterDuration(resp *http.Response) time.Duration {
+	if s := resp.Header.Get("Retry-After"); s != "" {
+		if secs, err := strconv.Atoi(s); err == nil {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	if s := resp.Header.Get("X-RateLimit-Reset"); s != "" {
+		if epoch, err := strconv.ParseInt(s, 10, 64); err == nil {
+			reset := time.Unix(epoch, 0)
+			if d := time.Until(reset); d > 0 {
+				return d
+			}
+		}
+	}
+	return 0
+}
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -77,7 +218,11 @@ func (g *GitHub) Conversations() ([]Conversation, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	client := github.NewClient(nil).WithAuthToken(token)
+
+	transport := newGitHubTransport(ctx)
+	defer transport.Close()
+	httpClient := &http.Client{Transport: transport}
+	client := github.NewClient(httpClient).WithAuthToken(token)
 
 	username, err := resolveGitHubUsername(ctx, client)
 	if err != nil {
@@ -309,11 +454,13 @@ func syncGitHubIncremental(ctx context.Context, client *github.Client, username,
 	return nil
 }
 
-// dateSegmentedSearch walks yearly intervals, subdividing into months
-// when a year exceeds the 1000-result search API limit.
+// dateSegmentedSearch walks yearly intervals most-recent-first, subdividing
+// into months when a year exceeds the 1000-result search API limit.
+// Recent-first means interrupted syncs capture the most valuable content
+// first, and already-cached threads are skipped on re-run.
 func dateSegmentedSearch(ctx context.Context, client *github.Client, username, kind string, isPR bool, cacheDir string) error {
 	now := time.Now()
-	for year := 2008; year <= now.Year(); year++ {
+	for year := now.Year(); year >= 2008; year-- {
 		start := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
 		end := time.Date(year+1, 1, 1, 0, 0, 0, 0, time.UTC)
 		if end.After(now) {
@@ -342,12 +489,12 @@ func dateSegmentedSearch(ctx context.Context, client *github.Client, username, k
 			}
 			fmt.Fprintf(os.Stderr, "github: %d %ss from %d\n", len(issues), kind, year)
 		} else {
-			// Subdivide into months
-			for month := time.January; month <= time.December; month++ {
+			// Subdivide into months, most recent first
+			for month := time.December; month >= time.January; month-- {
 				mStart := time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
 				mEnd := mStart.AddDate(0, 1, 0)
 				if mStart.After(now) {
-					break
+					continue
 				}
 				if mEnd.After(now) {
 					mEnd = now
@@ -422,61 +569,127 @@ func parseRepoURL(url string) (string, string) {
 
 // ── Comment fetching ───────────────────────────────────────────────────
 
-// fetchAndCacheIssues fetches comments for each issue and writes to cache.
+// fetchAndCacheIssues fetches comments for each issue in parallel and writes to cache.
 // Threads already cached with the same UpdatedAt are skipped.
 func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir string, issues []*github.Issue, isPR bool) error {
-	for i, issue := range issues {
-		owner, repo := parseRepoURL(issue.GetRepositoryURL())
-		if owner == "" || repo == "" {
-			continue
-		}
+	errCtx, cancelOnErr := context.WithCancel(ctx)
+	defer cancelOnErr()
 
-		// Skip if cache is already up-to-date
-		path := threadCachePath(cacheDir, owner, repo, issue.GetNumber(), isPR)
-		if existing, err := loadCachedThread(path); err == nil {
-			if !issue.GetUpdatedAt().Time.After(existing.UpdatedAt) {
-				continue
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, fetchWorkers)
+	var mu sync.Mutex
+	var firstErr error
+	var fetched atomic.Int32
+
+	for _, issue := range issues {
+		wg.Add(1)
+		go func(issue *github.Issue) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			if errCtx.Err() != nil {
+				return
 			}
-		}
 
-		messages, err := fetchThreadMessages(ctx, client, owner, repo, issue.GetNumber(), isPR)
-		if err != nil {
-			continue // skip individual failures
-		}
+			owner, repo := parseRepoURL(issue.GetRepositoryURL())
+			if owner == "" || repo == "" {
+				return
+			}
 
-		t := &cachedThread{
-			Owner:     owner,
-			Repo:      repo,
-			Number:    issue.GetNumber(),
-			IsPR:      isPR,
-			Title:     issue.GetTitle(),
-			Body:      issue.GetBody(),
-			Author:    issue.GetUser().GetLogin(),
-			CreatedAt: issue.GetCreatedAt().Time,
-			UpdatedAt: issue.GetUpdatedAt().Time,
-			Messages:  messages,
-		}
-		saveCachedThread(cacheDir, t)
+			// Skip if cache is already up-to-date
+			path := threadCachePath(cacheDir, owner, repo, issue.GetNumber(), isPR)
+			if existing, err := loadCachedThread(path); err == nil {
+				if !issue.GetUpdatedAt().Time.After(existing.UpdatedAt) {
+					return
+				}
+			}
 
-		if (i+1)%50 == 0 {
-			fmt.Fprintf(os.Stderr, "github: fetched %d/%d threads\n", i+1, len(issues))
-		}
+			messages, err := fetchThreadMessages(errCtx, client, owner, repo, issue.GetNumber(), isPR)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("fetch %s/%s#%d: %w", owner, repo, issue.GetNumber(), err)
+					cancelOnErr()
+				}
+				mu.Unlock()
+				return
+			}
+
+			t := &cachedThread{
+				Owner:     owner,
+				Repo:      repo,
+				Number:    issue.GetNumber(),
+				IsPR:      isPR,
+				Title:     issue.GetTitle(),
+				Body:      issue.GetBody(),
+				Author:    issue.GetUser().GetLogin(),
+				CreatedAt: issue.GetCreatedAt().Time,
+				UpdatedAt: issue.GetUpdatedAt().Time,
+				Messages:  messages,
+			}
+			saveCachedThread(cacheDir, t)
+
+			if n := fetched.Add(1); n%50 == 0 {
+				fmt.Fprintf(os.Stderr, "github: fetched %d threads\n", n)
+			}
+		}(issue)
 	}
-	return nil
+	wg.Wait()
+	return firstErr
 }
 
 // fetchThreadMessages fetches all comments from a thread as raw cached messages.
+// For PRs, the three API endpoints (issue comments, review comments, reviews)
+// are fetched concurrently.
 func fetchThreadMessages(ctx context.Context, client *github.Client, owner, repo string, number int, isPR bool) ([]cachedMessage, error) {
-	var messages []cachedMessage
+	issueComments, err := fetchIssueComments(ctx, client, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	if !isPR {
+		return issueComments, nil
+	}
 
-	// Issue comments (both PRs and issues have these)
-	icOpts := &github.IssueListCommentsOptions{
+	// Fan out the two PR-specific endpoints concurrently with issue comments
+	// (issue comments already fetched above; review comments and reviews in parallel)
+	var reviewComments, reviews []cachedMessage
+	var rcErr, rErr error
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		reviewComments, rcErr = fetchPRReviewComments(ctx, client, owner, repo, number)
+	}()
+	go func() {
+		defer wg.Done()
+		reviews, rErr = fetchPRReviews(ctx, client, owner, repo, number)
+	}()
+	wg.Wait()
+
+	if rcErr != nil {
+		return nil, rcErr
+	}
+	if rErr != nil {
+		return nil, rErr
+	}
+
+	messages := issueComments
+	messages = append(messages, reviewComments...)
+	messages = append(messages, reviews...)
+	return messages, nil
+}
+
+func fetchIssueComments(ctx context.Context, client *github.Client, owner, repo string, number int) ([]cachedMessage, error) {
+	var messages []cachedMessage
+	opts := &github.IssueListCommentsOptions{
 		Sort:        github.String("created"),
 		Direction:   github.String("asc"),
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {
-		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, number, icOpts)
+		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, number, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -493,21 +706,20 @@ func fetchThreadMessages(ctx context.Context, client *github.Client, owner, repo
 		if resp.NextPage == 0 {
 			break
 		}
-		icOpts.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
+	return messages, nil
+}
 
-	if !isPR {
-		return messages, nil
-	}
-
-	// PR review comments (line-level)
-	rcOpts := &github.PullRequestListCommentsOptions{
+func fetchPRReviewComments(ctx context.Context, client *github.Client, owner, repo string, number int) ([]cachedMessage, error) {
+	var messages []cachedMessage
+	opts := &github.PullRequestListCommentsOptions{
 		Sort:        "created",
 		Direction:   "asc",
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {
-		comments, resp, err := client.PullRequests.ListComments(ctx, owner, repo, number, rcOpts)
+		comments, resp, err := client.PullRequests.ListComments(ctx, owner, repo, number, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -526,13 +738,16 @@ func fetchThreadMessages(ctx context.Context, client *github.Client, owner, repo
 		if resp.NextPage == 0 {
 			break
 		}
-		rcOpts.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
+	return messages, nil
+}
 
-	// PR reviews (approval/changes-requested bodies)
-	rOpts := &github.ListOptions{PerPage: 100}
+func fetchPRReviews(ctx context.Context, client *github.Client, owner, repo string, number int) ([]cachedMessage, error) {
+	var messages []cachedMessage
+	opts := &github.ListOptions{PerPage: 100}
 	for {
-		reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, number, rOpts)
+		reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, number, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -550,9 +765,8 @@ func fetchThreadMessages(ctx context.Context, client *github.Client, owner, repo
 		if resp.NextPage == 0 {
 			break
 		}
-		rOpts.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
-
 	return messages, nil
 }
 
@@ -561,10 +775,16 @@ func fetchThreadMessages(ctx context.Context, client *github.Client, owner, repo
 // assembleCachedConversation builds a Conversation from a cached thread.
 // Returns nil if the owner has fewer than 2 messages (insufficient signal
 // for the observation pipeline).
+//
+// For PRs, the description body is annotated as auto-generated and excluded
+// from the 2+ owner message threshold. PR descriptions are typically
+// LLM-generated and don't represent the owner's authentic engagement.
+// The body is still included for context after the threshold check passes.
 func assembleCachedConversation(username string, t cachedThread) *Conversation {
 	var messages []githubMessage
 
-	if t.Body != "" {
+	// Issue body: human-authored opening post, counts toward threshold.
+	if t.Body != "" && !t.IsPR {
 		messages = append(messages, githubMessage{
 			Author:    t.Author,
 			Body:      t.Body,
@@ -590,7 +810,27 @@ func assembleCachedConversation(username string, t cachedThread) *Conversation {
 		})
 	}
 
-	return assembleGitHubConversation(username, t.Owner, t.Repo, t.Number, t.IsPR, t.Title, t.CreatedAt, t.UpdatedAt, messages)
+	conv := assembleGitHubConversation(username, t.Owner, t.Repo, t.Number, t.IsPR, t.Title, t.CreatedAt, t.UpdatedAt, messages)
+
+	// PR body: included for context but annotated as auto-generated.
+	// Prepended after threshold check so it doesn't inflate owner engagement.
+	if conv != nil && t.IsPR && t.Body != "" {
+		body := "[Auto-generated PR description — not authored by the user]\n" + t.Body
+		role := "assistant"
+		if strings.EqualFold(t.Author, username) {
+			role = "user"
+		} else {
+			body = fmt.Sprintf("[GitHub comment by @%s]\n%s", t.Author, body)
+		}
+		bodyMsg := Message{
+			Role:      role,
+			Content:   body,
+			Timestamp: t.CreatedAt,
+		}
+		conv.Messages = append([]Message{bodyMsg}, conv.Messages...)
+	}
+
+	return conv
 }
 
 // assembleGitHubConversation builds a Conversation from pre-formatted messages.
