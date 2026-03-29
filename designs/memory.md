@@ -9,42 +9,29 @@ context-appropriate prompts at query time from the identity and relevant memorie
 
 Memories store two kinds of signal:
 
-**Identity** — how the owner thinks. Reasoning patterns, awareness (self-model and audience-model),
-voice. These transfer across domains. "Trace to root cause before engaging with the fix" applies
-whether the domain is Kubernetes, API design, or organizational process. Identity is what makes the
-muse behave like the owner regardless of topic.
+**Identity** — how the owner thinks. Patterns, heuristics, and mental models that transfer across
+domains. Identity is what makes the muse behave like the owner regardless of topic.
 
-**Knowledge** — what the owner knows, believes, and has decided. Positions on specific topics,
-domain expertise that shapes judgment, mental models of their ecosystem, learned lessons from
-failures. "Karpenter should own every customer-facing integration with the Kubernetes API" is
-knowledge — a specific position produced by reasoning. The muse needs it as a fact about what the
-owner believes, not as a pattern to re-derive. If the muse only has the reasoning, it might arrive
-at a different conclusion than the owner actually holds.
+**Knowledge** — what the owner knows, believes, and has decided. The muse needs this as fact about
+what the owner holds, not as a pattern to re-derive. If the muse only has the reasoning, it might
+arrive at a different conclusion than the owner actually holds.
 
 Knowledge and identity are often two views of the same moment. A memory about etcd write
 amplification invalidating designs at scale is knowledge (a domain-specific constraint). It's also an
 instance of "check whether the substrate constraint invalidates the design before engaging with the
-design" — a reasoning pattern. Both are worth storing. They serve different retrieval needs: the
-reasoning pattern surfaces for structural questions ("how should I evaluate this design?"), the
-knowledge surfaces for domain questions ("what should I watch out for at Kubernetes scale?").
+design" — a reasoning pattern. Both are worth storing. They serve different retrieval needs.
 Multi-labeling captures this — the memory lives at the intersection of a domain label and a
 reasoning-pattern label.
 
 Not everything the owner knows qualifies. The filter: does this knowledge make the muse behave more
-like the owner, or just more informed? Raw technical facts the owner happens to know but that don't
-shape their judgment belong in a reference system, not the muse. The muse doesn't need the etcd
-default storage limit — it needs to know that the owner treats etcd write pressure as a first-class
-design constraint. The fact is retrievable from anywhere; the salience is what's specific to this
-person.
+like the owner, or just more informed? The muse doesn't need the etcd default storage limit — it
+needs to know that the owner treats etcd write pressure as a first-class design constraint. The fact
+is retrievable from anywhere; the salience is what's specific to this person.
 
-Knowledge that qualifies: positions the owner has taken, domain expertise that shapes how they
-evaluate tradeoffs, mental models of their ecosystem (who owns what, what's competing with what),
-organizational knowledge (how their team works, institutional dynamics they navigate, where bandwidth
-is scarce), and outcomes — what was built, decided, shipped, influenced, and fixed. Conversations are
-the work artifact. A design review is evidence of technical judgment applied to a specific problem. A
-Slack thread where the owner redirects a team is evidence of leadership. A debugging session that
-identifies a root cause is evidence of problem-solving. The muse sees outcomes because the
-conversations contain them.
+Knowledge includes outcomes — what was built, decided, shipped, influenced, and fixed. Conversations
+are the work artifact. A design review is evidence of technical judgment. A Slack thread where the
+owner redirects a team is evidence of leadership. The muse sees outcomes because the conversations
+contain them.
 
 A memory is the atomic unit. Each memory stores:
 
@@ -52,15 +39,27 @@ A memory is the atomic unit. Each memory stores:
 - **Quote**: the owner's actual words when phrasing carries voice signal (optional)
 - **Date**: when the conversation occurred
 - **Labels**: 1-3 thematic tags naming the pattern or domain
+- **Source**: which conversation produced this memory (source, conversation ID, location)
 
 Labels are the index. They name what a memory reflects — "root cause over symptom fixing,"
 "cost-asymmetry as dispatch heuristic," "kubernetes-ownership-scope." A memory belongs to multiple
 labels when it genuinely operates at the intersection of themes. Labels are the knowledge graph;
 multi-label memories are the edges.
 
+Source is the provenance chain. Every memory traces back to a specific moment in a specific
+conversation. This enables three levels of retrieval resolution:
+
+- **Identity** — how does this person think? (always loaded)
+- **Memory** — what's their position/knowledge on this topic? (retrieved by label)
+- **Conversation** — what actually happened? (followed via source reference)
+
+Most questions stop at memories. Fact-finding and evidence — performance reviews, decision
+archaeology, "when did I actually say this" — follow through to conversations. The muse navigates
+this chain internally based on what the question demands.
+
 Memories grow monotonically. New conversations produce new memories. Old memories persist. Nothing is
-deleted. Memories are the source of truth. Everything else — the identity, query-time assembly — is a
-view over them.
+deleted. Memories are the primary retrieval artifact. Conversations are the source of truth,
+reachable through the source field on each memory.
 
 ## Identity
 
@@ -83,8 +82,9 @@ voice to demonstrate. It is the most sensitive step in the system and the hardes
 
 ## Recall
 
-When asked a question, the muse assembles a context-appropriate prompt from the identity and relevant
-memories — both reasoning patterns and domain knowledge.
+Recall is the internal mechanism behind `ask`. The caller asks a question; the muse navigates the
+retrieval chain — identity, memories, conversations — based on what the question demands. The
+interface stays clean: one tool, the muse handles the rest.
 
 **Classify**: the query is classified into relevant thematic labels. Classification uses the
 identity's relational structure to expand beyond literal matches — a question about API design also
@@ -94,7 +94,9 @@ scaling") and reasoning labels ("substrate constraints first") because the muse'
 what the owner knows but how they'd apply it. Single LLM call, observe-tier model.
 
 **Retrieve**: memories matching the classified labels, ranked by quality (memories with quotes rank
-higher — they carry voice) and recency.
+higher — they carry voice) and recency. When the question demands evidence or specifics — outcomes,
+decisions, timelines — the muse follows source references from memories to the originating
+conversations and grounds its response in that material.
 
 **Accumulate**: within a session, retrieved memories accumulate across turns. New turns add memories
 but don't remove previously retrieved ones — topic drift within a conversation usually signals that
@@ -106,8 +108,8 @@ conversational context and the lowest-ranked are dropped. Re-ranking is the only
 maintains coherence as a conversation drifts — dropping by age loses conversational context, dropping
 by original rank misses that relevance shifts as topics evolve.
 
-**Assemble**: the system prompt is built from the identity + accumulated memories. One synthesis step
-between the owner's words and the output.
+**Assemble**: the system prompt is built from the identity + accumulated memories (and conversation
+context when needed). One synthesis step between the owner's words and the output.
 
 ## Ingestion
 
@@ -132,15 +134,6 @@ Ingestion populates memories. It does not produce the identity.
 
 ## Decisions
 
-### Why memories instead of a document?
-
-A document has a fixed token budget. Compressing a person into a fixed-size document forces every
-memory to compete for the same attention budget — voice flattens because synthesis replaces concrete
-language with abstraction, natural weighting disappears because compression equalizes what should be
-uneven, and rare-but-defining patterns get squeezed out. Memories have no budget. The constraint
-moves to query time, where it's applied selectively — only relevant memories compete for attention,
-in context of the actual question.
-
 ### Why label-based retrieval instead of embeddings?
 
 Labels are human-readable, debuggable, and work with any LLM provider. When retrieval returns wrong
@@ -160,21 +153,6 @@ accumulations, the model is wrong.
 Dropping oldest loses conversational coherence — the earliest memories often set the frame. Dropping
 by original rank misses that relevance shifts as the conversation evolves. Re-ranking against the
 current context is the only option that adapts.
-
-### Why multi-label memories?
-
-A memory about "naming that implies wrong ownership boundaries" genuinely operates in both domains.
-Single-labeling forces a choice that breaks the connection. Multi-labeling preserves it — the memory
-appears when either topic is recalled. Labels are edges. Multi-labeling is what makes memories a
-graph rather than a list.
-
-### Why separate identity from memories?
-
-Different update cadences — identity is stable, memories grow continuously. Different consumption —
-identity is always loaded, memories are retrieved selectively. Different composition — identity
-requires editorial judgment, memories are stored as-is. Identity captures reasoning, awareness, and
-voice. Memories capture identity and knowledge. Identity tells the muse how to think; retrieved
-knowledge tells it what to think about.
 
 ### Why store knowledge alongside identity?
 
@@ -214,6 +192,14 @@ architecture is stable enough that the bottleneck is quality tuning, not structu
 
 Muse interactions produce correction signals that could feed back as memories. Risk: feedback loops
 amplify errors. **Revisit when:** the muse is well-calibrated enough that corrections are signal.
+
+### Memory confidence
+
+A settled position ("Karpenter owns k8s integrations") is different from an exploratory one ("I
+suspect we'll need 3-4 systems"). The memory text carries this signal in its language, but a
+structured field would make it retrievable — "give me settled positions on X" versus "what are they
+still working through." **Revisit when:** the muse needs to distinguish conviction levels
+programmatically rather than inferring from text.
 
 ### Memory decay
 

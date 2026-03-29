@@ -3,6 +3,9 @@
 This document specifies the operations muse performs. User-facing commands may compose or rename
 them. The document evolves with the system.
 
+The Muse defines what a muse is. Memory defines how it stores and retrieves. This document defines
+the interface.
+
 ## Types
 
 ```
@@ -17,7 +20,7 @@ Identity       — muse.md; the relational structure of the owner's thinking (~2
 observe  : (Source, Text) → [Memory]
 ingest   : [Conversation] → [Memory]
 compose  : [Memory] → Identity
-recall   : (Identity, [Memory], Question) → Answer
+ask      : (Identity, [Memory], Question) → Answer
 ```
 
 ### observe
@@ -33,11 +36,8 @@ Extracts memories from text. The source type tells the prompt where to find sign
 
 The output is always `[Memory]`. Source affects the extraction prompt, not the output type.
 
-Memories capture identity (reasoning patterns, awareness, voice) and knowledge (positions, domain
-expertise, organizational models, learned lessons, outcomes). A memory about etcd write amplification
-is knowledge; the reasoning move "check substrate constraints first" is identity. A design review
-that resolved an API ownership question is an outcome. All are extracted. Multi-labeling preserves
-the connections.
+Memories capture identity (how the owner thinks) and knowledge (what they know, believe, and have
+decided). Multi-labeling preserves the connections between them.
 
 Memories include relational knowledge — "my boss insists on test coverage," "the team resists ORMs"
 — because the owner's thinking includes their model of the people and constraints around them.
@@ -53,19 +53,19 @@ Produces the identity from memories. Editorial judgment — decides what's centr
 relate, what voice to demonstrate. The identity is small (~2k tokens), stable between compositions,
 and always loaded as a system instruction.
 
-### recall
+### ask
 
-Assembles a context-appropriate prompt from the identity and relevant memories, then responds.
-Classifies the query into thematic labels (expanded through the identity's relational structure),
-retrieves matching memories — both reasoning patterns and domain knowledge — and accumulates them
-across turns within a session.
+Answers a question using the identity and relevant memories. Internally navigates the retrieval
+chain — classifies the query into thematic labels, retrieves matching memories, follows through to
+source conversations when the question demands evidence. Accumulates memories across turns within a
+session.
 
 ## Commands
 
 ```
 muse compose [source...]        # ingest new conversations, compose identity
-muse ask <question>             # single-turn recall
-muse listen                     # MCP server, multi-turn recall
+muse ask <question>             # single-turn ask
+muse listen                     # MCP server, multi-turn ask
 muse show                       # print identity + memory stats
 muse sync <src> <dst>           # copy data between local and S3
 ```
