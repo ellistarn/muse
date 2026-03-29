@@ -288,7 +288,7 @@ func loadAllObservations(ctx context.Context, store storage.Store) ([]string, er
 				Source:         sc.Source,
 				ConversationID: sc.ConversationID,
 				Quote:          item.Quote,
-				Text:           item.Observation,
+				Text:           item.Text,
 				Date:           obs.Date,
 			}
 			observations = append(observations, entry.Format())

@@ -6,7 +6,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/output"
@@ -27,11 +26,6 @@ func logBefore(name, format string, args ...any) string {
 
 func logAfter(format string, args ...any) *stageLog {
 	return output.LogAfter(format, args...)
-}
-
-// costLog adds inference.Usage-aware cost formatting to a StageLog.
-func costLog(s *stageLog, d time.Duration, u inference.Usage) *stageLog {
-	return s.Cost(d, u.Cost())
 }
 
 // Re-export formatting functions used by cmd/compose.go.

@@ -43,7 +43,7 @@ func TestRunCompose_PropagatesLearnError(t *testing.T) {
 	store := testutil.NewConversationStore()
 	// Seed an observation via the shared JSON artifact path
 	compose.PutObservations(context.Background(), store, "test", "conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "observation"}},
+		Items: []compose.Observation{{Text: "observation"}},
 	})
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
@@ -88,7 +88,7 @@ func TestRunCompose_SuccessfulRun(t *testing.T) {
 func TestRunCompose_SuccessfulLearn(t *testing.T) {
 	store := testutil.NewConversationStore()
 	compose.PutObservations(context.Background(), store, "test", "conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "observation"}},
+		Items: []compose.Observation{{Text: "observation"}},
 	})
 	mockLLM := &testutil.MockLLM{
 		LearnResponse: "## Test\n\nContent.",

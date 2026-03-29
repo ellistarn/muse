@@ -30,10 +30,10 @@ func TestSyncAll(t *testing.T) {
 
 	// 2 observations (via the unified JSON artifact path)
 	compose.PutObservations(ctx, src, "test", "conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "observation 1"}},
+		Items: []compose.Observation{{Text: "observation 1"}},
 	})
 	compose.PutObservations(ctx, src, "test", "conv-2", &compose.Observations{
-		Items: []compose.Observation{{Observation: "observation 2"}},
+		Items: []compose.Observation{{Text: "observation 2"}},
 	})
 
 	// 1 muse version
@@ -58,14 +58,14 @@ func TestSyncAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservations(conv-1) error: %v", err)
 	}
-	if len(obs1.Items) != 1 || obs1.Items[0].Observation != "observation 1" {
+	if len(obs1.Items) != 1 || obs1.Items[0].Text != "observation 1" {
 		t.Errorf("observation 1 = %+v, want 'observation 1'", obs1.Items)
 	}
 	obs2, err := compose.GetObservations(ctx, dst, "test", "conv-2")
 	if err != nil {
 		t.Fatalf("GetObservations(conv-2) error: %v", err)
 	}
-	if len(obs2.Items) != 1 || obs2.Items[0].Observation != "observation 2" {
+	if len(obs2.Items) != 1 || obs2.Items[0].Text != "observation 2" {
 		t.Errorf("observation 2 = %+v, want 'observation 2'", obs2.Items)
 	}
 
@@ -101,7 +101,7 @@ func TestSyncSelectiveCategories(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	})
 	compose.PutObservations(ctx, src, "test", "conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "observation 1"}},
+		Items: []compose.Observation{{Text: "observation 1"}},
 	})
 	src.Muses["2024-01-15T10:00:00Z"] = "# Muse"
 
@@ -140,7 +140,7 @@ func TestSyncIdempotent(t *testing.T) {
 		{Role: "user", Content: "hello"},
 	})
 	compose.PutObservations(ctx, src, "test", "conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "observation 1"}},
+		Items: []compose.Observation{{Text: "observation 1"}},
 	})
 	src.Muses["2024-01-15T10:00:00Z"] = "# Muse"
 
@@ -161,7 +161,7 @@ func TestSyncIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservations error: %v", err)
 	}
-	if len(obs.Items) != 1 || obs.Items[0].Observation != "observation 1" {
+	if len(obs.Items) != 1 || obs.Items[0].Text != "observation 1" {
 		t.Errorf("observation = %+v, want 'observation 1'", obs.Items)
 	}
 	content, err := dst.GetMuseVersion(ctx, "2024-01-15T10:00:00Z")
@@ -222,7 +222,7 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 		{Role: "user", Content: "existing message"},
 	})
 	compose.PutObservations(ctx, dst, "existing", "dst-conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "existing observation"}},
+		Items: []compose.Observation{{Text: "existing observation"}},
 	})
 	dst.Muses["2024-01-01T00:00:00Z"] = "# Existing Muse"
 
@@ -231,7 +231,7 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 		{Role: "user", Content: "new message"},
 	})
 	compose.PutObservations(ctx, src, "test", "src-conv-1", &compose.Observations{
-		Items: []compose.Observation{{Observation: "new observation"}},
+		Items: []compose.Observation{{Text: "new observation"}},
 	})
 	src.Muses["2024-02-01T00:00:00Z"] = "# New Muse"
 
@@ -254,7 +254,7 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservations(existing) error: %v", err)
 	}
-	if obs.Items[0].Observation != "existing observation" {
+	if obs.Items[0].Text != "existing observation" {
 		t.Errorf("existing observation lost")
 	}
 	existingMuse, err := dst.GetMuseVersion(ctx, "2024-01-01T00:00:00Z")
@@ -270,7 +270,7 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetObservations(new) error: %v", err)
 	}
-	if newObs.Items[0].Observation != "new observation" {
+	if newObs.Items[0].Text != "new observation" {
 		t.Errorf("synced observation missing")
 	}
 	newMuse, err := dst.GetMuseVersion(ctx, "2024-02-01T00:00:00Z")

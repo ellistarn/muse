@@ -47,9 +47,9 @@ func TestArtifactObservations(t *testing.T) {
 	obs := &Observations{
 		Fingerprint: "abc123",
 		Items: []Observation{
-			{Observation: "obs1"},
-			{Quote: "some quote", Observation: "obs2"},
-			{Observation: "obs3"},
+			{Text: "obs1"},
+			{Quote: "some quote", Text: "obs2"},
+			{Text: "obs3"},
 		},
 	}
 
@@ -129,8 +129,8 @@ func TestArtifactDelete(t *testing.T) {
 	ctx := context.Background()
 
 	// Create some artifacts
-	PutObservations(ctx, store, "src1", "s1", &Observations{Items: []Observation{{Observation: "a"}}})
-	PutObservations(ctx, store, "src2", "s2", &Observations{Items: []Observation{{Observation: "b"}}})
+	PutObservations(ctx, store, "src1", "s1", &Observations{Items: []Observation{{Text: "a"}}})
+	PutObservations(ctx, store, "src2", "s2", &Observations{Items: []Observation{{Text: "b"}}})
 	PutLabels(ctx, store, "src1", "s1", &Labels{Items: []Label{{Observation: "a", Label: "x"}}})
 
 	// Delete observations for one source
@@ -151,7 +151,7 @@ func TestArtifactDelete(t *testing.T) {
 	}
 
 	// Delete all observations
-	PutObservations(ctx, store, "src3", "s3", &Observations{Items: []Observation{{Observation: "c"}}})
+	PutObservations(ctx, store, "src3", "s3", &Observations{Items: []Observation{{Text: "c"}}})
 	if err := DeleteObservations(ctx, store); err != nil {
 		t.Fatalf("DeleteObservations: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestFingerprintCacheValidation(t *testing.T) {
 	fp1 := Fingerprint("2024-01-01T00:00:00Z", "prompt-hash-v1")
 	obs := &Observations{
 		Fingerprint: fp1,
-		Items:       []Observation{{Observation: "obs1"}},
+		Items:       []Observation{{Text: "obs1"}},
 	}
 	PutObservations(ctx, store, "test", "s1", obs)
 

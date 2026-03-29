@@ -481,7 +481,7 @@ func extractObservations(ctx context.Context, client inference.Client, conv *con
 	var relevant []Observation
 	var irrelevant []Observation
 	for _, item := range items {
-		if isRelevant(item.Observation) {
+		if isRelevant(item.Text) {
 			relevant = append(relevant, item)
 		} else {
 			irrelevant = append(irrelevant, item)
@@ -490,7 +490,7 @@ func extractObservations(ctx context.Context, client inference.Client, conv *con
 	if len(irrelevant) > 0 && verbose {
 		fmt.Fprintf(os.Stderr, "    filtered %d irrelevant observations:\n", len(irrelevant))
 		for _, item := range irrelevant {
-			text := item.Observation
+			text := item.Text
 			if len(text) > 100 {
 				text = text[:100] + "..."
 			}
@@ -561,8 +561,6 @@ func extractAndRefine(ctx context.Context, client inference.Client, conv *conver
 // mostly code or tool results — the human's reaction is what matters, not the
 // full assistant text.
 const maxAssistantChars = 500
-
-// buildRawConversation was removed — mechanical compression is always used.
 
 // compressConversation mechanically compresses turns for extraction: strips
 // code blocks, collapses tool output to [tool: name] markers, and truncates
@@ -750,8 +748,8 @@ func parseObservationItems(text string) []Observation {
 			obs := strings.TrimSpace(cleaned[len(observationPrefix):])
 			if obs != "" {
 				items = append(items, Observation{
-					Quote:       pendingQuote,
-					Observation: obs,
+					Quote: pendingQuote,
+					Text:  obs,
 				})
 			}
 			pendingQuote = ""
@@ -848,7 +846,7 @@ func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]
 					ConversationID: ss.ConversationID,
 					Index:          j,
 					Quote:          item.Quote,
-					Text:           item.Observation,
+					Text:           item.Text,
 					Date:           obs.Date,
 				})
 			}

@@ -66,12 +66,14 @@ of evidence is conveyed through natural language:
 
 ```
 ~/.muse/
-├── conversations/{source}/{session_id}.json              # input, syncable
+├── conversations/{source}/{conversation_id}.json          # input, syncable
+├── observations/{source}/{conversation_id}.json           # shared, syncable
 ├── compose/
-│   └── observations/{source}/{session_id}.json           # shared, syncable
-├── muse/versions/{timestamp}/
-│   ├── muse.md                                           # output, syncable
-│   └── diff.md                                           # output, syncable
+│   ├── labels/{source}/{conversation_id}.json             # clustering-specific
+│   └── normalization.json                                 # clustering-specific
+├── versions/{timestamp}/
+│   ├── muse.md                                            # output, syncable
+│   └── diff.md                                            # output, syncable
 ```
 
 ### Usage

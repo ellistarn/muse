@@ -10,8 +10,8 @@ import (
 // (register, phrasing, conviction) — and is optional since some observations
 // are inferred from patterns rather than anchored to a single utterance.
 type Observation struct {
-	Quote       string `json:"quote,omitempty"`
-	Observation string `json:"observation"`
+	Quote string `json:"quote,omitempty"`
+	Text  string `json:"observation"`
 }
 
 // Observations stores discrete observations extracted from a single conversation.

@@ -77,20 +77,19 @@ distillation system, nested under `compose/`.
 ```
 ~/.muse/
 ├── conversations/{source}/{conversation_id}.json              # input, syncable
+├── observations/{source}/{conversation_id}.json               # syncable
 ├── compose/
-│   ├── observations/{source}/{conversation_id}.json           # syncable
 │   ├── labels/{source}/{conversation_id}.json                 # syncable
-│   ├── normalization.json                                # label mapping, ephemeral
-│   └── clusters/{id}.json                                # ephemeral, not synced, overwritten each run
-├── muse/versions/{timestamp}/muse.md                     # output, syncable
-├── muse/versions/{timestamp}/diff.md                     # output, syncable
+│   └── normalization.json                                     # label mapping, ephemeral
+├── versions/{timestamp}/muse.md                               # output, syncable
+├── versions/{timestamp}/diff.md                               # output, syncable
 ```
 
 Observations are a JSON array of discrete strings per conversation — each observation gets its own
 label. Labels are stored one file per conversation containing all per-observation entries:
 
 ```json
-// compose/observations/{source}/{conversation_id}.json
+// observations/{source}/{conversation_id}.json
 {"fingerprint": "abc123", "items": ["obs1", "obs2", "obs3"]}
 
 // compose/labels/{source}/{conversation_id}.json

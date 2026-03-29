@@ -36,12 +36,6 @@ func LogStage(name, format string, args ...any) *StageLog {
 	return &StageLog{Name: name, Body: fmt.Sprintf(format, args...)}
 }
 
-// SetTail sets the parenthetical suffix (duration, cost, etc.).
-func (s *StageLog) SetTail(format string, args ...any) *StageLog {
-	s.Tail = fmt.Sprintf(format, args...)
-	return s
-}
-
 // Cost appends a duration+cost tail like "(3.1s, $0.0042)".
 func (s *StageLog) Cost(d time.Duration, cost float64) *StageLog {
 	if cost > 0 {

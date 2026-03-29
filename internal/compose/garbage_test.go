@@ -114,30 +114,30 @@ func TestParseObservationItems(t *testing.T) {
 			name:  "standard format",
 			input: "Observation: Leads with the conclusion.\nObservation: Treats naming as architecture.",
 			want: []Observation{
-				{Observation: "Leads with the conclusion."},
-				{Observation: "Treats naming as architecture."},
+				{Text: "Leads with the conclusion."},
+				{Text: "Treats naming as architecture."},
 			},
 		},
 		{
 			name:  "with bullet prefixes",
 			input: "- Observation: First thing.\n- Observation: Second thing.",
 			want: []Observation{
-				{Observation: "First thing."},
-				{Observation: "Second thing."},
+				{Text: "First thing."},
+				{Text: "Second thing."},
 			},
 		},
 		{
 			name:  "with numbered prefixes",
 			input: "1. Observation: First.\n2. Observation: Second.",
 			want: []Observation{
-				{Observation: "First."},
-				{Observation: "Second."},
+				{Text: "First."},
+				{Text: "Second."},
 			},
 		},
 		{
 			name:  "meta-commentary discarded",
 			input: "Here are the observations:\nObservation: Real one.\nNothing else to report.",
-			want:  []Observation{{Observation: "Real one."}},
+			want:  []Observation{{Text: "Real one."}},
 		},
 		{
 			name:  "empty input",
@@ -158,8 +158,8 @@ func TestParseObservationItems(t *testing.T) {
 			name:  "mixed valid and garbage",
 			input: "Observation: A real observation.\n(empty)\nObservation: Another real one.\nI don't see any more.",
 			want: []Observation{
-				{Observation: "A real observation."},
-				{Observation: "Another real one."},
+				{Text: "A real observation."},
+				{Text: "Another real one."},
 			},
 		},
 		{
@@ -170,68 +170,68 @@ func TestParseObservationItems(t *testing.T) {
 		{
 			name:  "asterisk bullet",
 			input: "* Observation: Bullet with asterisk.",
-			want:  []Observation{{Observation: "Bullet with asterisk."}},
+			want:  []Observation{{Text: "Bullet with asterisk."}},
 		},
 		{
 			name:  "multi-digit numbered prefix",
 			input: "12. Observation: Twelfth item.",
-			want:  []Observation{{Observation: "Twelfth item."}},
+			want:  []Observation{{Text: "Twelfth item."}},
 		},
 		{
 			name:  "quote paired with observation",
 			input: "Quote: \"I'd rather find the right word and commit to it.\"\nObservation: Treats naming as a first-class design decision.",
 			want: []Observation{
-				{Quote: "I'd rather find the right word and commit to it.", Observation: "Treats naming as a first-class design decision."},
+				{Quote: "I'd rather find the right word and commit to it.", Text: "Treats naming as a first-class design decision."},
 			},
 		},
 		{
 			name:  "quote with smart quotes",
 			input: "Quote: \u201cFewest words that fully carry the meaning.\u201d\nObservation: Optimizes for compression in communication.",
 			want: []Observation{
-				{Quote: "Fewest words that fully carry the meaning.", Observation: "Optimizes for compression in communication."},
+				{Quote: "Fewest words that fully carry the meaning.", Text: "Optimizes for compression in communication."},
 			},
 		},
 		{
 			name:  "mixed quotes and plain observations",
 			input: "Quote: \"Delete it, don't simplify it.\"\nObservation: Defaults to deletion over simplification.\n\nObservation: Prefers structural constraints over stated rules.",
 			want: []Observation{
-				{Quote: "Delete it, don't simplify it.", Observation: "Defaults to deletion over simplification."},
-				{Observation: "Prefers structural constraints over stated rules."},
+				{Quote: "Delete it, don't simplify it.", Text: "Defaults to deletion over simplification."},
+				{Text: "Prefers structural constraints over stated rules."},
 			},
 		},
 		{
 			name:  "orphan quote without observation",
 			input: "Quote: \"Some quote.\"\nSome random line.\nObservation: Unrelated observation.",
 			want: []Observation{
-				{Observation: "Unrelated observation."},
+				{Text: "Unrelated observation."},
 			},
 		},
 		{
 			name:  "quote with bullet prefix",
 			input: "- Quote: \"Terse.\"\n- Observation: Values brevity.",
 			want: []Observation{
-				{Quote: "Terse.", Observation: "Values brevity."},
+				{Quote: "Terse.", Text: "Values brevity."},
 			},
 		},
 		{
 			name:  "quote at end of input",
 			input: "Observation: First.\nQuote: \"Trailing quote with no observation.\"",
 			want: []Observation{
-				{Observation: "First."},
+				{Text: "First."},
 			},
 		},
 		{
 			name:  "quote overwritten by second quote",
 			input: "Quote: \"First quote.\"\nQuote: \"Second quote.\"\nObservation: Pairs with the second.",
 			want: []Observation{
-				{Quote: "Second quote.", Observation: "Pairs with the second."},
+				{Quote: "Second quote.", Text: "Pairs with the second."},
 			},
 		},
 		{
 			name:  "quote survives blank line before observation",
 			input: "Quote: \"Survives blanks.\"\n\nObservation: Paired despite blank line.",
 			want: []Observation{
-				{Quote: "Survives blanks.", Observation: "Paired despite blank line."},
+				{Quote: "Survives blanks.", Text: "Paired despite blank line."},
 			},
 		},
 	}
@@ -243,8 +243,8 @@ func TestParseObservationItems(t *testing.T) {
 				t.Fatalf("parseObservationItems() returned %d items, want %d\n  got:  %v\n  want: %v", len(got), len(tt.want), got, tt.want)
 			}
 			for i := range got {
-				if got[i].Observation != tt.want[i].Observation {
-					t.Errorf("item[%d].Observation = %q, want %q", i, got[i].Observation, tt.want[i].Observation)
+				if got[i].Text != tt.want[i].Text {
+					t.Errorf("item[%d].Text = %q, want %q", i, got[i].Text, tt.want[i].Text)
 				}
 				if got[i].Quote != tt.want[i].Quote {
 					t.Errorf("item[%d].Quote = %q, want %q", i, got[i].Quote, tt.want[i].Quote)
