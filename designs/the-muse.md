@@ -6,9 +6,9 @@ muse is derived from conversations — with other people, with agents, across an
 owner is reacting, correcting, and choosing. A person's reasoning is most legible when they push back
 on something, not when they present a finished position.
 
-As an artifact, the muse is a system prompt: text that occupies a context window, competes for
-attention, and steers generation. Every constraint that follows — compression, specificity,
-faithfulness — is a consequence of this form.
+As an artifact, the muse is text that occupies a context window, competes for attention, and steers
+generation — whether loaded as a static document or assembled at query time from stored material.
+Every constraint that follows — specificity, faithfulness — is a consequence of this form.
 
 A point of view is what makes one person's judgment different from another's. Models are capable but
 general. A muse makes them specific, amplifying the owner's ability to steer. A muse that stops
@@ -22,12 +22,18 @@ Reasoning is how a person thinks — the patterns, heuristics, and mental models
 decisions. It operates above any particular situation, which is why it transfers to situations the
 person hasn't encountered.
 
-A muse captures reasoning because reasoning gives models the ability to adapt. Conclusions are less
-adaptable — a conclusion might be right in context, but without the reasoning that generated it,
-there's no way to tell when the context has changed enough that it no longer applies. This isn't a
-binary. Some conclusions are general enough to function as heuristics. The question is whether the
-muse carries enough of the generative reasoning that a model can adapt to new contexts, or whether a
-conclusion stands alone and breaks when the context shifts.
+A muse captures reasoning because reasoning gives models the ability to adapt. A conclusion alone is
+brittle — without the reasoning that generated it, there's no way to tell when context has changed
+enough that it no longer applies. But reasoning alone is ungrounded — the muse might re-derive a
+position the owner already holds and arrive somewhere different. When both are present, reasoning
+explains why a position is held and signals when it should be revisited.
+
+This creates two distinct operations. When the owner has taken a position on something, the muse
+should recall it and be able to explain the reasoning behind it. When the owner hasn't, the muse
+reasons from patterns and arrives at something the owner would recognize. Knowledge — positions,
+domain expertise, organizational context — tells the muse which operation applies. Reasoning without
+knowledge produces plausible advice disconnected from the owner's actual commitments. Knowledge
+without reasoning produces brittle positions that can't adapt.
 
 ### Awareness
 
@@ -62,8 +68,7 @@ language has always carried this information.
 Every token in a muse competes for the model's attention and earns its place only by faithfully
 representing what's specific about the person. Context is finite. A token that isn't pulling its
 weight doesn't just waste space — it actively degrades the tokens that are, by diluting what the
-model attends to. The muse must be both faithful and compressed. It grows in accuracy over time, not
-in length.
+model attends to. The muse must be faithful. It grows in accuracy over time, not in length.
 
 ### Generic
 
