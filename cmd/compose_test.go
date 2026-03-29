@@ -41,7 +41,10 @@ func TestRunCompose_PropagatesRunError(t *testing.T) {
 
 func TestRunCompose_PropagatesLearnError(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.Observations["conversations/test/conv-1.json"] = "- observation"
+	// Seed an observation via the shared JSON artifact path
+	compose.PutObservations(context.Background(), store, "test", "conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "observation"}},
+	})
 	ctx := context.Background()
 	var stdout, stderr bytes.Buffer
 
@@ -63,7 +66,7 @@ func TestRunCompose_SuccessfulRun(t *testing.T) {
 		{Role: "assistant", Content: "sure"},
 	})
 	mockLLM := &testutil.MockLLM{
-		ObserveResponse: "- Uses tabs\n- No emojis",
+		ObserveResponse: "Observation: Uses tabs\nObservation: No emojis",
 		LearnResponse:   "## Style\n\nUse tabs. No emojis.",
 	}
 
@@ -84,7 +87,9 @@ func TestRunCompose_SuccessfulRun(t *testing.T) {
 
 func TestRunCompose_SuccessfulLearn(t *testing.T) {
 	store := testutil.NewConversationStore()
-	store.Observations["conversations/test/conv-1.json"] = "- observation"
+	compose.PutObservations(context.Background(), store, "test", "conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "observation"}},
+	})
 	mockLLM := &testutil.MockLLM{
 		LearnResponse: "## Test\n\nContent.",
 	}
@@ -125,13 +130,6 @@ func (s *failingStore) ListMuses(_ context.Context) ([]string, error) {
 func (s *failingStore) GetMuseVersion(_ context.Context, _ string) (string, error) {
 	return "", s.err
 }
-func (s *failingStore) ListObservations(_ context.Context) (map[string]time.Time, error) {
-	return nil, s.err
-}
-func (s *failingStore) GetObservation(_ context.Context, _ string) (string, error) {
-	return "", s.err
-}
-func (s *failingStore) PutObservation(_ context.Context, _, _ string) error { return s.err }
 func (s *failingStore) DeletePrefix(_ context.Context, _ string) error      { return s.err }
 func (s *failingStore) PutData(_ context.Context, _ string, _ []byte) error { return s.err }
 func (s *failingStore) GetData(_ context.Context, _ string) ([]byte, error) { return nil, s.err }

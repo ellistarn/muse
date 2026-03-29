@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/internal/testutil"
@@ -27,9 +28,13 @@ func TestSyncAll(t *testing.T) {
 		{Role: "assistant", Content: "see ya"},
 	})
 
-	// 2 observations
-	src.Observations["conversations/test/conv-1.json"] = "observation 1"
-	src.Observations["conversations/test/conv-2.json"] = "observation 2"
+	// 2 observations (via the unified JSON artifact path)
+	compose.PutObservations(ctx, src, "test", "conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "observation 1"}},
+	})
+	compose.PutObservations(ctx, src, "test", "conv-2", &compose.Observations{
+		Items: []compose.Observation{{Observation: "observation 2"}},
+	})
 
 	// 1 muse version
 	src.Muses["2024-01-15T10:00:00Z"] = "# My Muse\ncontent"
@@ -48,12 +53,20 @@ func TestSyncAll(t *testing.T) {
 		t.Errorf("dst conversations = %d, want 2", len(conversations))
 	}
 
-	// Verify observations
-	if dst.Observations["conversations/test/conv-1.json"] != "observation 1" {
-		t.Errorf("dst observation 1 = %q, want %q", dst.Observations["conversations/test/conv-1.json"], "observation 1")
+	// Verify observations synced via DataStore
+	obs1, err := compose.GetObservations(ctx, dst, "test", "conv-1")
+	if err != nil {
+		t.Fatalf("GetObservations(conv-1) error: %v", err)
 	}
-	if dst.Observations["conversations/test/conv-2.json"] != "observation 2" {
-		t.Errorf("dst observation 2 = %q, want %q", dst.Observations["conversations/test/conv-2.json"], "observation 2")
+	if len(obs1.Items) != 1 || obs1.Items[0].Observation != "observation 1" {
+		t.Errorf("observation 1 = %+v, want 'observation 1'", obs1.Items)
+	}
+	obs2, err := compose.GetObservations(ctx, dst, "test", "conv-2")
+	if err != nil {
+		t.Fatalf("GetObservations(conv-2) error: %v", err)
+	}
+	if len(obs2.Items) != 1 || obs2.Items[0].Observation != "observation 2" {
+		t.Errorf("observation 2 = %+v, want 'observation 2'", obs2.Items)
 	}
 
 	// Verify muse version
@@ -87,7 +100,9 @@ func TestSyncSelectiveCategories(t *testing.T) {
 	src.AddConversation("test", "conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
 	})
-	src.Observations["conversations/test/conv-1.json"] = "observation 1"
+	compose.PutObservations(ctx, src, "test", "conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "observation 1"}},
+	})
 	src.Muses["2024-01-15T10:00:00Z"] = "# Muse"
 
 	var buf bytes.Buffer
@@ -105,8 +120,9 @@ func TestSyncSelectiveCategories(t *testing.T) {
 	}
 
 	// Verify observations NOT synced
-	if len(dst.Observations) != 0 {
-		t.Errorf("dst observations = %d, want 0", len(dst.Observations))
+	obsList, _ := dst.ListData(ctx, "observations/")
+	if len(obsList) != 0 {
+		t.Errorf("dst observations = %d, want 0", len(obsList))
 	}
 
 	// Verify muse NOT synced
@@ -123,7 +139,9 @@ func TestSyncIdempotent(t *testing.T) {
 	src.AddConversation("test", "conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "hello"},
 	})
-	src.Observations["conversations/test/conv-1.json"] = "observation 1"
+	compose.PutObservations(ctx, src, "test", "conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "observation 1"}},
+	})
 	src.Muses["2024-01-15T10:00:00Z"] = "# Muse"
 
 	// First sync
@@ -139,8 +157,12 @@ func TestSyncIdempotent(t *testing.T) {
 	}
 
 	// Verify dst still has correct data
-	if dst.Observations["conversations/test/conv-1.json"] != "observation 1" {
-		t.Errorf("observation = %q, want %q", dst.Observations["conversations/test/conv-1.json"], "observation 1")
+	obs, err := compose.GetObservations(ctx, dst, "test", "conv-1")
+	if err != nil {
+		t.Fatalf("GetObservations error: %v", err)
+	}
+	if len(obs.Items) != 1 || obs.Items[0].Observation != "observation 1" {
+		t.Errorf("observation = %+v, want 'observation 1'", obs.Items)
 	}
 	content, err := dst.GetMuseVersion(ctx, "2024-01-15T10:00:00Z")
 	if err != nil {
@@ -169,8 +191,9 @@ func TestSyncEmptySource(t *testing.T) {
 	if len(conversations) != 0 {
 		t.Errorf("dst conversations = %d, want 0", len(conversations))
 	}
-	if len(dst.Observations) != 0 {
-		t.Errorf("dst observations = %d, want 0", len(dst.Observations))
+	obsList, _ := dst.ListData(ctx, "observations/")
+	if len(obsList) != 0 {
+		t.Errorf("dst observations = %d, want 0", len(obsList))
 	}
 	if len(dst.Muses) != 0 {
 		t.Errorf("dst muses = %d, want 0", len(dst.Muses))
@@ -198,14 +221,18 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	dst.AddConversation("existing", "dst-conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "existing message"},
 	})
-	dst.Observations["conversations/existing/dst-conv-1.json"] = "existing observation"
+	compose.PutObservations(ctx, dst, "existing", "dst-conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "existing observation"}},
+	})
 	dst.Muses["2024-01-01T00:00:00Z"] = "# Existing Muse"
 
 	// Populate src with different data
 	src.AddConversation("test", "src-conv-1", time.Now(), []conversation.Message{
 		{Role: "user", Content: "new message"},
 	})
-	src.Observations["conversations/test/src-conv-1.json"] = "new observation"
+	compose.PutObservations(ctx, src, "test", "src-conv-1", &compose.Observations{
+		Items: []compose.Observation{{Observation: "new observation"}},
+	})
 	src.Muses["2024-02-01T00:00:00Z"] = "# New Muse"
 
 	var buf bytes.Buffer
@@ -223,7 +250,11 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	}
 
 	// Verify original dst data preserved
-	if dst.Observations["conversations/existing/dst-conv-1.json"] != "existing observation" {
+	obs, err := compose.GetObservations(ctx, dst, "existing", "dst-conv-1")
+	if err != nil {
+		t.Fatalf("GetObservations(existing) error: %v", err)
+	}
+	if obs.Items[0].Observation != "existing observation" {
 		t.Errorf("existing observation lost")
 	}
 	existingMuse, err := dst.GetMuseVersion(ctx, "2024-01-01T00:00:00Z")
@@ -235,7 +266,11 @@ func TestSyncPreservesExistingDstData(t *testing.T) {
 	}
 
 	// Verify new synced data present
-	if dst.Observations["conversations/test/src-conv-1.json"] != "new observation" {
+	newObs, err := compose.GetObservations(ctx, dst, "test", "src-conv-1")
+	if err != nil {
+		t.Fatalf("GetObservations(new) error: %v", err)
+	}
+	if newObs.Items[0].Observation != "new observation" {
 		t.Errorf("synced observation missing")
 	}
 	newMuse, err := dst.GetMuseVersion(ctx, "2024-02-01T00:00:00Z")

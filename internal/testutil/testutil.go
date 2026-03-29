@@ -29,7 +29,6 @@ type ConversationStore struct {
 	Conversations []storage.ConversationEntry
 	Data          map[string]*conversation.Conversation
 	Muse          string
-	Observations  map[string]string
 	RawData       map[string][]byte // generic key/value for PutData/GetData
 	Deleted       []string
 	Muses         map[string]string // timestamp -> content
@@ -39,10 +38,9 @@ type ConversationStore struct {
 // NewConversationStore returns a ready-to-use ConversationStore.
 func NewConversationStore() *ConversationStore {
 	return &ConversationStore{
-		Data:         map[string]*conversation.Conversation{},
-		Observations: map[string]string{},
-		RawData:      map[string][]byte{},
-		Muses:        map[string]string{},
+		Data:    map[string]*conversation.Conversation{},
+		RawData: map[string][]byte{},
+		Muses:   map[string]string{},
 	}
 }
 
@@ -124,38 +122,10 @@ func (s *ConversationStore) GetMuseVersion(_ context.Context, timestamp string) 
 	return content, nil
 }
 
-func (s *ConversationStore) ListObservations(_ context.Context) (map[string]time.Time, error) {
-	result := map[string]time.Time{}
-	for key := range s.Observations {
-		result[key] = time.Now()
-	}
-	return result, nil
-}
-
-func (s *ConversationStore) GetObservation(_ context.Context, conversationKey string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	content, ok := s.Observations[conversationKey]
-	if !ok {
-		return "", &storage.NotFoundError{Key: conversationKey}
-	}
-	return content, nil
-}
-
-func (s *ConversationStore) PutObservation(_ context.Context, key, content string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Observations[key] = content
-	return nil
-}
-
 func (s *ConversationStore) DeletePrefix(_ context.Context, prefix string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Deleted = append(s.Deleted, prefix)
-	if prefix == "observations/" {
-		s.Observations = map[string]string{}
-	}
 	for k := range s.RawData {
 		if strings.HasPrefix(k, prefix) {
 			delete(s.RawData, k)

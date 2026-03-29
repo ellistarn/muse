@@ -9,7 +9,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -233,61 +232,6 @@ func (c *S3Store) GetMuseVersion(ctx context.Context, timestamp string) (string,
 	return string(data), nil
 }
 
-// PutObservation writes observations to S3 under observations/{source}/{conversation}.md.
-func (c *S3Store) PutObservation(ctx context.Context, key, content string) error {
-	path := ObservationKey(key)
-	contentType := "text/markdown"
-	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      &c.bucket,
-		Key:         &path,
-		Body:        bytes.NewReader([]byte(content)),
-		ContentType: &contentType,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to put observation for %s: %w", key, err)
-	}
-	return nil
-}
-
-// ListObservations returns the keys of all persisted observations under observations/.
-func (c *S3Store) ListObservations(ctx context.Context) (map[string]time.Time, error) {
-	observations := map[string]time.Time{}
-	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
-		Bucket: &c.bucket,
-		Prefix: aws.String("observations/"),
-	})
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list observations: %w", err)
-		}
-		for _, obj := range page.Contents {
-			key := aws.ToString(obj.Key)
-			conversationKey := ObservationKeyToConversationKey(key)
-			observations[conversationKey] = aws.ToTime(obj.LastModified)
-		}
-	}
-	return observations, nil
-}
-
-// GetObservation downloads an observation's content from S3.
-func (c *S3Store) GetObservation(ctx context.Context, conversationKey string) (string, error) {
-	path := ObservationKey(conversationKey)
-	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: &c.bucket,
-		Key:    &path,
-	})
-	if err != nil {
-		return "", wrapS3NotFound(err, conversationKey)
-	}
-	defer out.Body.Close()
-	data, err := io.ReadAll(out.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read observation for %s: %w", conversationKey, err)
-	}
-	return string(data), nil
-}
-
 // PutData writes raw bytes to S3 at the given key.
 func (c *S3Store) PutData(ctx context.Context, key string, data []byte) error {
 	contentType := "application/octet-stream"
@@ -397,17 +341,4 @@ func museVersionKey(timestamp string) string {
 
 func museDiffKey(timestamp string) string {
 	return fmt.Sprintf("versions/%s/diff.md", timestamp)
-}
-
-// ObservationKey converts a conversation key to its observation storage key.
-// conversations/opencode/ses_abc.json -> observations/opencode/ses_abc.md
-func ObservationKey(conversationKey string) string {
-	return fmt.Sprintf("observations/%s.md", strings.TrimPrefix(strings.TrimSuffix(conversationKey, ".json"), "conversations/"))
-}
-
-// ObservationKeyToConversationKey converts an observation storage key back to a conversation key.
-// observations/opencode/ses_abc.md -> conversations/opencode/ses_abc.json
-func ObservationKeyToConversationKey(key string) string {
-	rel := strings.TrimPrefix(key, "observations/")
-	return "conversations/" + strings.TrimSuffix(rel, ".md") + ".json"
 }

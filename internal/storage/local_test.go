@@ -225,46 +225,42 @@ func TestLocalStore_MuseNotFound(t *testing.T) {
 	}
 }
 
-func TestLocalStore_ObservationRoundTrip(t *testing.T) {
+func TestLocalStore_DataRoundTrip(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()
 
-	memoryKey := "conversations/opencode/conv-1.json"
-	content := "## Observations\n- User prefers concise code."
+	key := "observations/opencode/conv-1.json"
+	content := []byte(`{"fingerprint":"abc","items":[]}`)
 
-	if err := store.PutObservation(ctx, memoryKey, content); err != nil {
-		t.Fatalf("PutObservation: %v", err)
+	if err := store.PutData(ctx, key, content); err != nil {
+		t.Fatalf("PutData: %v", err)
 	}
 
-	got, err := store.GetObservation(ctx, memoryKey)
+	got, err := store.GetData(ctx, key)
 	if err != nil {
-		t.Fatalf("GetObservation: %v", err)
+		t.Fatalf("GetData: %v", err)
 	}
-	if got != content {
-		t.Errorf("GetObservation = %q, want %q", got, content)
+	if string(got) != string(content) {
+		t.Errorf("GetData = %q, want %q", got, content)
 	}
 
-	observations, err := store.ListObservations(ctx)
+	keys, err := store.ListData(ctx, "observations/")
 	if err != nil {
-		t.Fatalf("ListObservations: %v", err)
+		t.Fatalf("ListData: %v", err)
 	}
-	if len(observations) != 1 {
-		t.Fatalf("len(ListObservations) = %d, want 1", len(observations))
+	if len(keys) != 1 {
+		t.Fatalf("len(ListData) = %d, want 1", len(keys))
 	}
-	modTime, ok := observations[memoryKey]
-	if !ok {
-		t.Fatalf("ListObservations missing key %q, got %v", memoryKey, observations)
-	}
-	if modTime.IsZero() {
-		t.Error("ListObservations returned zero mod time")
+	if keys[0] != key {
+		t.Errorf("ListData[0] = %q, want %q", keys[0], key)
 	}
 }
 
-func TestLocalStore_ObservationNotFound(t *testing.T) {
+func TestLocalStore_DataNotFound(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()
 
-	_, err := store.GetObservation(ctx, "conversations/opencode/nonexistent.json")
+	_, err := store.GetData(ctx, "observations/opencode/nonexistent.json")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -278,23 +274,23 @@ func TestLocalStore_DeletePrefix(t *testing.T) {
 	ctx := context.Background()
 
 	keys := []string{
-		"conversations/opencode/conv-1.json",
-		"conversations/opencode/conv-2.json",
-		"conversations/claude/conv-3.json",
+		"observations/opencode/conv-1.json",
+		"observations/opencode/conv-2.json",
+		"observations/claude/conv-3.json",
 	}
 	for _, key := range keys {
-		if err := store.PutObservation(ctx, key, "observation for "+key); err != nil {
-			t.Fatalf("PutObservation(%s): %v", key, err)
+		if err := store.PutData(ctx, key, []byte("data for "+key)); err != nil {
+			t.Fatalf("PutData(%s): %v", key, err)
 		}
 	}
 
 	// Verify they exist.
-	observations, err := store.ListObservations(ctx)
+	listed, err := store.ListData(ctx, "observations/")
 	if err != nil {
-		t.Fatalf("ListObservations before delete: %v", err)
+		t.Fatalf("ListData before delete: %v", err)
 	}
-	if len(observations) != 3 {
-		t.Fatalf("len(ListObservations) = %d, want 3", len(observations))
+	if len(listed) != 3 {
+		t.Fatalf("len(ListData) = %d, want 3", len(listed))
 	}
 
 	// Delete all observations.
@@ -302,12 +298,12 @@ func TestLocalStore_DeletePrefix(t *testing.T) {
 		t.Fatalf("DeletePrefix: %v", err)
 	}
 
-	observations, err = store.ListObservations(ctx)
+	listed, err = store.ListData(ctx, "observations/")
 	if err != nil {
-		t.Fatalf("ListObservations after delete: %v", err)
+		t.Fatalf("ListData after delete: %v", err)
 	}
-	if len(observations) != 0 {
-		t.Errorf("len(ListObservations) = %d after delete, want 0", len(observations))
+	if len(listed) != 0 {
+		t.Errorf("len(ListData) = %d after delete, want 0", len(listed))
 	}
 }
 

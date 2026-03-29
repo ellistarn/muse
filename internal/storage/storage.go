@@ -15,13 +15,14 @@ import (
 // Storage layout:
 //
 //	conversations/{source}/{conversation_id}.json   — raw conversations
-//	observations/{source}/{conversation_id}.md      — per-conversation observations
-//	versions/{timestamp}/muse.md                — timestamped muse versions (latest = current)
-//	versions/{timestamp}/diff.md               — what changed from the previous version
+//	observations/{source}/{conversation_id}.json    — per-conversation observations (structured JSON)
+//	compose/labels/{source}/{conversation_id}.json  — clustering-specific label artifacts
+//	compose/normalization.json                      — clustering-specific label normalization
+//	versions/{timestamp}/muse.md                    — timestamped muse versions (latest = current)
+//	versions/{timestamp}/diff.md                    — what changed from the previous version
 type Store interface {
 	ConversationStore
 	MuseStore
-	ObservationStore
 	DataStore
 }
 
@@ -42,16 +43,9 @@ type MuseStore interface {
 	GetMuseVersion(ctx context.Context, timestamp string) (string, error) // specific version
 }
 
-// ObservationStore manages per-conversation observations.
-type ObservationStore interface {
-	ListObservations(ctx context.Context) (map[string]time.Time, error)
-	GetObservation(ctx context.Context, conversationKey string) (string, error)
-	PutObservation(ctx context.Context, key, content string) error
-}
-
 // DataStore provides generic key/value operations for pipeline artifacts and
 // strategy-specific state. Keys are slash-delimited paths (e.g.
-// "compose/observations/opencode/ses_001.json").
+// "observations/opencode/ses_001.json", "compose/labels/opencode/ses_001.json").
 type DataStore interface {
 	PutData(ctx context.Context, key string, data []byte) error
 	GetData(ctx context.Context, key string) ([]byte, error)

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ellistarn/muse/internal/conversation"
 )
@@ -200,62 +199,6 @@ func (l *LocalStore) GetMuseVersion(_ context.Context, timestamp string) (string
 			return "", &NotFoundError{Key: museVersionKey(timestamp)}
 		}
 		return "", fmt.Errorf("failed to read muse version %s: %w", timestamp, err)
-	}
-	return string(data), nil
-}
-
-// PutObservation writes observations under observations/.
-func (l *LocalStore) PutObservation(_ context.Context, key, content string) error {
-	relPath := ObservationKey(key)
-	path := filepath.Join(l.root, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-	return os.WriteFile(path, []byte(content), 0o644)
-}
-
-// ListObservations returns all persisted observations with their modification times.
-func (l *LocalStore) ListObservations(_ context.Context) (map[string]time.Time, error) {
-	obsDir := filepath.Join(l.root, "observations")
-	observations := map[string]time.Time{}
-	err := filepath.WalkDir(obsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fs.SkipAll
-			}
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".md") {
-			return nil
-		}
-		rel, err := filepath.Rel(obsDir, path)
-		if err != nil {
-			return nil
-		}
-		conversationKey := "conversations/" + strings.TrimSuffix(filepath.ToSlash(rel), ".md") + ".json"
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		observations[conversationKey] = info.ModTime()
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list observations: %w", err)
-	}
-	return observations, nil
-}
-
-// GetObservation reads an observation's content.
-func (l *LocalStore) GetObservation(_ context.Context, conversationKey string) (string, error) {
-	relPath := ObservationKey(conversationKey)
-	path := filepath.Join(l.root, filepath.FromSlash(relPath))
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", &NotFoundError{Key: conversationKey}
-		}
-		return "", fmt.Errorf("failed to read observation: %w", err)
 	}
 	return string(data), nil
 }

@@ -68,6 +68,13 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				return err
 			}
 
+			// One-time migration from legacy compose/observations/ to observations/
+			if migrated, err := compose.MigrateObservations(ctx, store); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: observation migration failed: %v\n", err)
+			} else if migrated > 0 {
+				fmt.Fprintf(os.Stderr, "Migrated %d observations to observations/\n", migrated)
+			}
+
 			// Discover and store new conversations (skip for --learn since it
 			// only recomposes from existing observations)
 			var uploaded, uploadBytes int

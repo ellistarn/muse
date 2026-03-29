@@ -25,7 +25,7 @@ func Sync(ctx context.Context, src, dst Store, categories []string, w io.Writer)
 	}
 
 	if all || cats["observations"] {
-		n, err := syncObservations(ctx, src, dst)
+		n, err := syncData(ctx, src, dst, "observations/")
 		if err != nil {
 			return fmt.Errorf("sync observations: %w", err)
 		}
@@ -62,19 +62,20 @@ func syncConversations(ctx context.Context, src, dst Store) (int, error) {
 	return count, nil
 }
 
-func syncObservations(ctx context.Context, src, dst Store) (int, error) {
-	index, err := src.ListObservations(ctx)
+// syncData copies all keys under the given prefix from src to dst via DataStore.
+func syncData(ctx context.Context, src, dst Store, prefix string) (int, error) {
+	keys, err := src.ListData(ctx, prefix)
 	if err != nil {
 		return 0, err
 	}
 	var count int
-	for conversationKey := range index {
-		content, err := src.GetObservation(ctx, conversationKey)
+	for _, key := range keys {
+		data, err := src.GetData(ctx, key)
 		if err != nil {
-			return count, fmt.Errorf("get observation %s: %w", conversationKey, err)
+			return count, fmt.Errorf("get %s: %w", key, err)
 		}
-		if err := dst.PutObservation(ctx, conversationKey, content); err != nil {
-			return count, fmt.Errorf("put observation %s: %w", conversationKey, err)
+		if err := dst.PutData(ctx, key, data); err != nil {
+			return count, fmt.Errorf("put %s: %w", key, err)
 		}
 		count++
 	}

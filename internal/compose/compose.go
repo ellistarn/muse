@@ -81,44 +81,51 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 		return nil, fmt.Errorf("failed to list conversations: %w", err)
 	}
 
-	observations, err := store.ListObservations(ctx)
+	existingObs, err := ListObservations(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list observations: %w", err)
+	}
+	existingSet := make(map[string]bool, len(existingObs))
+	for _, sc := range existingObs {
+		existingSet[sc.Source+"/"+sc.ConversationID] = true
 	}
 
 	// If reprocessing, clear existing observations (scoped to sources if set)
 	if opts.Reobserve {
 		if len(opts.Sources) > 0 {
 			for _, src := range opts.Sources {
-				prefix := "observations/" + src + "/"
-				if err := store.DeletePrefix(ctx, prefix); err != nil {
+				if err := DeleteObservationsForSource(ctx, store, src); err != nil {
 					return nil, fmt.Errorf("failed to clear observations: %w", err)
 				}
 				if opts.Verbose {
-					fmt.Fprintf(os.Stderr, "Cleared %s\n", prefix)
+					fmt.Fprintf(os.Stderr, "Cleared observations/%s/\n", src)
 				}
 			}
 		} else {
-			if err := store.DeletePrefix(ctx, "observations/"); err != nil {
+			if err := DeleteObservations(ctx, store); err != nil {
 				return nil, fmt.Errorf("failed to clear observations: %w", err)
 			}
 			fmt.Fprintln(os.Stderr, "Cleared observations/")
 		}
-		// Rebuild observations map after deletion
-		observations, err = store.ListObservations(ctx)
+		// Rebuild observations set after deletion
+		existingObs, err = ListObservations(ctx, store)
 		if err != nil {
 			return nil, fmt.Errorf("failed to re-list observations: %w", err)
+		}
+		existingSet = make(map[string]bool, len(existingObs))
+		for _, sc := range existingObs {
+			existingSet[sc.Source+"/"+sc.ConversationID] = true
 		}
 	}
 
 	// Filter by sources if specified
 	entries = storage.FilterEntriesBySource(entries, opts.Sources)
 
-	// Diff: conversations without corresponding observations (or stale ones) are pending
+	// Diff: conversations without corresponding observations are pending
 	var pending []storage.ConversationEntry
 	var pruned int
 	for _, e := range entries {
-		if observed, ok := observations[e.Key]; ok && !e.LastModified.After(observed) {
+		if existingSet[e.Source+"/"+e.ConversationID] {
 			pruned++
 			continue
 		}
@@ -177,8 +184,15 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 					return
 				}
 
-				// Persist immediately so progress survives cancellation
-				if err := store.PutObservation(ctx, entry.Key, obs); err != nil {
+				// Persist as structured JSON so both pipelines share a single format
+				items := parseObservationItems(obs)
+				fp := Fingerprint(entry.LastModified.Format(time.RFC3339Nano), Fingerprint(prompts.Extract, prompts.Refine))
+				structured := &Observations{
+					Fingerprint: fp,
+					Date:        entry.LastModified.Format("2006-01-02"),
+					Items:       items,
+				}
+				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, structured); err != nil {
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = fmt.Errorf("save observation for %s: %w", entry.Key, err)
@@ -188,7 +202,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 				}
 				if opts.Verbose {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] Observed ~/.muse/%s (%s, $%.4f)\n",
-						n, len(pending), storage.ObservationKey(entry.Key), time.Since(start).Round(time.Millisecond), usage.Cost())
+						n, len(pending), observationPath(entry.Source, entry.ConversationID), time.Since(start).Round(time.Millisecond), usage.Cost())
 				}
 				mu.Lock()
 				observeUsage = observeUsage.Add(usage)
@@ -255,20 +269,29 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM inference.Clie
 	}, nil
 }
 
-// loadAllObservations fetches every persisted observation from storage.
+// loadAllObservations fetches every persisted observation from storage and
+// returns them as text strings (for the map-reduce learn step).
 func loadAllObservations(ctx context.Context, store storage.Store) ([]string, error) {
-	index, err := store.ListObservations(ctx)
+	convList, err := ListObservations(ctx, store)
 	if err != nil {
 		return nil, err
 	}
 	var observations []string
-	for conversationKey := range index {
-		content, err := store.GetObservation(ctx, conversationKey)
+	for _, sc := range convList {
+		obs, err := GetObservations(ctx, store, sc.Source, sc.ConversationID)
 		if err != nil {
-			return nil, fmt.Errorf("get observation %s: %w", conversationKey, err)
+			return nil, fmt.Errorf("get observation %s/%s: %w", sc.Source, sc.ConversationID, err)
 		}
-		if content != "" {
-			observations = append(observations, content)
+		// Format each observation item as text for the learn step
+		for _, item := range obs.Items {
+			entry := observationEntry{
+				Source:         sc.Source,
+				ConversationID: sc.ConversationID,
+				Quote:          item.Quote,
+				Text:           item.Observation,
+				Date:           obs.Date,
+			}
+			observations = append(observations, entry.Format())
 		}
 	}
 	return observations, nil

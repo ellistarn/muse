@@ -419,7 +419,7 @@ func runObserve(
 
 				if opts.Verbose {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] Observed ~/.muse/%s (%d obs, %s, $%.4f)\n",
-						n, len(pending), composePath("observations", entry.Source, entry.ConversationID), len(items),
+						n, len(pending), observationPath(entry.Source, entry.ConversationID), len(items),
 						time.Since(start).Round(time.Millisecond), u.Cost())
 				}
 				mu.Lock()

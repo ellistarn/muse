@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/compose"
+	"github.com/ellistarn/muse/internal/conversation"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/testutil"
 )
@@ -40,7 +40,7 @@ func twoConversationStore() *testutil.ConversationStore {
 func TestMapReduce_EndToEnd(t *testing.T) {
 	store := twoConversationStore()
 	llm := &testutil.MockLLM{
-		ObserveResponse: "- Prefers kebab-case file names\n- No emojis in commits",
+		ObserveResponse: "Observation: Prefers kebab-case file names\nObservation: No emojis in commits",
 		LearnResponse:   "## Naming\n\nI use kebab-case for file names.\n\n## Commits\n\nNo emojis. Keep them short.",
 	}
 
@@ -95,7 +95,7 @@ func TestMapReduce_Limit(t *testing.T) {
 	}
 
 	llm := &testutil.MockLLM{
-		ObserveResponse: "- observation",
+		ObserveResponse: "Observation: test observation",
 		LearnResponse:   "## Test\n\nContent here.",
 	}
 
@@ -123,7 +123,7 @@ func TestMapReduce_LimitIncludesPreviousObservations(t *testing.T) {
 	}
 
 	llm := &testutil.MockLLM{
-		ObserveResponse: "- observation",
+		ObserveResponse: "Observation: test observation",
 		LearnResponse:   "## Test\n\nContent here.",
 	}
 
@@ -151,8 +151,9 @@ func TestMapReduce_LimitIncludesPreviousObservations(t *testing.T) {
 	if result.Remaining != 0 {
 		t.Errorf("second run Remaining = %d, want 0", result.Remaining)
 	}
-	if len(store.Observations) != 4 {
-		t.Errorf("observations after second run = %d, want 4", len(store.Observations))
+	obsList, _ := compose.ListObservations(context.Background(), store)
+	if len(obsList) != 4 {
+		t.Errorf("observations after second run = %d, want 4", len(obsList))
 	}
 	// The learn call (last call, now that diff is computed lazily) should contain all 4 observations
 	learnInput := llm.Calls[len(llm.Calls)-1].User
@@ -184,7 +185,7 @@ func TestMapReduce_ObserveError(t *testing.T) {
 	store := twoConversationStore()
 	llm := &contentFailLLM{
 		failOn:          "use spaces",
-		observeResponse: "- observation from good conversation",
+		observeResponse: "Observation: test observation from good conversation",
 		learnResponse:   "## Muse\n\nContent.",
 	}
 
@@ -212,7 +213,7 @@ func TestMapReduce_Reobserve(t *testing.T) {
 	})
 
 	llm := &testutil.MockLLM{
-		ObserveResponse: "- observation",
+		ObserveResponse: "Observation: test observation",
 		LearnResponse:   "## Test\n\nContent.",
 	}
 
@@ -236,7 +237,7 @@ func TestMapReduce_Reobserve(t *testing.T) {
 func TestMapReduce_IncrementalPersist(t *testing.T) {
 	store := twoConversationStore()
 	llm := &testutil.MockLLM{
-		ObserveResponse: "- observation",
+		ObserveResponse: "Observation: test observation",
 		LearnResponse:   "## Test\n\nContent.",
 	}
 
@@ -247,8 +248,9 @@ func TestMapReduce_IncrementalPersist(t *testing.T) {
 	if result.Processed != 2 {
 		t.Errorf("Processed = %d, want 2", result.Processed)
 	}
-	if len(store.Observations) != 2 {
-		t.Errorf("Observations = %d, want 2", len(store.Observations))
+	obsList, _ := compose.ListObservations(context.Background(), store)
+	if len(obsList) != 2 {
+		t.Errorf("Observations = %d, want 2", len(obsList))
 	}
 }
 
