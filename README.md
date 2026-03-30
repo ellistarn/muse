@@ -14,6 +14,7 @@ go install github.com/ellistarn/muse@latest
 ```bash
 muse compose              # discover conversations and compose muse.md
 muse ask "your question"  # ask your muse directly
+muse eval                 # evaluate the muse against a base model
 muse listen               # start MCP server
 muse show                 # print muse.md
 muse show -o muse.pdf     # export as PDF

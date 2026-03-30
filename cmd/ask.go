@@ -28,7 +28,7 @@ questions ("Is X a good approach for Y?") rather than factual lookups.`,
 				return err
 			}
 			document := loadDocument(ctx, store)
-			llm, err := newLLMClient(ctx, TierCompose)
+			llm, err := newLLMClient(ctx, TierStrong)
 			if err != nil {
 				return err
 			}

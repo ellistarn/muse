@@ -334,7 +334,7 @@ func runObserve(
 	discovered := len(entries)
 
 	// Compute prompt chain hash for fingerprinting
-	promptHash := Fingerprint(prompts.Extract, prompts.ObserveHuman, prompts.Refine)
+	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine)
 
 	// Determine which conversations need (re)observation
 	var pending []storage.ConversationEntry
@@ -411,7 +411,7 @@ func runObserve(
 				convBytes := conversationDataSize(conv)
 
 				start := time.Now()
-				items, u, err := extractObservations(ctx, llm, conv, opts.Verbose)
+				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose)
 				n := counter.Add(1)
 				if err != nil {
 					return fmt.Errorf("observe %s: %w", entry.Key, err)
@@ -468,15 +468,15 @@ func conversationDataSize(conv *conversation.Conversation) int {
 	return n
 }
 
-// extractObservations runs the observe pipeline on a conversation and returns
+// observeAndParse runs the observe pipeline on a conversation and returns
 // discrete observations (not a markdown blob).
 //
-// Raw conversation is sent to the extract prompt by default. When the raw text
+// Conversation is sent to the observe prompt by default. When the raw text
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func extractObservations(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]Observation, inference.Usage, error) {
-	refined, usage, err := extractAndRefine(ctx, client, conv, verbose)
+func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]Observation, inference.Usage, error) {
+	refined, usage, err := observeAndRefine(ctx, client, conv, verbose)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -510,12 +510,12 @@ func extractObservations(ctx context.Context, client inference.Client, conv *con
 	return relevant, usage, nil
 }
 
-// extractAndRefine is the shared core of the observation pipeline. It extracts
-// turns from a conversation, mechanically compresses them, runs the extract
+// observeAndRefine is the shared core of the observation pipeline. It extracts
+// turns from a conversation, mechanically compresses them, runs the observe
 // prompt in chunks, and refines the candidates into a single text.
 // Both the map-reduce path (which wants raw text) and the clustering path
 // (which further parses into discrete items) call this function.
-func extractAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) (string, inference.Usage, error) {
+func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) (string, inference.Usage, error) {
 	turns := extractTurns(conv)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
@@ -526,22 +526,22 @@ func extractAndRefine(ctx context.Context, client inference.Client, conv *conver
 		return "", inference.Usage{}, nil
 	}
 
-	// Select the appropriate extract prompt based on source type
-	extractPrompt := prompts.Extract
+	// Select the appropriate observe prompt based on source type
+	observePrompt := prompts.Observe
 	if isHumanSource(conv.Source) {
-		extractPrompt = prompts.ObserveHuman
+		observePrompt = prompts.ObserveHuman
 	}
 
 	var totalUsage inference.Usage
 
-	// Extract candidates (Pass 1)
+	// Observe (Pass 1)
 	var allCandidates []string
 	for i, chunk := range chunks {
 		start := time.Now()
-		obs, usage, err := inference.Converse(ctx, client, extractPrompt, chunk, inference.WithMaxTokens(4096))
+		obs, usage, err := inference.Converse(ctx, client, observePrompt, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if verbose {
-			fmt.Fprintf(os.Stderr, "      extract[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
+			fmt.Fprintf(os.Stderr, "      observe[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
 				i+1, len(chunks), len(chunk), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 		}
 		if err != nil && obs == "" {
@@ -589,18 +589,16 @@ func isHumanSource(source string) bool {
 	}
 }
 
-// compressConversation mechanically compresses turns for extraction: strips
+// compressConversation mechanically compresses turns for observation: strips
 // code blocks, collapses tool output to [tool: name] markers, and truncates
-// long assistant/peer messages. Returns chunked text ready for the extract prompt.
+// long assistant/peer messages. Returns chunked text ready for the observe prompt.
 func compressConversation(turns []turn, source string) []string {
 	var chunks []string
 	var b strings.Builder
 
-	human := isHumanSource(source)
-	ownerLabel := "[human]"
+	ownerLabel := "[owner]"
 	peerLabel := "[assistant]"
-	if human {
-		ownerLabel = "[owner]"
+	if isHumanSource(source) {
 		peerLabel = "[peer]"
 	}
 

@@ -110,7 +110,7 @@ func runShowDiff(cmd *cobra.Command, store storage.Store) error {
 	}
 
 	fmt.Fprintln(os.Stderr, "Computing diff...")
-	client, err := newLLMClient(ctx, TierObserve)
+	client, err := newLLMClient(ctx, TierFast)
 	if err != nil {
 		return fmt.Errorf("llm client: %w", err)
 	}

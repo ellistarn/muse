@@ -34,7 +34,8 @@ Workflow:
   1. muse compose    Discover conversations, observe, and compose muse.md
   2. muse show       Print muse.md
   3. muse ask        Ask your muse a question (stateless, one-shot)
-  4. muse listen     Start an MCP server so agents can ask your muse
+  4. muse eval       Evaluate how the muse changes responses to design questions
+  5. muse listen     Start an MCP server so agents can ask your muse
 
 Getting started:
 
@@ -83,12 +84,11 @@ func loadDocument(ctx context.Context, store storage.Store) string {
 	return document
 }
 
-// Model tiers used by the pipeline. Compose is for editorial work (final
-// muse composition, ask). Observe handles bulk work (observation, labeling,
-// summarization).
+// Model tiers. Strong trades cost for capability. Fast trades capability
+// for throughput and cost. Each call site decides which it needs.
 const (
-	TierCompose = "compose"
-	TierObserve = "observe"
+	TierStrong = "strong"
+	TierFast   = "fast"
 )
 
 // newLLMClient creates an inference.Client based on MUSE_PROVIDER and tier.
@@ -125,21 +125,21 @@ func detectProvider() string {
 }
 
 func bedrockModel(tier string) string {
-	if tier == TierObserve {
+	if tier == TierFast {
 		return bedrock.ModelSonnet
 	}
 	return bedrock.ModelOpus
 }
 
 func anthropicModel(tier string) string {
-	if tier == TierObserve {
+	if tier == TierFast {
 		return anthropic.ModelSonnet
 	}
 	return anthropic.ModelOpus
 }
 
 func openaiModel(tier string) string {
-	if tier == TierObserve {
+	if tier == TierFast {
 		return museOpenAI.ModelMini
 	}
 	return museOpenAI.ModelReasoning

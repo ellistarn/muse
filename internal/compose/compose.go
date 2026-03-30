@@ -186,7 +186,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 
 				// Persist as structured JSON so both pipelines share a single format
 				items := parseObservationItems(obs)
-				fp := Fingerprint(entry.LastModified.Format(time.RFC3339Nano), Fingerprint(prompts.Extract, prompts.Refine))
+				fp := Fingerprint(entry.LastModified.Format(time.RFC3339Nano), Fingerprint(prompts.Observe, prompts.Refine))
 				structured := &Observations{
 					Fingerprint: fp,
 					Date:        entry.LastModified.Format("2006-01-02"),
@@ -304,7 +304,7 @@ type turn struct {
 }
 
 func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
-	refined, usage, err := extractAndRefine(ctx, client, conv, false)
+	refined, usage, err := observeAndRefine(ctx, client, conv, false)
 	if err != nil {
 		return "", usage, err
 	}
@@ -314,7 +314,7 @@ func observeConversation(ctx context.Context, client inference.Client, conv *con
 // isEmpty checks if the LLM output has no substantive content.
 // isEmpty returns true if the LLM response is empty or a common null marker.
 // This prevents trivial responses like "None" or "N/A" from triggering
-// downstream LLM calls (e.g. a refine pass on empty extract output).
+// downstream LLM calls (e.g. a refine pass on empty observe output).
 func isEmpty(s string) bool {
 	s = strings.TrimSpace(s)
 	if len(s) == 0 {

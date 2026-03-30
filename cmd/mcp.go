@@ -33,7 +33,7 @@ Add this to your agent's MCP config:
 				return err
 			}
 			document := loadDocument(ctx, store)
-			llm, err := newLLMClient(ctx, TierCompose)
+			llm, err := newLLMClient(ctx, TierStrong)
 			if err != nil {
 				return err
 			}

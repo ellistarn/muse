@@ -12,10 +12,10 @@ frequently-observed patterns at the expense of rare but defining ones.
 ### Pipeline
 
 Conversations are mechanically compressed (code blocks stripped, tool output collapsed to markers,
-long messages truncated) and sent to an extraction LLM that identifies what the owner's messages
+long messages truncated) and sent to an observe LLM that identifies what the owner's messages
 reveal about how they think. Human-to-human conversations (Slack, GitHub) use a separate observe
 prompt tuned for peer discussion — positions defended, mentorship, organizational reasoning — with
-`[owner]`/`[peer]` role labels instead of `[human]`/`[assistant]`. The extract prompt requires a
+`[owner]`/`[peer]` role labels instead of `[owner]`/`[assistant]`. The observe prompt requires a
 structured `Observation:` prefix on each output line — lines without the prefix are discarded at
 parse time. A refine step filters candidates to only those that would change how the muse behaves.
 
@@ -27,7 +27,7 @@ observations into the final muse.md.
 ```
 conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► COMPOSE ─► muse.md
 
-OBSERVE    compress → extract (Observation: prefix) → refine → parse
+OBSERVE    compress → observe (Observation: prefix) → refine → parse
 CLUSTER    label (parallel) → theme (consolidate vocabulary) → group (exact match)
 COMPOSE    per-cluster summarize → compose with noise
 ```
@@ -36,9 +36,9 @@ COMPOSE    per-cluster summarize → compose with noise
 
 The observe step routes to different prompts based on source type:
 
-- **AI conversations** (claude-code, opencode, kiro, codex): Uses the standard extract prompt.
+- **AI conversations** (claude-code, opencode, kiro, codex): Uses the standard observe prompt.
   Signal comes from corrections, course changes, and preferences expressed while directing an AI.
-  `[human]`/`[assistant]` role labels. Peer messages truncated to 500 chars.
+  `[owner]`/`[assistant]` role labels. Assistant messages truncated to 500 chars.
 
 - **Human conversations** (slack, github): Uses the human observe prompt. Signal comes from
   positions defended against peers, architectural reasoning explained to colleagues, mentorship,
@@ -89,11 +89,11 @@ labels → (sorted unique labels, theme prompt) → theme mapping
 Change a conversation and its observations invalidate, which invalidates labels. Change the label
 prompt and all labels invalidate. Change the label vocabulary or theme prompt and the theme mapping
 invalidates. The observe prompt fingerprint includes both AI and human prompts, so changing the
-human observe prompt invalidates all observations for re-extraction.
+human observe prompt invalidates all observations for re-observation.
 
 Fingerprints per layer:
 
-- **Observation**: `hash(conversation.LastModified, extractPromptHash, observeHumanPromptHash, refinePromptHash)`
+- **Observation**: `hash(conversation.LastModified, observePromptHash, observeHumanPromptHash, refinePromptHash)`
 - **Label**: `hash(observationContent, labelPromptHash)`
 - **Theme**: `hash(sorted unique labels, themePromptHash)`
 
@@ -144,13 +144,15 @@ label. Labels are stored one file per conversation containing all per-observatio
 
 ### Eval
 
-`muse eval` runs each eval case twice — once with the muse, once without — and prints both
-responses side by side. Eval cases are single-question markdown files in `cmd/evals/`. No scoring,
-no judge — the human reads the delta to see where the muse steers the model's judgment.
+`muse eval` runs each case twice — once with the muse, once without — then an LLM judge
+characterizes the difference. Cases are single-question markdown files in `cmd/evals/`. The judge
+receives the question, base response, and muse response, and describes how the muse changed the
+response — specificity, reasoning patterns, blind spots — then makes a net-positive/net-negative
+call. Within each case, the baseline and muse calls run in parallel.
 
 ```bash
-muse eval              # built-in cases
-muse eval --dir ./my-evals  # custom cases
+muse eval                   # built-in cases
+muse eval --dir ./my-cases  # custom cases
 ```
 
 ## Decisions
@@ -165,11 +167,11 @@ themes.
 
 ### Why mechanical compression over raw or LLM-summarized input?
 
-The extract model needs enough context to understand what the human was reacting to, but assistant
+The observe model needs enough context to understand what the owner was reacting to, but assistant
 messages are mostly code blocks, tool output, and verbose explanations — none of which carry signal
 about how the owner thinks. Mechanical compression (strip code fences, collapse tool calls to
 `[tool: name]`, truncate long assistant messages to 500 chars) removes the bloat while preserving
-human messages in full. This is cheaper and faster than LLM summarization and doesn't risk losing
+owner messages in full. This is cheaper and faster than LLM summarization and doesn't risk losing
 the detail that provoked a correction.
 
 ### Why a structured prefix over empty-output instructions?
@@ -186,7 +188,7 @@ filter catches any well-formed-but-vacuous observations that slip through.
 
 ### Why separate observe prompts for human conversations?
 
-The original extract prompt was designed for human-AI interaction — it looks for corrections,
+The original observe prompt was designed for human-AI interaction — it looks for corrections,
 course changes, and preferences expressed while directing a model. For Slack and GitHub, this
 produced 85% empty conversations even when the owner wrote thousands of characters. The signal in
 peer conversations is structurally different: positions defended against pushback, architectural

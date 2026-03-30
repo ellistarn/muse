@@ -357,7 +357,7 @@ func TestClustered_ObserveError(t *testing.T) {
 		{Role: "assistant", Content: "sure"},
 	})
 
-	mock := &clusterMockLLM{failOnExtract: true}
+	mock := &clusterMockLLM{failOnObserve: true}
 
 	_, err := compose.RunClustered(
 		context.Background(), store,
@@ -438,7 +438,7 @@ func (m *contentFailLLM) Model() string { return "content-fail-mock" }
 type clusterMockLLM struct {
 	mu            sync.Mutex
 	calls         []string
-	failOnExtract bool
+	failOnObserve bool
 }
 
 func (m *clusterMockLLM) ConverseMessages(_ context.Context, system string, messages []inference.Message, _ ...inference.ConverseOption) (*inference.Response, error) {
@@ -451,8 +451,8 @@ func (m *clusterMockLLM) ConverseMessages(_ context.Context, system string, mess
 	m.mu.Unlock()
 	usage := inference.Usage{InputTokens: 100, OutputTokens: 50}
 
-	if m.failOnExtract && strings.Contains(system, "Extract observations") {
-		return nil, fmt.Errorf("simulated extract failure")
+	if m.failOnObserve && strings.Contains(system, "Extract observations") {
+		return nil, fmt.Errorf("simulated observe failure")
 	}
 	if strings.Contains(system, "Label each") {
 		return &inference.Response{Text: "explicit patterns over implicit conventions", Usage: usage}, nil

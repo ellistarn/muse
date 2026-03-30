@@ -102,11 +102,11 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 }
 
 func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, relabel bool, limit, uploaded, uploadBytes int) error {
-	observeLLM, err := newLLMClient(ctx, TierObserve)
+	observeLLM, err := newLLMClient(ctx, TierFast)
 	if err != nil {
 		return err
 	}
-	composeLLM, err := newLLMClient(ctx, TierCompose)
+	composeLLM, err := newLLMClient(ctx, TierStrong)
 	if err != nil {
 		return err
 	}
@@ -146,11 +146,11 @@ func runMapReduceCompose(ctx context.Context, stdout io.Writer, store storage.St
 		Learn: learn,
 	}
 
-	observeLLM, err := newLLMClient(ctx, TierObserve)
+	observeLLM, err := newLLMClient(ctx, TierFast)
 	if err != nil {
 		return err
 	}
-	composeLLM, err := newLLMClient(ctx, TierCompose)
+	composeLLM, err := newLLMClient(ctx, TierStrong)
 	if err != nil {
 		return err
 	}
