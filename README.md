@@ -16,6 +16,7 @@ muse compose              # discover conversations and compose muse.md
 muse ask "your question"  # ask your muse directly
 muse listen               # start MCP server
 muse show                 # print muse.md
+muse show -o muse.pdf     # export as PDF
 ```
 
 Work directly with your muse as agent:
