@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -210,6 +211,29 @@ func TestParallelProviderLoading_ErrorHandling(t *testing.T) {
 	}
 	if len(conversations) != 2 {
 		t.Errorf("expected 2 conversations from good providers, got %d", len(conversations))
+	}
+}
+
+func TestConversation_SessionIDAlias(t *testing.T) {
+	// Upstream tools rename fields without notice (session_id → conversation_id).
+	// The parser must accept both per designs/sources.md "Format compatibility".
+	raw := `{"session_id": "abc-123", "source": "test", "messages": []}`
+	var conv Conversation
+	if err := json.Unmarshal([]byte(raw), &conv); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if conv.ConversationID != "abc-123" {
+		t.Errorf("ConversationID = %q, want %q", conv.ConversationID, "abc-123")
+	}
+
+	// conversation_id takes precedence when both are present.
+	raw = `{"conversation_id": "real", "session_id": "old", "source": "test", "messages": []}`
+	conv = Conversation{}
+	if err := json.Unmarshal([]byte(raw), &conv); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if conv.ConversationID != "real" {
+		t.Errorf("ConversationID = %q, want %q (conversation_id should take precedence)", conv.ConversationID, "real")
 	}
 }
 

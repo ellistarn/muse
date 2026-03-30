@@ -320,13 +320,12 @@ func TestLocalStore_ListConversationsEmpty(t *testing.T) {
 	}
 }
 
-func TestLocalStore_GetConversation_RejectsStaleSchema(t *testing.T) {
+func TestLocalStore_GetConversation_AcceptsSessionIDAlias(t *testing.T) {
 	store := newTestLocalStore(t)
 	ctx := context.Background()
 
 	// Write a file with the old "session_id" JSON key (pre-rename schema).
-	// GetConversation must reject this rather than silently returning an
-	// empty ConversationID.
+	// Per designs/sources.md "Format compatibility", the parser accepts both names.
 	staleJSON := `{
 		"schema_version": 1,
 		"source": "opencode",
@@ -341,8 +340,11 @@ func TestLocalStore_GetConversation_RejectsStaleSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := store.GetConversation(ctx, "opencode", "old-conv-001")
-	if err == nil {
-		t.Fatal("expected error for stale session_id schema, got nil")
+	conv, err := store.GetConversation(ctx, "opencode", "old-conv-001")
+	if err != nil {
+		t.Fatalf("expected session_id to be accepted as alias, got error: %v", err)
+	}
+	if conv.ConversationID != "old-conv-001" {
+		t.Errorf("ConversationID = %q, want %q", conv.ConversationID, "old-conv-001")
 	}
 }

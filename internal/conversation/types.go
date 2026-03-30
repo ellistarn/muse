@@ -108,6 +108,25 @@ type Conversation struct {
 	Messages       []Message `json:"messages"`
 }
 
+// UnmarshalJSON implements backward-compatible deserialization for Conversation.
+// Upstream tools rename fields without notice (e.g. session_id → conversation_id).
+// Per designs/sources.md "Format compatibility", the parser accepts both names.
+func (c *Conversation) UnmarshalJSON(data []byte) error {
+	// Alias avoids infinite recursion on UnmarshalJSON.
+	type Alias Conversation
+	aux := &struct {
+		*Alias
+		SessionID string `json:"session_id"`
+	}{Alias: (*Alias)(c)}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if c.ConversationID == "" && aux.SessionID != "" {
+		c.ConversationID = aux.SessionID
+	}
+	return nil
+}
+
 // Validate checks that required fields are present. This catches silent
 // deserialization failures (e.g. renamed JSON tags, corrupt data) that would
 // otherwise propagate empty strings through the system.
