@@ -8,4 +8,7 @@ Distill to the most accurate claim, not the punchiest one. Prefer precision over
 
 Cut anything a knowledgeable person in this domain would already know or agree with — unless this person's specific stance on it is unusual.
 
-Distinguish two kinds of signal in the observations: **generative principles** (how the person reasons — the underlying logic that produces decisions) and **terminal rules** (specific decisions the principle has already made — standing operational rules like "reject X on principle," "Y by default, Z requires justification," concrete code conventions). Principles should be distilled to their most compressed form. Terminal rules should survive at their operational resolution — they are not examples of the principle, they are the output of having applied it, and abstracting them back into the principle destroys their value as actionable guidance.
+Distinguish three kinds of signal in the observations:
+- **Generative principles**: how the person reasons — the underlying logic that produces decisions. Distill to their most compressed form.
+- **Decision heuristics**: if/then rules that bridge a principle to a class of situations — "if X, then Y." When multiple observations show the same decision being made for the same structural reason in different contexts, the heuristic is the generalization. Preserve these — they are what makes the muse predictive rather than merely descriptive.
+- **Terminal rules**: specific decisions the principle has already made — standing operational rules like "reject X on principle," "Y by default, Z requires justification," concrete code conventions. Preserve at operational resolution — they are not examples of the principle, they are the output of having applied it.

@@ -35,9 +35,9 @@ muse is always recomposed.
 
 Two composition methods are available:
 
-  clustering (default) — labels observations, normalizes synonyms, groups by
-  label match, summarizes per-cluster, then composes muse.md. Produces
-  thematically coherent output.
+  clustering (default) — labels observations, themes them into canonical
+  patterns, groups by theme, summarizes per-cluster, then composes muse.md.
+  Produces thematically coherent output.
 
   map-reduce — observe maps each conversation into observations, then learn
   reduces all observations into a single muse.md. Simpler, sufficient for

@@ -404,7 +404,7 @@ func extractTurns(conv *conversation.Conversation) []turn {
 		}
 	}
 	minTurns := 2
-	if conv.Source == "slack" {
+	if isHumanSource(conv.Source) {
 		minTurns = 1
 	}
 	if userTurns < minTurns {

@@ -18,7 +18,7 @@ import (
 //
 // Clustering-specific:
 //   compose/labels/{source}/{conversationID}.json
-//   compose/normalization.json
+//   compose/themes.json
 
 // SourceConversation identifies a conversation by its source and conversation ID.
 type SourceConversation struct {
@@ -65,18 +65,23 @@ func GetLabels(ctx context.Context, store storage.Store, source, conversationID 
 	return &lbl, nil
 }
 
-// PutNormalization writes the normalization mapping.
-func PutNormalization(ctx context.Context, store storage.Store, norm *Normalization) error {
-	return putJSON(ctx, store, "compose/normalization.json", norm)
+// PutThemes writes the theme mapping.
+func PutThemes(ctx context.Context, store storage.Store, themes *LabelMapping) error {
+	return putJSON(ctx, store, "compose/themes.json", themes)
 }
 
-// GetNormalization reads the normalization mapping.
-func GetNormalization(ctx context.Context, store storage.Store) (*Normalization, error) {
-	var norm Normalization
-	if err := getJSON(ctx, store, "compose/normalization.json", &norm); err != nil {
+// GetThemes reads the theme mapping.
+func GetThemes(ctx context.Context, store storage.Store) (*LabelMapping, error) {
+	var themes LabelMapping
+	if err := getJSON(ctx, store, "compose/themes.json", &themes); err != nil {
 		return nil, err
 	}
-	return &norm, nil
+	return &themes, nil
+}
+
+// DeleteThemes removes the theme mapping artifact.
+func DeleteThemes(ctx context.Context, store storage.Store) error {
+	return store.DeletePrefix(ctx, "compose/themes.json")
 }
 
 // ListObservations returns all (source, conversationID) pairs that have observations.
@@ -104,12 +109,7 @@ func DeleteLabels(ctx context.Context, store storage.Store) error {
 	return store.DeletePrefix(ctx, "compose/labels/")
 }
 
-// DeleteNormalization removes the normalization mapping artifact.
-func DeleteNormalization(ctx context.Context, store storage.Store) error {
-	return store.DeletePrefix(ctx, "compose/normalization.json")
-}
-
-// listArtifacts returns (source, conversationID) pairs from keys under the given prefix.
+// ListObservations returns all (source, conversationID) pairs that have observations.
 // Keys are expected to follow the pattern: {prefix}{source}/{conversationID}.json
 func listArtifacts(ctx context.Context, store storage.Store, prefix string) ([]SourceConversation, error) {
 	keys, err := store.ListData(ctx, prefix)

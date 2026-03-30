@@ -1,8 +1,8 @@
-# Clustered Distillation
+# Clustered Compose
 
 ## Problem
 
-Distilling a large corpus of observations into a muse document. Single-pass distillation breaks down
+Composing a large corpus of observations into a muse document. Single-pass composition breaks down
 on three fronts: the observation set outgrows context window limits, model attention dilutes
 distinctive signal as input volume grows, and redundant observations bias output toward
 frequently-observed patterns at the expense of rare but defining ones.
@@ -12,27 +12,60 @@ frequently-observed patterns at the expense of rare but defining ones.
 ### Pipeline
 
 Conversations are mechanically compressed (code blocks stripped, tool output collapsed to markers,
-long assistant messages truncated) and sent to an extraction LLM that identifies what the human's
-messages reveal about how they think. The extract prompt requires a structured `Observation:` prefix
-on each output line — lines without the prefix are discarded at parse time. A refine step filters
-candidates to only those that would change how the muse behaves.
+long messages truncated) and sent to an extraction LLM that identifies what the owner's messages
+reveal about how they think. Human-to-human conversations (Slack, GitHub) use a separate observe
+prompt tuned for peer discussion — positions defended, mentorship, organizational reasoning — with
+`[owner]`/`[peer]` role labels instead of `[human]`/`[assistant]`. The extract prompt requires a
+structured `Observation:` prefix on each output line — lines without the prefix are discarded at
+parse time. A refine step filters candidates to only those that would change how the muse behaves.
 
-The surviving observations are labeled with short thematic labels, normalized to merge synonyms, and
-grouped into clusters by exact label match. Labels with 3+ observations form clusters; the rest flow
-through as noise. Each cluster is summarized independently, then composed with noise observations into
-the final muse.md.
+The surviving observations are labeled with short thematic labels, themed into canonical patterns,
+and grouped into clusters by exact label match. Labels with 3+ observations form clusters; the rest
+flow through as noise. Each cluster is summarized independently, then composed with noise
+observations into the final muse.md.
 
 ```
 conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► COMPOSE ─► muse.md
 
 OBSERVE    compress → extract (Observation: prefix) → refine → parse
-CLUSTER    label (parallel) → normalize (merge synonyms) → group (exact match)
+CLUSTER    label (parallel) → theme (consolidate vocabulary) → group (exact match)
 COMPOSE    per-cluster summarize → compose with noise
 ```
 
+### Source-aware observation
+
+The observe step routes to different prompts based on source type:
+
+- **AI conversations** (claude-code, opencode, kiro, codex): Uses the standard extract prompt.
+  Signal comes from corrections, course changes, and preferences expressed while directing an AI.
+  `[human]`/`[assistant]` role labels. Peer messages truncated to 500 chars.
+
+- **Human conversations** (slack, github): Uses the human observe prompt. Signal comes from
+  positions defended against peers, architectural reasoning explained to colleagues, mentorship,
+  organizational judgment. `[owner]`/`[peer]` role labels. Both sides preserved in full because
+  peer messages carry context the owner is responding to.
+
+`isHumanSource()` determines routing. Adding a new human source requires one line in that function.
+
+### Theming
+
+Parallel labeling produces fragmented vocabulary — the same concept gets different names across
+conversations because each labeling call runs independently. When the unique label count exceeds 50,
+a theme step consolidates them into 15-25 canonical themes. Each theme names a distinct thinking
+pattern at the right altitude — specific enough to be meaningful, general enough to absorb variants.
+
+The theme step is deliberately naive about what happens downstream. It doesn't know its output
+becomes cluster keys, which become summaries, which become muse sections. It just consolidates
+vocabulary. Structural decisions about the muse belong in the compose step.
+
+The compose step treats each cluster as one distinct idea regardless of observation count. A cluster
+with 40 observations and one with 3 each contribute one idea. This corrects for volume asymmetry —
+the muse represents the *breadth* of the person's thinking, not the frequency distribution of their
+conversations.
+
 ### Strategies
 
-Two distillation methods are available permanently. Clustering produces thematically coherent output
+Two composition methods are available permanently. Clustering produces thematically coherent output
 at higher complexity. Map-reduce is simpler and sufficient for smaller observation sets.
 
 ```bash
@@ -50,18 +83,19 @@ correctness; the dependency chain self-invalidates:
 ```
 conversation → (observe prompt) → observations
 observation → (label prompt) → labels
-labels → (sorted unique labels) → normalization mapping
+labels → (sorted unique labels, theme prompt) → theme mapping
 ```
 
 Change a conversation and its observations invalidate, which invalidates labels. Change the label
-prompt and all labels invalidate. Change the label vocabulary and the normalization mapping
-invalidates.
+prompt and all labels invalidate. Change the label vocabulary or theme prompt and the theme mapping
+invalidates. The observe prompt fingerprint includes both AI and human prompts, so changing the
+human observe prompt invalidates all observations for re-extraction.
 
 Fingerprints per layer:
 
-- **Observation**: `hash(conversation.LastModified, observePromptHash)`
+- **Observation**: `hash(conversation.LastModified, extractPromptHash, observeHumanPromptHash, refinePromptHash)`
 - **Label**: `hash(observationContent, labelPromptHash)`
-- **Normalization**: `hash(sorted unique labels, normalizePromptHash)`
+- **Theme**: `hash(sorted unique labels, themePromptHash)`
 
 Grouping, sampling, summarization, and composition are recomputed each run — they're cheap relative
 to the cached stages.
@@ -71,8 +105,8 @@ These are debugging tools for prompt iteration — correctness never depends on 
 
 ### Storage
 
-Conversations are input. The muse is output. Everything in between is pipeline internals owned by the
-distillation system, nested under `compose/`.
+Conversations are input. The muse is output. Everything in between is pipeline internals owned by
+the compose system, nested under `compose/`.
 
 ```
 ~/.muse/
@@ -80,17 +114,20 @@ distillation system, nested under `compose/`.
 ├── observations/{source}/{conversation_id}.json               # syncable
 ├── compose/
 │   ├── labels/{source}/{conversation_id}.json                 # syncable
-│   └── normalization.json                                     # label mapping, ephemeral
+│   └── themes.json                                            # label mapping, ephemeral
 ├── versions/{timestamp}/muse.md                               # output, syncable
 ├── versions/{timestamp}/diff.md                               # output, syncable
 ```
 
-Observations are a JSON array of discrete strings per conversation — each observation gets its own
+Observations are a JSON array of discrete items per conversation — each observation gets its own
 label. Labels are stored one file per conversation containing all per-observation entries:
 
 ```json
 // observations/{source}/{conversation_id}.json
-{"fingerprint": "abc123", "items": ["obs1", "obs2", "obs3"]}
+{"fingerprint": "abc123", "items": [
+  {"observation": "obs1"},
+  {"observation": "obs2", "quote": "exact words"}
+]}
 
 // compose/labels/{source}/{conversation_id}.json
 {"fingerprint": "def456", "items": [
@@ -98,11 +135,22 @@ label. Labels are stored one file per conversation containing all per-observatio
   {"observation": "obs2", "label": "abstraction must earn its cost"}
 ]}
 
-// compose/normalization.json
+// compose/themes.json
 {"fingerprint": "789abc", "mapping": {
-  "abstraction must earn its keep": "abstraction must earn its cost",
-  "infra-tasks": "infrastructure work"
+  "abstraction must earn its keep": "Complexity Cost and Justification",
+  "root cause over symptom fixing": "Structural Diagnosis over Symptom Fixing"
 }}
+```
+
+### Eval
+
+`muse eval` runs each eval case twice — once with the muse, once without — and prints both
+responses side by side. Eval cases are single-question markdown files in `cmd/evals/`. No scoring,
+no judge — the human reads the delta to see where the muse steers the model's judgment.
+
+```bash
+muse eval              # built-in cases
+muse eval --dir ./my-evals  # custom cases
 ```
 
 ## Decisions
@@ -134,37 +182,38 @@ judgment ("is this nothing?") into a structural parse rule ("does this line star
 
 The `Observation:` prefix also anchors the model's generation — it's harder to drift into
 conversational meta-commentary when the required output format is explicit. A secondary relevance
-filter catches any well-formed-but-vacuous observations that slip through (e.g. parenthesized
-meta-commentary).
+filter catches any well-formed-but-vacuous observations that slip through.
 
-### Why normalize instead of sequential convergence?
+### Why separate observe prompts for human conversations?
 
-The previous design processed label assignments sequentially so each batch saw the full label
-vocabulary from prior batches. This used ordering as an implicit normalization mechanism — label
-convergence was an emergent property of execution order. The consequence was that labeling could not
-be parallelized, making it the pipeline bottleneck.
+The original extract prompt was designed for human-AI interaction — it looks for corrections,
+course changes, and preferences expressed while directing a model. For Slack and GitHub, this
+produced 85% empty conversations even when the owner wrote thousands of characters. The signal in
+peer conversations is structurally different: positions defended against pushback, architectural
+reasoning explained to colleagues, mentorship, strategic reasoning. The `[assistant]` role label
+caused the LLM to treat peer messages as AI output and ignore them.
 
-Normalization separates two concerns that are genuinely separate: *labeling* (what thematic pattern
-does this observation reflect?) and *normalization* (are these two labels the same concept?).
-Labeling runs in parallel with a shared but unordered label set — each call sees the current
-vocabulary and naturally reuses labels where they fit, providing convergence pressure without
-requiring strict ordering. A single normalization call then takes the full label set and produces a
-canonical mapping that merges synonyms, applying it to all stored labels before grouping.
+The human observe prompt uses `[owner]`/`[peer]` labels and reframes what signal looks like.
+This increased Slack observation yield roughly 3x.
 
-This is both faster (parallel labeling) and architecturally cleaner (normalization is a named step,
-not an emergent property of execution order). The normalization mapping is cached by label set hash
-and only recomputed when the vocabulary actually changes.
+### Why theme instead of normalize?
+
+The original pipeline had two steps: "distill" (coarse, 356 labels → 25 themes) then "normalize"
+(fine-grained synonym merge). The normalize step was redundant — distill already consolidated the
+vocabulary. The two steps were collapsed into one called "theme" because it names what the step
+actually does: decide what themes the observations should be organized around.
+
+The step is deliberately naive about its downstream effect. It produces a clean vocabulary; the
+compose step decides structure.
 
 ### Why label-match only?
 
-Grouping is exact label match — observations with the same (normalized) label form a cluster. This
-works because labeling with shared vocabulary plus normalization produces consistent terminology.
+Grouping is exact label match — observations with the same (themed) label form a cluster. This
+works because labeling with shared vocabulary plus theming produces consistent terminology.
 
 We initially designed a two-phase approach (label-match followed by HDBSCAN over embeddings for the
 ungrouped residual) but found that consistent labeling eliminates the sub-cluster variation HDBSCAN
-was meant to capture. With 168 observations, median cosine distance was 0.92 — the embedding space
-was flat because labels were paraphrasing, not categorizing. Fixing labeling upstream made the
-downstream algorithm irrelevant.
+was meant to capture. Fixing labeling upstream made the downstream algorithm irrelevant.
 
 Observations whose labels appear fewer than 3 times flow through as noise rather than forming
 micro-clusters. This threshold prevents summarization from operating on groups too small to have a
@@ -182,6 +231,14 @@ judgment step — it decides what to organize, preserve, or let go.
 Summarization compresses each cluster independently (parallel), then composition organizes across
 cluster summaries. Single-pass would be simpler but forces one LLM call to both summarize and
 organize. Two passes keep each call focused and produce debuggable intermediate artifacts.
+
+### Why treat each cluster as one idea regardless of size?
+
+Without this correction, compose over-represents high-frequency patterns. A cluster with 42
+observations about abstraction boundaries would dominate the muse while a cluster with 4
+observations about organizational judgment gets squeezed out. Both represent distinct thinking
+patterns the person has. Volume means they revisit a topic often — it doesn't mean the topic
+deserves more space. The muse represents breadth, not frequency.
 
 ## Deferred
 

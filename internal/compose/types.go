@@ -33,8 +33,9 @@ type Labels struct {
 	Items       []Label `json:"items"`
 }
 
-// Normalization stores the canonical label mapping produced by the normalize step.
-type Normalization struct {
+// LabelMapping stores a cached label-to-canonical mapping with a fingerprint
+// for cache invalidation.
+type LabelMapping struct {
 	Fingerprint string            `json:"fingerprint"`
 	Mapping     map[string]string `json:"mapping"` // original → canonical
 }

@@ -23,6 +23,11 @@ import (
 // a cluster. Labels with fewer observations flow through as noise.
 const minClusterSize = 3
 
+// themeThreshold triggers vocabulary theming when the number of unique
+// labels exceeds this count. Cold-start parallel labeling produces fragmented
+// vocabularies; the theme step consolidates them into canonical themes.
+const themeThreshold = 50
+
 // ClusteredOptions configures a clustered compose run.
 type ClusteredOptions struct {
 	BaseOptions
@@ -34,10 +39,11 @@ type ClusteredOptions struct {
 }
 
 // RunClustered executes the full clustering composition pipeline:
-// observe → label → normalize → group → sample → summarize → compose → diff.
+// observe → label → theme → group → sample → summarize → compose → diff.
 //
-// Grouping is by exact label match — shared label vocabulary plus normalization
-// produces a shared vocabulary, making embedding-based clustering unnecessary.
+// Labeling happens per-conversation in parallel, producing fragmented vocabulary.
+// The theme step consolidates labels into canonical themes when the vocabulary
+// exceeds the threshold. Grouping is by exact label match after theming.
 func RunClustered(
 	ctx context.Context,
 	store storage.Store,
@@ -127,25 +133,29 @@ func RunClustered(
 	}
 	logAfter("%d labels%s", numLabels, labelNote).Cost(time.Since(labelStart), labelUsage.Cost()).Print()
 
-	// ── NORMALIZE ──────────────────────────────────────────────────────
-	normalizeStart := time.Now()
-	logBefore("normalize", "%d labels", numLabels)
-	normalizeUsage, err := runNormalize(ctx, store, labelLLM, opts.Verbose)
-	if err != nil {
-		return nil, fmt.Errorf("normalize: %w", err)
+	// ── THEME (when label set is fragmented) ──────────────────────────────
+	var themeMapping map[string]string
+	if numLabels > themeThreshold {
+		themeStart := time.Now()
+		logBefore("theme", "%d labels", numLabels)
+		var themeUsage inference.Usage
+		themeMapping, themeUsage, err = runTheme(ctx, store, labelLLM, opts.Verbose)
+		if err != nil {
+			return nil, fmt.Errorf("theme: %w", err)
+		}
+		totalUsage = totalUsage.Add(themeUsage)
+		stages = append(stages, StageStats{
+			Name:     "theme",
+			Model:    labelLLM.Model(),
+			Duration: time.Since(themeStart),
+			Usage:    themeUsage,
+		})
+		logAfter("themed").Cost(time.Since(themeStart), themeUsage.Cost()).Print()
 	}
-	totalUsage = totalUsage.Add(normalizeUsage)
-	stages = append(stages, StageStats{
-		Name:     "normalize",
-		Model:    labelLLM.Model(),
-		Duration: time.Since(normalizeStart),
-		Usage:    normalizeUsage,
-	})
-	logAfter("normalized").Cost(time.Since(normalizeStart), normalizeUsage.Cost()).Print()
 
 	// ── GROUP ───────────────────────────────────────────────────────────
 	groupStart := time.Now()
-	clusters, noiseObs, err := runGroup(ctx, store, allObs)
+	clusters, noiseObs, err := runGroup(ctx, store, allObs, themeMapping)
 	if err != nil {
 		return nil, fmt.Errorf("group: %w", err)
 	}
@@ -324,7 +334,7 @@ func runObserve(
 	discovered := len(entries)
 
 	// Compute prompt chain hash for fingerprinting
-	promptHash := Fingerprint(prompts.Extract, prompts.Refine)
+	promptHash := Fingerprint(prompts.Extract, prompts.ObserveHuman, prompts.Refine)
 
 	// Determine which conversations need (re)observation
 	var pending []storage.ConversationEntry
@@ -511,9 +521,15 @@ func extractAndRefine(ctx context.Context, client inference.Client, conv *conver
 		return "", inference.Usage{}, nil
 	}
 
-	chunks := compressConversation(turns)
+	chunks := compressConversation(turns, conv.Source)
 	if len(chunks) == 0 {
 		return "", inference.Usage{}, nil
+	}
+
+	// Select the appropriate extract prompt based on source type
+	extractPrompt := prompts.Extract
+	if isHumanSource(conv.Source) {
+		extractPrompt = prompts.ObserveHuman
 	}
 
 	var totalUsage inference.Usage
@@ -522,7 +538,7 @@ func extractAndRefine(ctx context.Context, client inference.Client, conv *conver
 	var allCandidates []string
 	for i, chunk := range chunks {
 		start := time.Now()
-		obs, usage, err := inference.Converse(ctx, client, prompts.Extract, chunk, inference.WithMaxTokens(4096))
+		obs, usage, err := inference.Converse(ctx, client, extractPrompt, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if verbose {
 			fmt.Fprintf(os.Stderr, "      extract[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
@@ -562,20 +578,39 @@ func extractAndRefine(ctx context.Context, client inference.Client, conv *conver
 // full assistant text.
 const maxAssistantChars = 500
 
+// isHumanSource returns true for sources where conversations are between
+// the owner and other people (not AI assistants).
+func isHumanSource(source string) bool {
+	switch source {
+	case "slack", "github":
+		return true
+	default:
+		return false
+	}
+}
+
 // compressConversation mechanically compresses turns for extraction: strips
 // code blocks, collapses tool output to [tool: name] markers, and truncates
-// long assistant messages. Returns chunked text ready for the extract prompt.
-func compressConversation(turns []turn) []string {
+// long assistant/peer messages. Returns chunked text ready for the extract prompt.
+func compressConversation(turns []turn, source string) []string {
 	var chunks []string
 	var b strings.Builder
+
+	human := isHumanSource(source)
+	ownerLabel := "[human]"
+	peerLabel := "[assistant]"
+	if human {
+		ownerLabel = "[owner]"
+		peerLabel = "[peer]"
+	}
 
 	for _, t := range turns {
 		var entry string
 		if t.assistantContent != "" {
 			compressed := compressAssistant(t.assistantContent)
-			entry = fmt.Sprintf("[assistant]: %s\n[human]: %s\n\n", compressed, t.humanContent)
+			entry = fmt.Sprintf("%s: %s\n%s: %s\n\n", peerLabel, compressed, ownerLabel, t.humanContent)
 		} else {
-			entry = fmt.Sprintf("[human]: %s\n\n", t.humanContent)
+			entry = fmt.Sprintf("%s: %s\n\n", ownerLabel, t.humanContent)
 		}
 
 		if b.Len()+len(entry) > maxChunkChars && b.Len() > 0 {
@@ -1126,28 +1161,29 @@ func runLabel(
 	return totalUsage, HitMiss{Hit: int(hits.Load()), Miss: int(misses.Load())}, len(labels.list()), nil
 }
 
-// ── NORMALIZE ───────────────────────────────────────────────────────────
+// ── THEME ─────────────────────────────────────────────────────────────
 
-// runNormalize merges synonymous labels via a single LLM call.
-// The mapping is cached by label vocabulary hash — it only reruns when
-// the set of labels changes.
-func runNormalize(
+// runTheme consolidates a fragmented label set into canonical themes.
+// This handles the cold-start case where parallel labeling produces hundreds of
+// unique labels because conversations are labeled without shared vocabulary.
+// The mapping is applied at group time (labels on disk stay pristine).
+func runTheme(
 	ctx context.Context,
 	store storage.Store,
 	llm inference.Client,
 	verbose bool,
-) (inference.Usage, error) {
+) (map[string]string, inference.Usage, error) {
 	// Collect all unique labels
 	convList, err := ListLabels(ctx, store)
 	if err != nil {
-		return inference.Usage{}, fmt.Errorf("list labels: %w", err)
+		return nil, inference.Usage{}, fmt.Errorf("list labels: %w", err)
 	}
 
 	uniqueLabels := map[string]bool{}
 	for _, ss := range convList {
 		lbl, err := GetLabels(ctx, store, ss.Source, ss.ConversationID)
 		if err != nil {
-			return inference.Usage{}, fmt.Errorf("get labels %s/%s: %w", ss.Source, ss.ConversationID, err)
+			return nil, inference.Usage{}, fmt.Errorf("get labels %s/%s: %w", ss.Source, ss.ConversationID, err)
 		}
 		for _, item := range lbl.Items {
 			if item.Label != "" {
@@ -1156,27 +1192,18 @@ func runNormalize(
 		}
 	}
 
-	if len(uniqueLabels) == 0 {
-		return inference.Usage{}, nil
-	}
-
-	// Sort labels for deterministic fingerprinting
 	sorted := make([]string, 0, len(uniqueLabels))
 	for l := range uniqueLabels {
 		sorted = append(sorted, l)
 	}
 	sort.Strings(sorted)
 
-	fp := Fingerprint(append(sorted, Fingerprint(prompts.Normalize))...)
+	fp := Fingerprint(append(sorted, Fingerprint(prompts.Theme))...)
 
 	// Check cache
-	existing, err := GetNormalization(ctx, store)
+	existing, err := GetThemes(ctx, store)
 	if err == nil && existing.Fingerprint == fp {
-		// Cache hit — still need to apply mapping to ensure consistency
-		if len(existing.Mapping) > 0 {
-			applyNormalization(ctx, store, convList, existing.Mapping)
-		}
-		return inference.Usage{}, nil
+		return existing.Mapping, inference.Usage{}, nil
 	}
 
 	// Build input: one label per line
@@ -1187,40 +1214,31 @@ func runNormalize(
 		input.WriteString("\n")
 	}
 
-	resp, usage, err := inference.Converse(ctx, llm, prompts.Normalize, input.String(), inference.WithMaxTokens(4096))
+	resp, usage, err := inference.Converse(ctx, llm, prompts.Theme, input.String(), inference.WithMaxTokens(16384))
 	if err != nil {
-		return usage, fmt.Errorf("normalize: %w", err)
+		return nil, usage, fmt.Errorf("theme: %w", err)
 	}
 
-	// Parse "original → canonical" lines
-	mapping := parseNormalizationResponse(resp)
+	mapping := parseThemeResponse(resp)
 
 	if verbose && len(mapping) > 0 {
-		fmt.Fprintf(os.Stderr, "  Normalized %d labels:\n", len(mapping))
-		for from, to := range mapping {
-			fmt.Fprintf(os.Stderr, "    %s → %s\n", from, to)
-		}
+		fmt.Fprintf(os.Stderr, "  Themed %d labels:\n", len(mapping))
 	}
 
-	// Save normalization mapping
-	norm := &Normalization{
+	// Save
+	themes := &LabelMapping{
 		Fingerprint: fp,
 		Mapping:     mapping,
 	}
-	if err := PutNormalization(ctx, store, norm); err != nil {
-		return usage, fmt.Errorf("save normalization: %w", err)
+	if err := PutThemes(ctx, store, themes); err != nil {
+		return nil, usage, fmt.Errorf("save themes: %w", err)
 	}
 
-	// Apply mapping to label artifacts
-	if len(mapping) > 0 {
-		applyNormalization(ctx, store, convList, mapping)
-	}
-
-	return usage, nil
+	return mapping, usage, nil
 }
 
-// parseNormalizationResponse parses "original → canonical" lines from the LLM response.
-func parseNormalizationResponse(resp string) map[string]string {
+// parseThemeResponse parses "original → canonical" lines from the LLM response.
+func parseThemeResponse(resp string) map[string]string {
 	mapping := map[string]string{}
 	for _, line := range strings.Split(resp, "\n") {
 		line = strings.TrimSpace(line)
@@ -1250,26 +1268,6 @@ func parseNormalizationResponse(resp string) map[string]string {
 	return mapping
 }
 
-// applyNormalization rewrites label artifacts, replacing labels according to the mapping.
-func applyNormalization(ctx context.Context, store storage.Store, convList []SourceConversation, mapping map[string]string) {
-	for _, ss := range convList {
-		lbl, err := GetLabels(ctx, store, ss.Source, ss.ConversationID)
-		if err != nil {
-			continue
-		}
-		changed := false
-		for i, item := range lbl.Items {
-			if canonical, ok := mapping[item.Label]; ok {
-				lbl.Items[i].Label = canonical
-				changed = true
-			}
-		}
-		if changed {
-			PutLabels(ctx, store, ss.Source, ss.ConversationID, lbl)
-		}
-	}
-}
-
 // ── GROUP ───────────────────────────────────────────────────────────────
 
 type clusterResult struct {
@@ -1277,9 +1275,10 @@ type clusterResult struct {
 	ObservationIdxs []int // indices into the flat allObs slice
 }
 
-// runGroup groups observations by exact label match.
+// runGroup groups observations by exact label match, applying normalization at read time.
+// Labels on disk stay pristine; the normalization mapping is applied in-memory only.
 // Labels with minClusterSize+ observations form clusters; the rest is noise.
-func runGroup(ctx context.Context, store storage.Store, allObs []observationEntry) ([]clusterResult, []string, error) {
+func runGroup(ctx context.Context, store storage.Store, allObs []observationEntry, themeMapping map[string]string) ([]clusterResult, []string, error) {
 	// Load labels to get label for each observation
 	type conversationKey struct{ source, conversationID string }
 	lblByConversation := map[conversationKey]*Labels{}
@@ -1295,15 +1294,20 @@ func runGroup(ctx context.Context, store storage.Store, allObs []observationEntr
 		lblByConversation[conversationKey{ss.Source, ss.ConversationID}] = lbl
 	}
 
-	// Build observation → label mapping
+	// Build observation → label mapping, applying normalization at read time
 	obsLabels := make([]string, len(allObs))
 	for i, obs := range allObs {
 		key := conversationKey{obs.Source, obs.ConversationID}
 		lbl, ok := lblByConversation[key]
 		if ok && obs.Index < len(lbl.Items) {
-			obsLabels[i] = strings.ToLower(strings.TrimSpace(lbl.Items[obs.Index].Label))
+			label := strings.ToLower(strings.TrimSpace(lbl.Items[obs.Index].Label))
 			// Strip surrounding quotes from labels
-			obsLabels[i] = strings.Trim(obsLabels[i], "\"'")
+			label = strings.Trim(label, "\"'")
+			// Apply normalization mapping in-memory (labels stay pristine on disk)
+			if canonical, ok := themeMapping[label]; ok {
+				label = strings.ToLower(strings.TrimSpace(canonical))
+			}
+			obsLabels[i] = label
 		}
 	}
 
