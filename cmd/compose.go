@@ -43,27 +43,30 @@ Two composition methods are available:
   reduces all observations into a single muse.md. Simpler, sufficient for
   smaller observation sets.
 
-Optionally pass one or more source names to limit discovery and observation to
-those sources. Run "muse sources" to see what's available. Network sources like
-github and slack are opt-in — they only run when explicitly named. Pass "all" to
-include every source.
+Sources are remembered automatically. On first run, default (local) sources are
+activated. Use "muse add" and "muse remove" to manage sources. Run "muse sources"
+to see what's active.
 
 Use --learn to recompose the muse from existing observations without
 reprocessing conversations. Use --reobserve to reprocess conversations from scratch.`,
 		Example: `  muse compose                          # default: clustering
   muse compose --method=map-reduce      # simpler pipeline
-  muse compose codex                    # only Codex conversations
-  muse compose github                   # GitHub PRs and issues (opt-in, requires gh auth)
-  muse compose slack                    # Slack (opt-in, set MUSE_SLACK_TOKEN)
-  muse compose all                      # all sources including opt-in
   muse compose kiro --reobserve         # re-observe kiro from scratch
   muse compose --learn                  # recompose from existing observations
   muse compose --limit 50              # process at most 50 conversations`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			sources := args
 
 			store, err := newStore(ctx)
+			if err != nil {
+				return err
+			}
+
+			// Resolve which sources to process. When no args are given,
+			// the observation directory is the config: sources with existing
+			// observation directories are included. On first run (no
+			// observation dirs), defaults are bootstrapped.
+			sources, err := compose.ResolveSources(ctx, store, args)
 			if err != nil {
 				return err
 			}

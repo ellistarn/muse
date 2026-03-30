@@ -58,6 +58,8 @@ Run "muse listen --help" for MCP server configuration.`,
 	cmd.AddCommand(newSyncCmd())
 	cmd.AddCommand(newSourcesCmd())
 	cmd.AddCommand(newEvalCmd())
+	cmd.AddCommand(newAddCmd())
+	cmd.AddCommand(newRemoveCmd())
 	return cmd
 }
 

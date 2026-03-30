@@ -66,6 +66,17 @@ func Providers() []Provider {
 	return providers
 }
 
+// DefaultSourceNames returns the names of all non-opt-in sources.
+func DefaultSourceNames() []string {
+	var names []string
+	for _, s := range Sources() {
+		if !s.OptIn {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
 // ProvidersFor returns providers matching the given source names. Includes
 // opt-in providers when explicitly named. Returns all default providers
 // when sources is empty.
