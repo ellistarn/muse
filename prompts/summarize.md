@@ -7,3 +7,5 @@ Observations carry dates. Note the temporal range — a pattern appearing across
 Distill to the most accurate claim, not the punchiest one. Prefer precision over assertiveness — a nuanced position with a real tension acknowledged is more valuable than a confident-sounding slogan. If the cluster contains multiple genuinely distinct claims, keep each as a separate sentence.
 
 Cut anything a knowledgeable person in this domain would already know or agree with — unless this person's specific stance on it is unusual.
+
+Distinguish two kinds of signal in the observations: **generative principles** (how the person reasons — the underlying logic that produces decisions) and **terminal rules** (specific decisions the principle has already made — standing operational rules like "reject X on principle," "Y by default, Z requires justification," concrete code conventions). Principles should be distilled to their most compressed form. Terminal rules should survive at their operational resolution — they are not examples of the principle, they are the output of having applied it, and abstracting them back into the principle destroys their value as actionable guidance.
