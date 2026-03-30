@@ -50,6 +50,9 @@ Use -o to write output to a file. Files ending in .pdf are rendered as PDF.`,
 			}
 
 			if output != "" {
+				if err := os.MkdirAll(filepath.Dir(output), 0755); err != nil {
+					return err
+				}
 				if filepath.Ext(output) == ".pdf" {
 					return renderPDF(document, output)
 				}
