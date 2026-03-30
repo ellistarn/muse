@@ -14,21 +14,14 @@ import (
 // The observation directory is the config — its presence means the source is
 // active. The rules are:
 //
-//  1. Explicit sources passed (e.g. "muse compose github")? Use those exactly.
-//  2. No explicit sources, observation directories exist? Use the set of sources
-//     that have observation directories.
-//  3. No explicit sources, no observation directories (first run)? Bootstrap
-//     with all non-opt-in (default) sources.
+//  1. Observation directories exist? Use the set of sources that have them.
+//  2. No observation directories (first run)? Bootstrap with all non-opt-in
+//     (default) sources.
 //
 // On bootstrap, observation directories are created for all default sources so
 // that future runs remember them even if a source had no conversations on the
 // first run.
-func ResolveSources(ctx context.Context, store storage.Store, explicit []string) ([]string, error) {
-	// Explicit sources: use them as-is
-	if len(explicit) > 0 {
-		return explicit, nil
-	}
-
+func ResolveSources(ctx context.Context, store storage.Store) ([]string, error) {
 	// Check which sources have observation directories
 	existing, err := ListObservationSources(ctx, store)
 	if err != nil {

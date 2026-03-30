@@ -305,23 +305,11 @@ func runObserve(
 
 	// Handle reobserve
 	if opts.Reobserve {
-		if len(opts.Sources) > 0 {
-			for _, src := range opts.Sources {
-				DeleteObservationsForSource(ctx, store, src)
-				if opts.Verbose {
-					fmt.Fprintf(os.Stderr, "  Cleared observations for %s\n", src)
-				}
-			}
-		} else {
-			DeleteObservations(ctx, store)
-			fmt.Fprintln(os.Stderr, "  Cleared all observations")
-		}
+		DeleteObservations(ctx, store)
+		fmt.Fprintln(os.Stderr, "  Cleared all observations")
 	}
 
-	// Filter by sources
-	entries = storage.FilterEntriesBySource(entries, opts.Sources)
-
-	// Count per-source conversations
+	// List all conversations
 	sourceCounts := map[string]int{}
 	for _, e := range entries {
 		sourceCounts[e.Source]++

@@ -57,9 +57,6 @@ type BaseOptions struct {
 	Reobserve bool
 	// Limit caps how many conversations to process (0 means no limit).
 	Limit int
-	// Sources filters to conversations from specific sources (e.g. "kiro").
-	// Empty means all sources.
-	Sources []string
 	// Verbose enables per-item progress logging.
 	Verbose bool
 }
@@ -90,23 +87,12 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 		existingSet[sc.Source+"/"+sc.ConversationID] = true
 	}
 
-	// If reprocessing, clear existing observations (scoped to sources if set)
+	// If reprocessing, clear all existing observations
 	if opts.Reobserve {
-		if len(opts.Sources) > 0 {
-			for _, src := range opts.Sources {
-				if err := DeleteObservationsForSource(ctx, store, src); err != nil {
-					return nil, fmt.Errorf("failed to clear observations: %w", err)
-				}
-				if opts.Verbose {
-					fmt.Fprintf(os.Stderr, "Cleared observations/%s/\n", src)
-				}
-			}
-		} else {
-			if err := DeleteObservations(ctx, store); err != nil {
-				return nil, fmt.Errorf("failed to clear observations: %w", err)
-			}
-			fmt.Fprintln(os.Stderr, "Cleared observations/")
+		if err := DeleteObservations(ctx, store); err != nil {
+			return nil, fmt.Errorf("failed to clear observations: %w", err)
 		}
+		fmt.Fprintln(os.Stderr, "Cleared observations/")
 		// Rebuild observations set after deletion
 		existingObs, err = ListObservations(ctx, store)
 		if err != nil {
@@ -117,9 +103,6 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 			existingSet[sc.Source+"/"+sc.ConversationID] = true
 		}
 	}
-
-	// Filter by sources if specified
-	entries = storage.FilterEntriesBySource(entries, opts.Sources)
 
 	// Diff: conversations without corresponding observations are pending
 	var pending []storage.ConversationEntry

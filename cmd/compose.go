@@ -26,7 +26,7 @@ func newComposeCmd() *cobra.Command {
 	var limit int
 	var method string
 	cmd := &cobra.Command{
-		Use:   "compose [source...]",
+		Use:   "compose",
 		Short: "Compose a muse from conversations",
 		Long: `Discovers new conversations, observes them, and composes a muse.md
 that captures how you think. Safe to run repeatedly — only new
@@ -51,7 +51,7 @@ Use --learn to recompose the muse from existing observations without
 reprocessing conversations. Use --reobserve to reprocess conversations from scratch.`,
 		Example: `  muse compose                          # default: clustering
   muse compose --method=map-reduce      # simpler pipeline
-  muse compose kiro --reobserve         # re-observe kiro from scratch
+  muse compose --reobserve              # re-observe all from scratch
   muse compose --learn                  # recompose from existing observations
   muse compose --limit 50              # process at most 50 conversations`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -62,11 +62,9 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				return err
 			}
 
-			// Resolve which sources to process. When no args are given,
-			// the observation directory is the config: sources with existing
-			// observation directories are included. On first run (no
-			// observation dirs), defaults are bootstrapped.
-			sources, err := compose.ResolveSources(ctx, store, args)
+			// Resolve active sources from observation directories.
+			// On first run, defaults are bootstrapped.
+			sources, err := compose.ResolveSources(ctx, store)
 			if err != nil {
 				return err
 			}
@@ -88,9 +86,9 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 
 			switch method {
 			case "clustering":
-				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, sources, reobserve, relabel, limit, uploaded, uploadBytes)
+				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, reobserve, relabel, limit, uploaded, uploadBytes)
 			case "map-reduce":
-				return runMapReduceCompose(ctx, cmd.OutOrStdout(), store, sources, reobserve, learn, limit)
+				return runMapReduceCompose(ctx, cmd.OutOrStdout(), store, reobserve, learn, limit)
 			default:
 				return fmt.Errorf("unknown method %q (use 'clustering' or 'map-reduce')", method)
 			}
@@ -104,7 +102,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 	return cmd
 }
 
-func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, relabel bool, limit, uploaded, uploadBytes int) error {
+func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, reobserve, relabel bool, limit, uploaded, uploadBytes int) error {
 	observeLLM, err := newLLMClient(ctx, TierFast)
 	if err != nil {
 		return err
@@ -123,7 +121,6 @@ func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.St
 			BaseOptions: compose.BaseOptions{
 				Reobserve: reobserve,
 				Limit:     limit,
-				Sources:   sources,
 				Verbose:   verbose,
 			},
 			Relabel:     relabel,
@@ -138,12 +135,11 @@ func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.St
 	return printResult(stdout, result, false)
 }
 
-func runMapReduceCompose(ctx context.Context, stdout io.Writer, store storage.Store, sources []string, reobserve, learn bool, limit int) error {
+func runMapReduceCompose(ctx context.Context, stdout io.Writer, store storage.Store, reobserve, learn bool, limit int) error {
 	opts := compose.Options{
 		BaseOptions: compose.BaseOptions{
 			Reobserve: reobserve,
 			Limit:     limit,
-			Sources:   sources,
 			Verbose:   verbose,
 		},
 		Learn: learn,

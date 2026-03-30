@@ -9,20 +9,6 @@ import (
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-func TestResolveSources_Explicit(t *testing.T) {
-	store := storage.NewLocalStoreWithRoot(t.TempDir())
-	ctx := context.Background()
-
-	// Explicit sources are returned as-is, regardless of what's on disk
-	got, err := ResolveSources(ctx, store, []string{"github", "slack"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0] != "github" || got[1] != "slack" {
-		t.Errorf("expected [github slack], got %v", got)
-	}
-}
-
 func TestResolveSources_SteadyState(t *testing.T) {
 	store := storage.NewLocalStoreWithRoot(t.TempDir())
 	ctx := context.Background()
@@ -36,8 +22,8 @@ func TestResolveSources_SteadyState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// No explicit sources — should return sources that have observation dirs
-	got, err := ResolveSources(ctx, store, nil)
+	// Should return sources that have observation dirs
+	got, err := ResolveSources(ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +38,7 @@ func TestResolveSources_Bootstrap(t *testing.T) {
 	ctx := context.Background()
 
 	// No observation directories at all — bootstrap with defaults
-	got, err := ResolveSources(ctx, store, nil)
+	got, err := ResolveSources(ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +93,7 @@ func TestResolveSources_RemovedSource(t *testing.T) {
 	}
 
 	// Should only return opencode now
-	got, err := ResolveSources(ctx, store, nil)
+	got, err := ResolveSources(ctx, store)
 	if err != nil {
 		t.Fatal(err)
 	}
