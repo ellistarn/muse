@@ -33,8 +33,8 @@ Run "muse sources" to see available sources and their status.`,
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Removed %s\n", source)
-			return nil
+			fmt.Fprintf(cmd.OutOrStdout(), "Removed %s\n\n", source)
+			return printSources(ctx, cmd.OutOrStdout(), store)
 		},
 	}
 }

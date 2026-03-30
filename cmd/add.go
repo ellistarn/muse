@@ -44,9 +44,8 @@ Run "muse sources" to see available sources and their status.`,
 				fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Added %s (%d conversations)\n", source, result.Total)
-			fmt.Fprintln(cmd.OutOrStdout(), "\n  muse compose    # to observe and compose")
-			return nil
+			fmt.Fprintf(cmd.OutOrStdout(), "Added %s (%d conversations)\n\n", source, result.Total)
+			return printSources(ctx, cmd.OutOrStdout(), store)
 		},
 	}
 }

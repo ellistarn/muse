@@ -88,14 +88,6 @@ func ProvidersFor(sources []string) []Provider {
 	for _, s := range sources {
 		wanted[s] = true
 	}
-	// --all: include everything
-	if wanted["all"] {
-		var providers []Provider
-		for _, s := range Sources() {
-			providers = append(providers, s.Provider)
-		}
-		return providers
-	}
 	var providers []Provider
 	for _, s := range Sources() {
 		if wanted[s.Name] {
