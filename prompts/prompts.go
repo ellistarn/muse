@@ -35,11 +35,8 @@ var Theme string
 //go:embed observe-human.md
 var ObserveHuman string
 
-//go:embed judge-observable.md
-var JudgeObservable string
-
-//go:embed judge-epistemic.md
-var JudgeEpistemic string
+//go:embed judge-dimensions.md
+var JudgeDimensions string
 
 //go:embed judge-preference.md
 var JudgePreference string

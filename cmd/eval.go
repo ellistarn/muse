@@ -41,17 +41,15 @@ type evalScores struct {
 
 // evalResult holds the complete evaluation for one question.
 type evalResult struct {
-	Question       evalQuestion
-	BaseResponse   string
-	MuseResponse   string
-	BaseIsA        bool // true if base was randomly assigned to "Response A"
-	BaseObservable evalScores
-	MuseObservable evalScores
-	BaseEpistemic  evalScores
-	MuseEpistemic  evalScores
-	Preferred      string // "base", "muse", "neither"
-	Rationale      string
-	Error          error
+	Question     evalQuestion
+	BaseResponse string
+	MuseResponse string
+	BaseIsA      bool // true if base was randomly assigned to "Response A"
+	BaseScores   evalScores
+	MuseScores   evalScores
+	Preferred    string // "base", "muse", "neither"
+	Rationale    string
+	Error        error
 }
 
 // cachedResponse is the on-disk format for a cached eval response.
@@ -65,15 +63,14 @@ func newEvalCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "eval",
-		Short: "Evaluate how the muse changes response quality across dimensions",
+		Short: "Evaluate how the muse changes response quality",
 		Long: `Runs each question twice — once with the muse, once without — then blind
-judges score both responses independently on six dimensions plus an overall
-preference. The output is a profile showing where the muse adds value and
-where it doesn't.
+judges score both responses on three dimensions plus an overall preference.
 
 Dimensions (scored 1-5, where 3 = strong base model):
-  What it does:    positional clarity, completeness, specificity
-  How it reasons:  calibration, reasoning transparency, intellectual honesty
+  Reasoning:   distinctive mental models and reasoning moves
+  Voice:       structural commitment, compression, reframing
+  Awareness:   actionable self-awareness, calibrated confidence
 
 A separate preference judge picks which response demonstrates better overall
 judgment, capturing signal the dimension scores may miss.
@@ -231,18 +228,14 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 	blindedInput := fmt.Sprintf("## Question\n%s\n\n## Response A\n%s\n\n## Response B\n%s",
 		strings.TrimSpace(q.Prompt), respA, respB)
 
-	// Run all three judge calls in parallel (never cached — cheap, benefits from prompt iteration)
-	var obsResp, epiResp, prefResp string
-	var obsErr, epiErr, prefErr error
+	// Run both judge calls in parallel (never cached — cheap, benefits from prompt iteration)
+	var dimResp, prefResp string
+	var dimErr, prefErr error
 	var judgeWg sync.WaitGroup
-	judgeWg.Add(3)
+	judgeWg.Add(2)
 	go func() {
 		defer judgeWg.Done()
-		obsResp, _, obsErr = inference.Converse(ctx, llm, prompts.JudgeObservable, blindedInput)
-	}()
-	go func() {
-		defer judgeWg.Done()
-		epiResp, _, epiErr = inference.Converse(ctx, llm, prompts.JudgeEpistemic, blindedInput)
+		dimResp, _, dimErr = inference.Converse(ctx, llm, prompts.JudgeDimensions, blindedInput)
 	}()
 	go func() {
 		defer judgeWg.Done()
@@ -250,14 +243,9 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 	}()
 	judgeWg.Wait()
 
-	if obsErr != nil {
-		result.Error = obsErr
-		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, obsErr)
-		return result
-	}
-	if epiErr != nil {
-		result.Error = epiErr
-		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, epiErr)
+	if dimErr != nil {
+		result.Error = dimErr
+		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, dimErr)
 		return result
 	}
 	if prefErr != nil {
@@ -267,21 +255,16 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 	}
 
 	// Parse scores
-	aObs, bObs := parseJudgeScores(obsResp)
-	aEpi, bEpi := parseJudgeScores(epiResp)
+	aScores, bScores := parseJudgeScores(dimResp)
 	preferred, rationale := parsePreference(prefResp)
 
 	// De-blind
 	if result.BaseIsA {
-		result.BaseObservable = aObs
-		result.MuseObservable = bObs
-		result.BaseEpistemic = aEpi
-		result.MuseEpistemic = bEpi
+		result.BaseScores = aScores
+		result.MuseScores = bScores
 	} else {
-		result.BaseObservable = bObs
-		result.MuseObservable = aObs
-		result.BaseEpistemic = bEpi
-		result.MuseEpistemic = aEpi
+		result.BaseScores = bScores
+		result.MuseScores = aScores
 	}
 
 	// De-blind preference
@@ -369,19 +352,12 @@ func parsePreference(raw string) (preferred, rationale string) {
 
 // --- Output ---
 
-var (
-	observableDims = []string{"positional_clarity", "completeness", "specificity"}
-	epistemicDims  = []string{"calibration", "reasoning", "honesty"}
-	allDims        = append(append([]string{}, observableDims...), epistemicDims...)
-)
+var allDims = []string{"reasoning", "voice", "awareness"}
 
 var dimLabels = map[string]string{
-	"positional_clarity": "Positional clarity",
-	"completeness":       "Completeness",
-	"specificity":        "Specificity",
-	"calibration":        "Calibration",
-	"reasoning":          "Reasoning",
-	"honesty":            "Intellectual honesty",
+	"reasoning": "Reasoning",
+	"voice":     "Voice",
+	"awareness": "Awareness",
 }
 
 func printEvalProfile(results []evalResult) {
@@ -396,9 +372,7 @@ func printEvalProfile(results []evalResult) {
 		return
 	}
 
-	printDimensionTable("What it does", observableDims, valid)
-	fmt.Fprintln(os.Stderr)
-	printDimensionTable("How it reasons", epistemicDims, valid)
+	printDimensionTable(valid)
 	fmt.Fprintln(os.Stderr)
 	printTransferability(valid)
 	fmt.Fprintln(os.Stderr)
@@ -418,15 +392,15 @@ func printEvalProfile(results []evalResult) {
 		museN, len(valid), baseN, len(valid), neitherN, len(valid))
 }
 
-func printDimensionTable(title string, dims []string, results []evalResult) {
-	fmt.Fprintf(os.Stderr, "%-24s  Base  Muse  Delta\n", title)
+func printDimensionTable(results []evalResult) {
+	fmt.Fprintf(os.Stderr, "%-24s  Base  Muse  Delta\n", "")
 	fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 50))
 
-	for _, dim := range dims {
+	for _, dim := range allDims {
 		var baseSum, museSum, count int
 		for _, r := range results {
-			bs, bOk := dimScore(r.BaseObservable, r.BaseEpistemic, dim)
-			ms, mOk := dimScore(r.MuseObservable, r.MuseEpistemic, dim)
+			bs, bOk := r.BaseScores.Values[dim]
+			ms, mOk := r.MuseScores.Values[dim]
 			if bOk && mOk {
 				baseSum += bs
 				museSum += ms
@@ -474,8 +448,8 @@ func printTransferability(results []evalResult) {
 		var deltaSum float64
 		var dimCount int
 		for _, dim := range allDims {
-			bs, bOk := dimScore(r.BaseObservable, r.BaseEpistemic, dim)
-			ms, mOk := dimScore(r.MuseObservable, r.MuseEpistemic, dim)
+			bs, bOk := r.BaseScores.Values[dim]
+			ms, mOk := r.MuseScores.Values[dim]
 			if bOk && mOk {
 				deltaSum += float64(ms - bs)
 				dimCount++
@@ -525,22 +499,10 @@ func printEvalDetail(results []evalResult) {
 		fmt.Fprintf(os.Stderr, "MUSE:\n%s\n", r.MuseResponse)
 		fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 40))
 
-		fmt.Fprintf(os.Stderr, "What it does:    ")
-		for _, dim := range observableDims {
-			bs, _ := dimScore(r.BaseObservable, r.BaseEpistemic, dim)
-			ms, _ := dimScore(r.MuseObservable, r.MuseEpistemic, dim)
-			label := dimLabels[dim]
-			if label == "" {
-				label = dim
-			}
-			fmt.Fprintf(os.Stderr, "%s: %d→%d  ", label, bs, ms)
-		}
-		fmt.Fprintln(os.Stderr)
-
-		fmt.Fprintf(os.Stderr, "How it reasons:  ")
-		for _, dim := range epistemicDims {
-			bs, _ := dimScore(r.BaseObservable, r.BaseEpistemic, dim)
-			ms, _ := dimScore(r.MuseObservable, r.MuseEpistemic, dim)
+		fmt.Fprintf(os.Stderr, "Scores:  ")
+		for _, dim := range allDims {
+			bs := r.BaseScores.Values[dim]
+			ms := r.MuseScores.Values[dim]
 			label := dimLabels[dim]
 			if label == "" {
 				label = dim
@@ -558,21 +520,6 @@ func printEvalDetail(results []evalResult) {
 }
 
 // --- Helpers ---
-
-// dimScore looks up a dimension score across observable and epistemic scores.
-func dimScore(obs, epi evalScores, dim string) (int, bool) {
-	if obs.Values != nil {
-		if v, ok := obs.Values[dim]; ok {
-			return v, true
-		}
-	}
-	if epi.Values != nil {
-		if v, ok := epi.Values[dim]; ok {
-			return v, true
-		}
-	}
-	return 0, false
-}
 
 // transferGroup maps a question category to a transferability group.
 func transferGroup(category string) string {
