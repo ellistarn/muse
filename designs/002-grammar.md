@@ -30,7 +30,7 @@ Extracts observations from text. The source type tells the prompt where to find 
 | Shared doc | Your annotations and feedback |
 
 The output is always `[Observation]`. Source affects the extraction prompt, not the output type.
-See sources.md for the source contract — how sources find, fetch, and normalize conversation data.
+See 003-sources.md for the source contract — how sources find, fetch, and normalize conversation data.
 
 Observations include relational knowledge — "my boss insists on test coverage," "the team resists
 ORMs" — because the owner's thinking includes their model of the people and constraints around them.

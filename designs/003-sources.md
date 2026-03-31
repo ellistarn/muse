@@ -1,7 +1,7 @@
 # Sources
 
 A source normalizes platform-specific conversation data into muse's `Conversation` type (see
-grammar.md). The source owns everything about how to find, fetch, and parse its data. Muse owns
+002-grammar.md). The source owns everything about how to find, fetch, and parse its data. Muse owns
 everything after normalization — it does not know or care whether a conversation came from a local
 JSONL file, a SQLite database, or a paginated API.
 
@@ -22,7 +22,7 @@ review comments, issue comments, and review bodies are three separate API surfac
 merged chronologically to reconstruct what actually happened.
 
 Sources that make novel decisions beyond this design document them in their own designs
-(github-source.md, slack-source.md). A source where one session maps to one conversation — like any
+(007-github-source.md, 008-slack-source.md). A source where one session maps to one conversation — like any
 local AI coding tool — doesn't need its own design.
 
 ## Role mapping
