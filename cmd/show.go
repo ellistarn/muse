@@ -72,6 +72,7 @@ func renderPDF(markdown, path string) error {
 	renderer := mdtopdf.NewPdfRenderer(mdtopdf.PdfRendererParams{
 		PdfFile: path,
 		Theme:   mdtopdf.LIGHT,
+		Opts:    []mdtopdf.RenderOption{mdtopdf.WithUnicodeTranslator("")},
 	})
 	return renderer.Process([]byte(markdown))
 }
