@@ -146,7 +146,7 @@ func Upload(ctx context.Context, store storage.Store, progress SyncProgressFunc,
 	}
 	providers := conversation.ProvidersFor(sources)
 	// Sort providers so API sources (slower, network-bound) start first.
-	apiSources := map[string]bool{"GitHub": true, "Slack": true}
+	apiSources := map[string]bool{"GitHub Issues": true, "GitHub PRs": true, "Slack": true}
 	sort.SliceStable(providers, func(i, j int) bool {
 		iAPI := apiSources[providers[i].Name()]
 		jAPI := apiSources[providers[j].Name()]

@@ -17,8 +17,9 @@ will be excluded from future "muse compose" runs. Cached conversations are
 kept so re-adding the source doesn't require re-downloading.
 
 Run "muse sources" to see available sources and their status.`,
-		Example: `  muse remove github    # stop including GitHub in compose
-  muse remove slack     # stop including Slack in compose`,
+		Example: `  muse remove github-prs     # stop including GitHub PRs in compose
+  muse remove github-issues   # stop including GitHub issues in compose
+  muse remove slack            # stop including Slack in compose`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()

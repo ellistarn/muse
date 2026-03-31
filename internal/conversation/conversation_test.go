@@ -52,14 +52,14 @@ func TestProviders_ReturnsAllDefaults(t *testing.T) {
 
 func TestSources_ReturnsAll(t *testing.T) {
 	sources := Sources()
-	if len(sources) != 7 {
-		t.Fatalf("expected 7 sources, got %d", len(sources))
+	if len(sources) != 8 {
+		t.Fatalf("expected 8 sources, got %d", len(sources))
 	}
 	names := map[string]bool{}
 	for _, s := range sources {
 		names[s.Name] = true
 	}
-	for _, want := range []string{"opencode", "claude-code", "codex", "kiro", "kiro-cli", "github", "slack"} {
+	for _, want := range []string{"opencode", "claude-code", "codex", "kiro", "kiro-cli", "github-issues", "github-prs", "slack"} {
 		if !names[want] {
 			t.Errorf("missing source %q", want)
 		}

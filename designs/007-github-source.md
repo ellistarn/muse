@@ -4,13 +4,20 @@ Captures the owner's engagement on GitHub PRs and issues — code review, design
 triage — as conversations for the observation pipeline. The signal is the owner's words, reactions,
 and corrections. Code, bot chatter, and auto-generated descriptions are context or noise.
 
-GitHub is opt-in: `muse compose github`. It requires network access and an initial sync of thousands
-of API calls, so it does not run on bare `muse compose`.
+GitHub is split into two independent sources: `github-issues` and `github-prs`. Each is opt-in
+(`muse add github-issues`, `muse add github-prs`). They require network access and an initial sync
+of thousands of API calls, so they do not run on bare `muse compose`.
+
+The split exists because PRs and issues carry fundamentally different signal. Issues contain design
+thinking, problem framing, and bug triage. PRs contain implementation detail that can overfit the
+muse toward code-level patterns rather than judgment. Independent add/remove lifecycle lets the owner
+control which class of content shapes their muse.
 
 ## Conversation contract
 
-Each GitHub thread (PR or issue) produces one `Conversation` with source `"github"`. The conversation
-ID is `{owner}/{repo}/{pull|issues}/{number}`. Project is `{owner}/{repo}`.
+Each GitHub thread produces one `Conversation`. Issues have source `"github-issues"`, PRs have source
+`"github-prs"`. The conversation ID is `{owner}/{repo}/{pull|issues}/{number}`. Project is
+`{owner}/{repo}`.
 
 A thread must contain 2+ authentic owner messages to produce a conversation. This aligns with
 `extractTurns`, which requires 2+ user turns to produce a turn pair. A thread where the owner was
@@ -51,9 +58,11 @@ re-fetching is bounded by rate limits.
 
 ## Sync
 
-Coverage spans all repos accessible to the token, historical and incremental. PRs and issues are a
-single source — they share authentication, API client, and filtering logic. The only difference is
-whether review comments are fetched.
+Coverage spans all repos accessible to the token, historical and incremental. Each source syncs only
+its kind (`type:pr` or `type:issue` in GitHub search queries). Both sources share authentication, the
+HTTP ETag cache, and the rate-limited transport (a single set of AIMD limiters) because they hit the
+same GitHub API with the same token. Sync state is per-kind so each source tracks its own incremental
+timestamp independently.
 
 Recent threads are synced first so partial runs prioritize current content. An interrupted sync after
 processing 2026–2023 has the most valuable threads cached; the next run skips them and continues
@@ -68,6 +77,22 @@ plus full comment payloads from each API endpoint, including untruncated diff hu
 Assembly changes (formatting, filtering, role mapping) rebuild from cache without re-fetching.
 
 ## Decisions
+
+### Why two sources instead of one with a filter?
+
+The user's removal unit is the source type — "I want issues but not PRs." The add/remove lifecycle
+*is* the filtering mechanism. A filter within a single source would be premature configurability:
+there's no evidence anyone needs "issues with label X but not label Y." There is evidence someone
+needs "issues yes, PRs no." Two sources with independent lifecycle matches the demonstrated need.
+
+The two sources are peers, not a decomposition of a parent. If someone adds both, that's intentional.
+The old `github` source is gone from the registry — not kept as sugar for "both."
+
+### Why share the transport between sources?
+
+Both sources hit the same GitHub API with the same token, sharing a single rate limit. Independent
+AIMD controllers would each independently probe toward the ceiling and collectively overshoot. A
+shared transport with shared rate limiters is simpler and correct — one budget, one controller.
 
 ### Why annotate PR descriptions instead of dropping them?
 

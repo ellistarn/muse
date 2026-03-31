@@ -47,9 +47,10 @@ Local sources are activated automatically on first run: **Claude Code**, **OpenC
 Network sources require explicit opt-in:
 
 ```bash
-muse add github                     # GitHub PRs and issues (requires gh auth)
+muse add github-issues              # GitHub issues (requires gh auth)
+muse add github-prs                 # GitHub PRs (requires gh auth)
 muse add slack                      # Slack (set MUSE_SLACK_TOKEN and MUSE_SLACK_WORKSPACE)
-muse remove github                  # stop including a source
+muse remove github-prs              # stop including a source
 muse sources                        # see what's active
 ```
 
