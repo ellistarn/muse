@@ -5,13 +5,16 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -19,6 +22,7 @@ import (
 	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/muse"
+	"github.com/ellistarn/muse/internal/output"
 	"github.com/ellistarn/muse/internal/storage"
 	"github.com/ellistarn/muse/prompts"
 )
@@ -129,26 +133,32 @@ generated from the muse.md to measure transferability.`,
 
 			fmt.Fprintf(os.Stderr, "eval  %d cases  %s\n\n", len(questions), model)
 
-			// Run all cases with bounded concurrency.
+			// Run all cases in parallel — the LLM client's rate limiter
+			// handles saturation, so no artificial concurrency bound.
 			results := make([]evalResult, len(questions))
+			var completed atomic.Int32
+			progress := output.StartProgress(len(questions), &completed)
+
 			g, ctx := errgroup.WithContext(ctx)
-			g.SetLimit(10)
 			for i, q := range questions {
 				g.Go(func() error {
 					results[i] = runEvalCase(ctx, q, llm, withMuse, withoutMuse, store, museHash)
+					completed.Add(1)
 					return nil
 				})
 			}
 			g.Wait()
+			progress.Stop()
 
-			// Print profile
-			fmt.Fprintln(os.Stderr)
-			printEvalProfile(results)
+			// Print results: summary table → profile → (verbose: detail)
+			stdout := cmd.OutOrStdout()
+			printSummaryTable(stdout, results)
+			fmt.Fprintln(stdout)
+			printEvalProfile(stdout, results)
 
-			// Verbose: per-case detail
 			if verbose {
-				fmt.Fprintln(os.Stderr)
-				printEvalDetail(results)
+				fmt.Fprintln(stdout)
+				printEvalDetail(stdout, results)
 			}
 			return nil
 		},
@@ -204,12 +214,10 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 
 	if baseErr != nil {
 		result.Error = baseErr
-		fmt.Fprintf(os.Stderr, "  ! %-28s error: %v\n", q.ID, baseErr)
 		return result
 	}
 	if museErr != nil {
 		result.Error = museErr
-		fmt.Fprintf(os.Stderr, "  ! %-28s error: %v\n", q.ID, museErr)
 		return result
 	}
 
@@ -245,12 +253,10 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 
 	if dimErr != nil {
 		result.Error = dimErr
-		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, dimErr)
 		return result
 	}
 	if prefErr != nil {
 		result.Error = prefErr
-		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, prefErr)
 		return result
 	}
 
@@ -285,16 +291,6 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 		result.Preferred = "neither"
 	}
 	result.Rationale = rationale
-
-	// Progress
-	icon := "~"
-	switch result.Preferred {
-	case "muse":
-		icon = "✓"
-	case "base":
-		icon = "✗"
-	}
-	fmt.Fprintf(os.Stderr, "  %s %-28s %s\n", icon, q.ID, truncate(rationale, 60))
 
 	return result
 }
@@ -360,7 +356,37 @@ var dimLabels = map[string]string{
 	"awareness": "Awareness",
 }
 
-func printEvalProfile(results []evalResult) {
+// printSummaryTable prints the per-case verdict table, grouped by outcome:
+// muse-preferred first, then neither, then base-preferred, then errors.
+func printSummaryTable(w io.Writer, results []evalResult) {
+	type row struct {
+		icon string
+		id   string
+		text string
+		rank int // sort key: 0=muse, 1=neither, 2=base, 3=error
+	}
+	var rows []row
+	for _, r := range results {
+		if r.Error != nil {
+			rows = append(rows, row{"!", r.Question.ID, r.Error.Error(), 3})
+			continue
+		}
+		icon, rank := "~", 1
+		switch r.Preferred {
+		case "muse":
+			icon, rank = "✓", 0
+		case "base":
+			icon, rank = "✗", 2
+		}
+		rows = append(rows, row{icon, r.Question.ID, truncate(r.Rationale, 60), rank})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].rank < rows[j].rank })
+	for _, r := range rows {
+		fmt.Fprintf(w, "  %s %-28s %s\n", r.icon, r.id, r.text)
+	}
+}
+
+func printEvalProfile(w io.Writer, results []evalResult) {
 	var valid []evalResult
 	for _, r := range results {
 		if r.Error == nil {
@@ -368,14 +394,14 @@ func printEvalProfile(results []evalResult) {
 		}
 	}
 	if len(valid) == 0 {
-		fmt.Fprintln(os.Stderr, "No valid results.")
+		fmt.Fprintln(w, "No valid results.")
 		return
 	}
 
-	printDimensionTable(valid)
-	fmt.Fprintln(os.Stderr)
-	printTransferability(valid)
-	fmt.Fprintln(os.Stderr)
+	printDimensionTable(w, valid)
+	fmt.Fprintln(w)
+	printTransferability(w, valid)
+	fmt.Fprintln(w)
 
 	var museN, baseN, neitherN int
 	for _, r := range valid {
@@ -388,13 +414,13 @@ func printEvalProfile(results []evalResult) {
 			neitherN++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Preferred: Muse %d/%d, Base %d/%d, Neither %d/%d\n",
+	fmt.Fprintf(w, "Preferred: Muse %d/%d · Base %d/%d · Neither %d/%d\n",
 		museN, len(valid), baseN, len(valid), neitherN, len(valid))
 }
 
-func printDimensionTable(results []evalResult) {
-	fmt.Fprintf(os.Stderr, "%-24s  Base  Muse  Delta\n", "")
-	fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 50))
+func printDimensionTable(w io.Writer, results []evalResult) {
+	fmt.Fprintf(w, "  %-22s  %4s  %4s  %5s\n", "", "Base", "Muse", "Delta")
+	fmt.Fprintf(w, "  %s\n", strings.Repeat("─", 42))
 
 	for _, dim := range allDims {
 		var baseSum, museSum, count int
@@ -421,12 +447,12 @@ func printDimensionTable(results []evalResult) {
 		if label == "" {
 			label = dim
 		}
-		fmt.Fprintf(os.Stderr, "  %-22s  %4.1f  %4.1f  %s%.1f\n",
+		fmt.Fprintf(w, "  %-22s  %4.1f  %4.1f  %s%.1f\n",
 			label, baseAvg, museAvg, sign, delta)
 	}
 }
 
-func printTransferability(results []evalResult) {
+func printTransferability(w io.Writer, results []evalResult) {
 	type group struct {
 		count int
 		delta float64
@@ -461,8 +487,8 @@ func printTransferability(results []evalResult) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "%-24s  Cases  Avg Δ\n", "Transferability")
-	fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 42))
+	fmt.Fprintf(w, "  %-22s  %5s  %5s\n", "Transferability", "Cases", "Avg Δ")
+	fmt.Fprintf(w, "  %s\n", strings.Repeat("─", 38))
 	for _, name := range displayOrder {
 		g := groups[name]
 		if g.count == 0 {
@@ -477,29 +503,23 @@ func printTransferability(results []evalResult) {
 		if label == "" {
 			label = name
 		}
-		fmt.Fprintf(os.Stderr, "  %-22s  %5d  %s%.1f\n", label, g.count, sign, avg)
+		fmt.Fprintf(w, "  %-22s  %5d  %s%.1f\n", label, g.count, sign, avg)
 	}
 }
 
-func printEvalDetail(results []evalResult) {
+func printEvalDetail(w io.Writer, results []evalResult) {
 	for _, r := range results {
 		if r.Error != nil {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 80))
-		fmt.Fprintf(os.Stderr, "Q [%s] (%s): %s\n", r.Question.ID, r.Question.Category,
-			strings.TrimSpace(r.Question.Prompt))
-		if len(r.Question.Tags) > 0 {
-			fmt.Fprintf(os.Stderr, "Tags: %s\n", strings.Join(r.Question.Tags, ", "))
-		}
-		fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 80))
+		fmt.Fprintf(w, "── %s (%s) %s\n\n", r.Question.ID, r.Question.Category,
+			strings.Repeat("─", max(0, 72-len(r.Question.ID)-len(r.Question.Category))))
+		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(r.Question.Prompt))
 
-		fmt.Fprintf(os.Stderr, "BASE:\n%s\n", r.BaseResponse)
-		fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 40))
-		fmt.Fprintf(os.Stderr, "MUSE:\n%s\n", r.MuseResponse)
-		fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 40))
+		fmt.Fprintf(w, "Base:\n%s\n\n", r.BaseResponse)
+		fmt.Fprintf(w, "Muse:\n%s\n\n", r.MuseResponse)
 
-		fmt.Fprintf(os.Stderr, "Scores:  ")
+		fmt.Fprintf(w, "Scores:  ")
 		for _, dim := range allDims {
 			bs := r.BaseScores.Values[dim]
 			ms := r.MuseScores.Values[dim]
@@ -507,15 +527,15 @@ func printEvalDetail(results []evalResult) {
 			if label == "" {
 				label = dim
 			}
-			fmt.Fprintf(os.Stderr, "%s: %d→%d  ", label, bs, ms)
+			fmt.Fprintf(w, "%s: %d→%d  ", label, bs, ms)
 		}
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(w)
 
-		fmt.Fprintf(os.Stderr, "Preferred: %s\n", r.Preferred)
+		fmt.Fprintf(w, "Preferred: %s", r.Preferred)
 		if r.Rationale != "" {
-			fmt.Fprintf(os.Stderr, "Rationale: %s\n", r.Rationale)
+			fmt.Fprintf(w, " — %s", r.Rationale)
 		}
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintf(w, "\n\n")
 	}
 }
 
