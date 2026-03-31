@@ -1,7 +1,8 @@
 # Eval
 
-The eval measures whether a muse produces better judgment. It scores responses on six dimensions,
-blindly, and outputs a profile — not a verdict.
+The eval measures whether a muse produces better judgment. It scores responses on three dimensions
+that correspond to what a muse actually adds — reasoning, voice, and awareness — blindly, and
+outputs a profile.
 
 ## Blindness
 
@@ -11,40 +12,42 @@ judge can't learn a positional pattern.
 
 ## Dimensions
 
-Split into two judge calls to prevent gestalt anchoring — a single judge forming one impression of
-quality and varying all scores around it. The split is between what's directly observable in the text
-and what requires interpretive judgment about reasoning quality.
+A single judge call scores both responses on three dimensions. These are orthogonal — a response can
+nail reasoning but sound like a helpful assistant (reasoning without voice), or have perfect voice
+but hedge where it should commit (voice without awareness). The old six-dimension split used
+correlated quality metrics that moved in lockstep; the new three correspond to what a muse claims to
+add.
 
-### What it does (observable)
+### Reasoning
 
-1. **Positional clarity**: Can you identify what the response recommends? Not "commits more" — the
-   position is legible regardless of how firmly it's held.
-2. **Completeness**: Addresses what matters and engages with the specific question asked. A thorough
-   answer to the wrong question scores low. A response that redirects to a different framing only
-   scores high if the reframe earns its weight.
-3. **Specificity of mechanism**: Gives you something actionable. "Consider the risks" scores low.
-   "The dangerous case is X because Y" scores high. The difference is whether you could start acting
-   on the response.
+Does the response make specific reasoning moves that reflect particular judgment? The rubric names
+the muse's actual moves: tracing symptoms to structural causes, transplanting analogs from other
+domains, refusing false spectrums via categorical distinctions, checking whether a constraint should
+be accepted before working within it. The judge pattern-matches against a known set rather than
+making a subjective "is this distinctive" call.
 
-### How it reasons (epistemic)
+### Voice
 
-4. **Calibration**: Confidence tracks epistemic state. Firm where warranted, uncertain where
-   warranted, and you can tell the difference. A response that commits hard everywhere is poorly
-   calibrated. So is one that hedges everything.
-5. **Reasoning transparency**: Visible mental models that transfer to novel situations. Not
-   assertion-from-authority, not "trust me." The test: could you apply the reasoning to a different
-   problem?
-6. **Intellectual honesty**: Names costs, acknowledges what it's trading away, surfaces what it
-   doesn't know. Distinguishes genuine engagement with tradeoffs from performative hedging.
+Does the response make structural commitments a generic helpful assistant wouldn't? Not stylistic
+markers (short sentences, dry humor) but structural properties: collapsing ambiguity into a position,
+reframing questions when the framing is wrong, compressing rather than enumerating. The test: does
+the response come from a perspective, not a process?
+
+### Awareness
+
+Does the response demonstrate actionable self-awareness? Not declaring uncertainty but adjusting
+behavior based on it. Does it name a bias and adjust for it? Distinguish confidence levels and act
+differently at different levels? Surface what it's trading away and engage with the cost? The rubric
+scores on demonstrated adjustment, not performative metacognition.
 
 ## Preference
 
-A third, independent judge call sees both responses and produces only a pairwise preference plus a
+A second, independent judge call sees both responses and produces only a pairwise preference plus a
 one-sentence rationale. No dimension scores — just "which response demonstrates better judgment?"
 
 The gap between dimension scores and preference is itself a measurement. If preference diverges from
-what the dimensions predict, the muse is adding something the six named axes don't capture (likely
-disposition, voice, or commitment style). If they converge, the dimensions are sufficient.
+what the dimensions predict, the muse is adding something the three named axes don't capture. If they
+converge, the dimensions are sufficient.
 
 ## Questions
 
@@ -63,17 +66,15 @@ resolves conflicts coherently or samples from a bag of heuristics.
 An LLM reads the muse.md, identifies the owner's domain, and generates questions at three distance
 levels (in-domain, adjacent-domain, out-of-domain). These measure **transferability**: is the muse
 delta on domain questions different from universal questions? If they're the same, the muse
-transfers. If domain is higher, it captured conclusions. If universal is higher, the measurement
-needs investigation.
+transfers. If domain is higher, it captured conclusions rather than reasoning.
 
 ## Scoring
 
-Each response is scored independently on all six dimensions on a 5-point scale (1-5). Every point is
-anchored with a concrete description. A score of 3 represents a competent response from a strong
-general-purpose model — well-structured, clear, and correct. Scores of 4-5 are reserved for
-responses that demonstrate judgment, specificity, or insight beyond general competence. This
-calibration puts the discrimination range where the actual signal lives: between a strong base model
-and a muse-augmented one.
+Each response is scored independently on all three dimensions on a 5-point scale (1-5). Every point
+is anchored with a concrete description. A score of 3 represents a competent response from a strong
+general-purpose model. Scores of 4-5 are reserved for responses that demonstrate particular judgment,
+distinctive commitment, or genuine self-awareness beyond general competence. This calibration puts the
+discrimination range where the actual signal lives.
 
 ## Output
 
