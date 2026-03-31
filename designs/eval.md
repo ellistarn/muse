@@ -15,7 +15,7 @@ Split into two judge calls to prevent gestalt anchoring — a single judge formi
 quality and varying all scores around it. The split is between what's directly observable in the text
 and what requires interpretive judgment about reasoning quality.
 
-### Observable (what the response does)
+### What it does (observable)
 
 1. **Positional clarity**: Can you identify what the response recommends? Not "commits more" — the
    position is legible regardless of how firmly it's held.
@@ -26,7 +26,7 @@ and what requires interpretive judgment about reasoning quality.
    "The dangerous case is X because Y" scores high. The difference is whether you could start acting
    on the response.
 
-### Epistemic (how well it reasons)
+### How it reasons (epistemic)
 
 4. **Calibration**: Confidence tracks epistemic state. Firm where warranted, uncertain where
    warranted, and you can tell the difference. A response that commits hard everywhere is poorly
@@ -35,7 +35,16 @@ and what requires interpretive judgment about reasoning quality.
    assertion-from-authority, not "trust me." The test: could you apply the reasoning to a different
    problem?
 6. **Intellectual honesty**: Names costs, acknowledges what it's trading away, surfaces what it
-   doesn't know. Presents its recommendation as a tradeoff it's making, not a free lunch.
+   doesn't know. Distinguishes genuine engagement with tradeoffs from performative hedging.
+
+## Preference
+
+A third, independent judge call sees both responses and produces only a pairwise preference plus a
+one-sentence rationale. No dimension scores — just "which response demonstrates better judgment?"
+
+The gap between dimension scores and preference is itself a measurement. If preference diverges from
+what the dimensions predict, the muse is adding something the six named axes don't capture (likely
+disposition, voice, or commitment style). If they converge, the dimensions are sufficient.
 
 ## Questions
 
@@ -51,30 +60,25 @@ resolves conflicts coherently or samples from a bag of heuristics.
 
 ### Domain (~10 generated)
 
-An LLM reads the muse.md, identifies the owner's domain, and generates:
-
-- 4 in-domain questions (the muse owner's territory)
-- 3 adjacent-domain questions (structurally similar fields)
-- 3 out-of-domain questions (unrelated fields)
-
-These measure **transferability**: does the muse improvement hold up as questions move away from the
-owner's domain? A flat curve means the muse captured reasoning. A steep dropoff means it captured
-conclusions.
+An LLM reads the muse.md, identifies the owner's domain, and generates questions at three distance
+levels (in-domain, adjacent-domain, out-of-domain). These measure **transferability**: is the muse
+delta on domain questions different from universal questions? If they're the same, the muse
+transfers. If domain is higher, it captured conclusions. If universal is higher, the measurement
+needs investigation.
 
 ## Scoring
 
-Each response is scored independently on all six dimensions on a 3-point scale (1-3). Every point is
-anchored with a concrete description — no interpolation between defined levels. A 3-point scale
-produces more reliable signal than a 5-point scale with phantom intermediate values, and with 30+
-questions the granularity recovers in aggregate through reduced measurement error.
-
-The epistemic judge also states which response demonstrates better overall judgment and why. This
-pairwise preference captures gestalt signal that individual dimension scores miss.
+Each response is scored independently on all six dimensions on a 5-point scale (1-5). Every point is
+anchored with a concrete description. A score of 3 represents a competent response from a strong
+general-purpose model — well-structured, clear, and correct. Scores of 4-5 are reserved for
+responses that demonstrate judgment, specificity, or insight beyond general competence. This
+calibration puts the discrimination range where the actual signal lives: between a strong base model
+and a muse-augmented one.
 
 ## Output
 
-A profile: per-dimension averages for base and muse responses, deltas, a transferability breakdown by
-question category, and an overall preference count. With verbose mode, full per-case detail.
+A profile: per-dimension averages for base and muse responses, deltas, a transferability comparison
+(domain vs universal), and an overall preference count. With verbose mode, full per-case detail.
 
 ## Caching
 

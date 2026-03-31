@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/inference"
@@ -66,12 +67,16 @@ func newEvalCmd() *cobra.Command {
 		Use:   "eval",
 		Short: "Evaluate how the muse changes response quality across dimensions",
 		Long: `Runs each question twice — once with the muse, once without — then blind
-judges score both responses independently on six dimensions. The output is a
-profile showing where the muse adds value and where it doesn't.
+judges score both responses independently on six dimensions plus an overall
+preference. The output is a profile showing where the muse adds value and
+where it doesn't.
 
-Dimensions (scored 1-3):
+Dimensions (scored 1-5, where 3 = strong base model):
   What it does:    positional clarity, completeness, specificity
   How it reasons:  calibration, reasoning transparency, intellectual honesty
+
+A separate preference judge picks which response demonstrates better overall
+judgment, capturing signal the dimension scores may miss.
 
 Questions include universal judgment probes plus domain-specific questions
 generated from the muse.md to measure transferability.`,
@@ -127,17 +132,17 @@ generated from the muse.md to measure transferability.`,
 
 			fmt.Fprintf(os.Stderr, "eval  %d cases  %s\n\n", len(questions), model)
 
-			// Run all cases in parallel.
+			// Run all cases with bounded concurrency.
 			results := make([]evalResult, len(questions))
-			var wg sync.WaitGroup
+			g, ctx := errgroup.WithContext(ctx)
+			g.SetLimit(10)
 			for i, q := range questions {
-				wg.Add(1)
-				go func(i int, q evalQuestion) {
-					defer wg.Done()
+				g.Go(func() error {
 					results[i] = runEvalCase(ctx, q, llm, withMuse, withoutMuse, store, museHash)
-				}(i, q)
+					return nil
+				})
 			}
-			wg.Wait()
+			g.Wait()
 
 			// Print profile
 			fmt.Fprintln(os.Stderr)
@@ -226,11 +231,11 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 	blindedInput := fmt.Sprintf("## Question\n%s\n\n## Response A\n%s\n\n## Response B\n%s",
 		strings.TrimSpace(q.Prompt), respA, respB)
 
-	// Run both judge calls in parallel (never cached — cheap, benefits from prompt iteration)
-	var obsResp, epiResp string
-	var obsErr, epiErr error
+	// Run all three judge calls in parallel (never cached — cheap, benefits from prompt iteration)
+	var obsResp, epiResp, prefResp string
+	var obsErr, epiErr, prefErr error
 	var judgeWg sync.WaitGroup
-	judgeWg.Add(2)
+	judgeWg.Add(3)
 	go func() {
 		defer judgeWg.Done()
 		obsResp, _, obsErr = inference.Converse(ctx, llm, prompts.JudgeObservable, blindedInput)
@@ -238,6 +243,10 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 	go func() {
 		defer judgeWg.Done()
 		epiResp, _, epiErr = inference.Converse(ctx, llm, prompts.JudgeEpistemic, blindedInput)
+	}()
+	go func() {
+		defer judgeWg.Done()
+		prefResp, _, prefErr = inference.Converse(ctx, llm, prompts.JudgePreference, blindedInput)
 	}()
 	judgeWg.Wait()
 
@@ -251,11 +260,16 @@ func runEvalCase(ctx context.Context, q evalQuestion, llm inference.Client, with
 		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, epiErr)
 		return result
 	}
+	if prefErr != nil {
+		result.Error = prefErr
+		fmt.Fprintf(os.Stderr, "  ! %-28s judge error: %v\n", q.ID, prefErr)
+		return result
+	}
 
 	// Parse scores
 	aObs, bObs := parseJudgeScores(obsResp)
 	aEpi, bEpi := parseJudgeScores(epiResp)
-	preferred, rationale := parsePreference(epiResp)
+	preferred, rationale := parsePreference(prefResp)
 
 	// De-blind
 	if result.BaseIsA {
@@ -443,12 +457,10 @@ func printTransferability(results []evalResult) {
 		count int
 		delta float64
 	}
-	displayOrder := []string{"in-domain", "adjacent-domain", "out-of-domain", "universal"}
+	displayOrder := []string{"domain", "universal"}
 	displayLabels := map[string]string{
-		"in-domain":       "In-domain",
-		"adjacent-domain": "Adjacent-domain",
-		"out-of-domain":   "Out-of-domain",
-		"universal":       "Universal",
+		"domain":    "Domain",
+		"universal": "Universal",
 	}
 	groups := map[string]*group{}
 	for _, name := range displayOrder {
@@ -566,7 +578,7 @@ func dimScore(obs, epi evalScores, dim string) (int, bool) {
 func transferGroup(category string) string {
 	switch category {
 	case "in-domain", "adjacent-domain", "out-of-domain":
-		return category
+		return "domain"
 	default:
 		return "universal"
 	}
@@ -619,7 +631,10 @@ func generateDomainQuestions(ctx context.Context, llm inference.Client, document
 	jsonStr := extractJSON(resp)
 	var questions []evalQuestion
 	if err := json.Unmarshal([]byte(jsonStr), &questions); err != nil {
-		return nil, fmt.Errorf("parse generated questions: %w", err)
+		return nil, fmt.Errorf("parse generated questions (raw response length %d): %w", len(resp), err)
+	}
+	if len(questions) == 0 {
+		return nil, fmt.Errorf("generated question set is empty")
 	}
 
 	// Cache for next run
@@ -630,7 +645,28 @@ func generateDomainQuestions(ctx context.Context, llm inference.Client, document
 }
 
 // extractJSON finds a JSON array in text that may be wrapped in markdown code blocks.
+// Returns the extracted substring, which the caller must validate by unmarshaling.
 func extractJSON(s string) string {
+	// Try the whole string first (model followed instructions)
+	trimmed := strings.TrimSpace(s)
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		return trimmed
+	}
+	// Strip markdown code fences
+	if idx := strings.Index(s, "```"); idx != -1 {
+		// Find content between first and last fence
+		start := strings.Index(s[idx+3:], "\n")
+		if start != -1 {
+			inner := s[idx+3+start+1:]
+			if end := strings.Index(inner, "```"); end != -1 {
+				inner = strings.TrimSpace(inner[:end])
+				if strings.HasPrefix(inner, "[") && strings.HasSuffix(inner, "]") {
+					return inner
+				}
+			}
+		}
+	}
+	// Last resort: first [ to last ]
 	if idx := strings.Index(s, "["); idx != -1 {
 		if end := strings.LastIndex(s, "]"); end > idx {
 			return s[idx : end+1]

@@ -41,5 +41,8 @@ var JudgeObservable string
 //go:embed judge-epistemic.md
 var JudgeEpistemic string
 
+//go:embed judge-preference.md
+var JudgePreference string
+
 //go:embed generate-eval.md
 var GenerateEval string
