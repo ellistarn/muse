@@ -17,7 +17,8 @@ import (
 // UploadResult summarizes what happened during an upload sync.
 type UploadResult struct {
 	Sources      int
-	SourceCounts map[string]int // per-source upload counts
+	SourceCounts map[string]int // per-source upload counts (new conversations)
+	SourceTotals map[string]int // per-source total conversation counts (discovered)
 	Total        int
 	Uploaded     int
 	Skipped      int
@@ -199,10 +200,10 @@ func Upload(ctx context.Context, store storage.Store, progress SyncProgressFunc,
 		local = filterConversationsBySource(local, sources)
 	}
 
-	// Count unique sources
-	sourceSet := map[string]bool{}
+	// Count per-source totals
+	sourceTotals := map[string]int{}
 	for _, sess := range local {
-		sourceSet[sess.Source] = true
+		sourceTotals[sess.Source]++
 	}
 
 	var uploaded, skipped int
@@ -243,8 +244,9 @@ func Upload(ctx context.Context, store storage.Store, progress SyncProgressFunc,
 	}
 	g.Wait()
 	return &UploadResult{
-		Sources:      len(sourceSet),
+		Sources:      len(sourceTotals),
 		SourceCounts: uploadCounts,
+		SourceTotals: sourceTotals,
 		Total:        len(local),
 		Uploaded:     uploaded,
 		Skipped:      skipped,

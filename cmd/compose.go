@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -80,6 +80,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 				for _, w := range result.Warnings {
 					fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 				}
+				printSyncSummary(result)
 				uploaded = result.Uploaded
 				uploadBytes = result.Bytes
 			}
@@ -252,30 +253,20 @@ func runCompose(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 // progress using the stage log system. Each source gets a "sync" stage line
 // that updates as discovery and fetching progress. The renderer is safe for
 // concurrent use by multiple providers.
+//
+// The "done" phase only clears the transient bar — summary lines are printed
+// after Upload returns via printSyncSummary, which has access to per-source
+// cache information (new vs cached counts).
 func syncProgressRenderer() muse.SyncProgressFunc {
 	var mu sync.Mutex
 	tty := output.IsTTY()
-	// Track per-source state to show meaningful summary on completion.
-	type sourceState struct {
-		start  time.Time
-		detail string
-		done   bool
-	}
-	sources := map[string]*sourceState{}
+	done := map[string]bool{}
 
 	return func(source string, p conversation.SyncProgress) {
 		mu.Lock()
 		defer mu.Unlock()
 
 		name := strings.ToLower(source)
-		st, exists := sources[name]
-		if !exists {
-			st = &sourceState{start: time.Now()}
-			sources[name] = st
-		}
-		if p.Detail != "" {
-			st.detail = p.Detail
-		}
 
 		switch p.Phase {
 		case "discovering":
@@ -295,19 +286,33 @@ func syncProgressRenderer() muse.SyncProgressFunc {
 			}
 			output.LogStage("sync", "%s: %s", name, p.Detail).Print()
 		case "done":
-			if !st.done {
-				st.done = true
+			if !done[name] {
+				done[name] = true
+				// Just clear the transient bar; summary printed by printSyncSummary.
 				if tty {
 					output.ClearLine()
 				}
-				detail := st.detail
-				if p.Detail != "" {
-					detail = p.Detail
-				}
-				if detail != "" {
-					output.LogStage("sync", "%s: %s", name, detail).Duration(time.Since(st.start)).Print()
-				}
 			}
 		}
+	}
+}
+
+// printSyncSummary prints per-source sync lines with cache information.
+// Each source shows total conversations and how many were new (uploaded).
+func printSyncSummary(result *muse.UploadResult) {
+	sources := make([]string, 0, len(result.SourceTotals))
+	for s := range result.SourceTotals {
+		sources = append(sources, s)
+	}
+	sort.Strings(sources)
+
+	for _, source := range sources {
+		total := result.SourceTotals[source]
+		newCount := result.SourceCounts[source] // 0 if not in map
+		displayName := strings.ReplaceAll(source, "-", " ")
+
+		detail := fmt.Sprintf("%d conversations (%d new)", total, newCount)
+
+		output.LogStage("sync", "%s: %s", displayName, detail).Print()
 	}
 }

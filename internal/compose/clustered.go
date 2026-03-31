@@ -150,7 +150,13 @@ func RunClustered(
 			Duration: time.Since(themeStart),
 			Usage:    themeUsage,
 		})
-		logAfter("themed").Cost(time.Since(themeStart), themeUsage.Cost()).Print()
+		themeAfter := logAfter("themed")
+		if themeUsage.InputTokens == 0 {
+			themeAfter.Tail = "(cached)"
+		} else {
+			themeAfter.Cost(time.Since(themeStart), themeUsage.Cost())
+		}
+		themeAfter.Print()
 	}
 
 	// ── GROUP ───────────────────────────────────────────────────────────
@@ -432,6 +438,10 @@ func runObserve(
 			return nil, err
 		}
 		prog.Stop()
+	} else if pruned > 0 {
+		// All conversations cached — print observe line so the user knows
+		// the stage ran and everything was a cache hit.
+		logBefore("observe", "%d conversations cached", pruned)
 	}
 
 	return &observeResult{
