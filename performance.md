@@ -65,19 +65,12 @@ degrade limiter accuracy over time.
 |---|---|
 | Batch | All LLM calls (observe, label, summarize) are individual requests. Hundreds of independent calls where results feed the next stage — batch-eligible. |
 | Batch | S3 `DeletePrefix` deletes objects one at a time. S3 supports `DeleteObjects` (up to 1000 keys per call). |
-| Saturate | Anthropic, OpenAI: no client-side rate limiting. Throttling discovered reactively via 429, no retry. |
-| Saturate | Slack: `time.Sleep` calls instead of adaptive limiter. No burst capacity, no feedback. |
-| Saturate | GitHub: proper rate limiting but not shared infrastructure — each API source builds its own. |
 | Saturate | Upload writes `PutConversation` sequentially. S3 PUTs at ~50-100ms each, no parallelism. |
 | Saturate | `storage.Sync` is fully sequential — one GET + one PUT per conversation in series. |
 | Flow | Upload waits for all sources before the pipeline starts. Local sources (milliseconds) idle while API sources (minutes) sync. |
-| Flow | Observe→Label, Label→Normalize, Summarize→Compose are all hard barriers. A conversation that finishes observe early waits for the entire stage before labeling begins. |
-| Flow | `runNormalize` and `runGroup` re-read all label artifacts from store. This data was already in memory during `runLabel`. |
+| Flow | Observe→Label, Summarize→Compose are hard barriers. A conversation that finishes observe early waits for the entire stage before labeling begins. |
+| Flow | `runGroup` re-reads all label artifacts from store. This data was already in memory during `runLabel`. |
 | Order | Upload source ordering is arbitrary. API sources (GitHub, Slack) may start after local sources. |
-| Order | Label and summarize stages dispatch in arbitrary order, not by size. |
-| Cache | Label fingerprint includes the mutable label vocabulary. Any new label from any goroutine invalidates every conversation's cache. On warm runs, this forces a complete relabel even when only one conversation changed. |
-| Feedback | Anthropic, OpenAI: 429 responses not reported to any adaptive mechanism. |
-| Feedback | Slack: single retry on 429 with no feedback to rate adjustment. |
 
 ### Gaps
 
