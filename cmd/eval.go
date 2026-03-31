@@ -69,9 +69,9 @@ func newEvalCmd() *cobra.Command {
 judges score both responses independently on six dimensions. The output is a
 profile showing where the muse adds value and where it doesn't.
 
-Dimensions (scored 1-5):
-  Observable:  positional clarity, completeness, specificity of mechanism
-  Epistemic:   calibration, reasoning transparency, intellectual honesty
+Dimensions (scored 1-3):
+  What it does:    positional clarity, completeness, specificity
+  How it reasons:  calibration, reasoning transparency, intellectual honesty
 
 Questions include universal judgment probes plus domain-specific questions
 generated from the muse.md to measure transferability.`,
@@ -382,9 +382,9 @@ func printEvalProfile(results []evalResult) {
 		return
 	}
 
-	printDimensionTable("Observable", observableDims, valid)
+	printDimensionTable("What it does", observableDims, valid)
 	fmt.Fprintln(os.Stderr)
-	printDimensionTable("Epistemic", epistemicDims, valid)
+	printDimensionTable("How it reasons", epistemicDims, valid)
 	fmt.Fprintln(os.Stderr)
 	printTransferability(valid)
 	fmt.Fprintln(os.Stderr)
@@ -444,6 +444,12 @@ func printTransferability(results []evalResult) {
 		delta float64
 	}
 	displayOrder := []string{"in-domain", "adjacent-domain", "out-of-domain", "universal"}
+	displayLabels := map[string]string{
+		"in-domain":       "In-domain",
+		"adjacent-domain": "Adjacent-domain",
+		"out-of-domain":   "Out-of-domain",
+		"universal":       "Universal",
+	}
 	groups := map[string]*group{}
 	for _, name := range displayOrder {
 		groups[name] = &group{}
@@ -481,7 +487,11 @@ func printTransferability(results []evalResult) {
 		if avg < 0 {
 			sign = ""
 		}
-		fmt.Fprintf(os.Stderr, "  %-22s  %5d  %s%.1f\n", name, g.count, sign, avg)
+		label := displayLabels[name]
+		if label == "" {
+			label = name
+		}
+		fmt.Fprintf(os.Stderr, "  %-22s  %5d  %s%.1f\n", label, g.count, sign, avg)
 	}
 }
 
@@ -503,19 +513,27 @@ func printEvalDetail(results []evalResult) {
 		fmt.Fprintf(os.Stderr, "MUSE:\n%s\n", r.MuseResponse)
 		fmt.Fprintf(os.Stderr, "%s\n", strings.Repeat("─", 40))
 
-		fmt.Fprintf(os.Stderr, "Observable:  ")
+		fmt.Fprintf(os.Stderr, "What it does:    ")
 		for _, dim := range observableDims {
 			bs, _ := dimScore(r.BaseObservable, r.BaseEpistemic, dim)
 			ms, _ := dimScore(r.MuseObservable, r.MuseEpistemic, dim)
-			fmt.Fprintf(os.Stderr, "%s: %d→%d  ", dim, bs, ms)
+			label := dimLabels[dim]
+			if label == "" {
+				label = dim
+			}
+			fmt.Fprintf(os.Stderr, "%s: %d→%d  ", label, bs, ms)
 		}
 		fmt.Fprintln(os.Stderr)
 
-		fmt.Fprintf(os.Stderr, "Epistemic:   ")
+		fmt.Fprintf(os.Stderr, "How it reasons:  ")
 		for _, dim := range epistemicDims {
 			bs, _ := dimScore(r.BaseObservable, r.BaseEpistemic, dim)
 			ms, _ := dimScore(r.MuseObservable, r.MuseEpistemic, dim)
-			fmt.Fprintf(os.Stderr, "%s: %d→%d  ", dim, bs, ms)
+			label := dimLabels[dim]
+			if label == "" {
+				label = dim
+			}
+			fmt.Fprintf(os.Stderr, "%s: %d→%d  ", label, bs, ms)
 		}
 		fmt.Fprintln(os.Stderr)
 
