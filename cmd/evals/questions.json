@@ -1,0 +1,116 @@
+[
+  {
+    "id": "arch-reorg",
+    "category": "architecture",
+    "prompt": "You're reorganizing a team or process that grew organically over two years. Three people have proposed three different structures, each optimizing for a different thing — speed, quality, or autonomy. How do you evaluate them?"
+  },
+  {
+    "id": "arch-rewrite",
+    "category": "architecture",
+    "prompt": "You inherit a system or process that works but is painful to change. Every modification requires touching multiple parts and coordinating with several people. A full redesign would take six months. How do you decide whether to redesign or keep evolving incrementally?"
+  },
+  {
+    "id": "arch-platform",
+    "category": "architecture",
+    "prompt": "You're starting something new and must choose between adapting an existing approach that covers 80% of what you need, or building a custom one from scratch. The existing approach will be awkward for the remaining 20%, and that 20% is important to your users. What's your framework for deciding?"
+  },
+  {
+    "id": "arch-automation",
+    "category": "architecture",
+    "prompt": "Your team relies on manual coordination for an important recurring process. Someone proposes automating it, but the automation would be complex to build and even more complex to maintain when requirements change. How do you think about this?"
+  },
+  {
+    "id": "tradeoff-ship",
+    "category": "tradeoff",
+    "tags": ["tension:principles-vs-shipping"],
+    "prompt": "Your team can ship something adequate now or something excellent in three months. A competitor is moving fast and your stakeholders are anxious. How do you decide?"
+  },
+  {
+    "id": "tradeoff-invest",
+    "category": "tradeoff",
+    "prompt": "You can invest in making your current thing significantly better — fixing pain points, improving reliability, reducing friction — or start building the next thing your users are asking for. Resources are fixed. You can't do both well. How do you allocate?"
+  },
+  {
+    "id": "tradeoff-risk",
+    "category": "tradeoff",
+    "prompt": "A proven approach would take three months. An experimental approach could take two weeks but might fail entirely, sending you back to the proven approach anyway. The stakes are moderate — not existential but not trivial. What do you do?"
+  },
+  {
+    "id": "tradeoff-config",
+    "category": "tradeoff",
+    "prompt": "You have the option to make something highly configurable — users can tune everything to their needs — or highly opinionated — you make the decisions for them based on what you believe is right. How do you decide which approach to take?"
+  },
+  {
+    "id": "failure-own",
+    "category": "failure",
+    "prompt": "A decision you championed six months ago is clearly not working. The team followed your lead, invested significant effort, and the results are poor. Walk me through your process from the moment you realize it's failing to the moment you've resolved it."
+  },
+  {
+    "id": "failure-visible",
+    "category": "failure",
+    "prompt": "Your team just had a visible failure in front of important stakeholders. The root cause is ambiguous — it could be a process problem, a technical problem, or bad luck. People are upset. How do you handle the next 48 hours?"
+  },
+  {
+    "id": "failure-dependency",
+    "category": "failure",
+    "tags": ["tension:principles-vs-shipping"],
+    "prompt": "Something you depend on has a major issue that's affecting your customers right now. You can work around it immediately with a hack that you'll need to maintain indefinitely, or wait for a proper fix that could take days. Customers are complaining. What do you do?"
+  },
+  {
+    "id": "people-gut",
+    "category": "people",
+    "prompt": "A respected colleague proposes a major change to how your team works. It's well-reasoned and others are persuaded, but your gut says it's wrong and you can't fully articulate why yet. How do you engage?"
+  },
+  {
+    "id": "people-communicator",
+    "category": "people",
+    "prompt": "Someone on your team consistently delivers excellent work but communicates poorly — their updates are confusing, their documentation is unclear, and others struggle to build on what they've done. How do you address it?"
+  },
+  {
+    "id": "people-disagree",
+    "category": "people",
+    "prompt": "Two people on your team fundamentally disagree about the right approach to an important problem. Both have valid arguments and neither is willing to compromise. The disagreement has been going on for a week and it's blocking progress. How do you resolve it?"
+  },
+  {
+    "id": "scope-overload",
+    "category": "scoping",
+    "prompt": "You have three times more work than your team can handle this quarter. Everything on the list has a stakeholder who considers it critical. Several of the items are genuinely important. How do you decide what gets cut?"
+  },
+  {
+    "id": "scope-unknowns",
+    "category": "scoping",
+    "prompt": "You're asked to commit to a timeline for something with significant unknowns. You genuinely don't know if it will take three weeks or three months. Your leadership needs a date for planning purposes. How do you respond?"
+  },
+  {
+    "id": "scope-wrong-abstraction",
+    "category": "scoping",
+    "tags": ["tension:principles-vs-shipping"],
+    "prompt": "A stakeholder wants you to build something that's easy to deliver but you believe creates the wrong foundation — it'll make future work harder and lock in assumptions you think are wrong. They have organizational authority and they're insistent. What do you do?"
+  },
+  {
+    "id": "scope-almost-done",
+    "category": "scoping",
+    "tags": ["tension:principles-vs-shipping"],
+    "prompt": "You notice the team is building something that will work but violates a principle you care about deeply. They're almost done and morale is high — they're proud of what they've built. Do you stop them? How do you handle it?"
+  },
+  {
+    "id": "meta-wrong",
+    "category": "meta",
+    "prompt": "How do you know when you're wrong about something? What are the signals you watch for, and how do you distinguish between 'I'm uncertain' and 'I was actually wrong'?"
+  },
+  {
+    "id": "meta-incomplete",
+    "category": "meta",
+    "prompt": "What's your process for making a high-stakes decision when you have incomplete information, no way to get more, and the window to decide is closing?"
+  },
+  {
+    "id": "meta-wasted",
+    "category": "meta",
+    "prompt": "You realize you've been working on the wrong problem for two weeks. The work is good quality — it's just solving the wrong thing. What do you do with the sunk effort, and what do you change about how you work to prevent this?"
+  },
+  {
+    "id": "meta-junior",
+    "category": "meta",
+    "prompt": "A less experienced team member proposes an unconventional approach. Your experience says the conventional approach is safer and more predictable, but their idea has an elegance you can't dismiss and they're genuinely excited about it. How much runway do you give them, and how do you decide?"
+  }
+]
