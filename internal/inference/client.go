@@ -1,6 +1,9 @@
 package inference
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Message is a provider-agnostic conversation message.
 type Message struct {
@@ -39,4 +42,12 @@ func ConverseStream(ctx context.Context, c Client, system, user string, fn Strea
 		return "", Usage{}, err
 	}
 	return resp.Text, resp.Usage, err
+}
+
+// IsTruncated reports whether err is a max-token truncation error.
+// All providers (Anthropic, Bedrock, OpenAI) return partial content
+// alongside this error — callers can use the response text even when
+// IsTruncated is true.
+func IsTruncated(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "response truncated: hit max token limit")
 }

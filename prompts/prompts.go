@@ -29,8 +29,11 @@ var Summarize string
 //go:embed compose-clustered.md
 var ComposeClustered string
 
-//go:embed theme.md
-var Theme string
+//go:embed theme-identify.md
+var ThemeIdentify string
+
+//go:embed theme-map.md
+var ThemeMap string
 
 //go:embed observe-human.md
 var ObserveHuman string

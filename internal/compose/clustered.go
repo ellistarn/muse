@@ -1159,10 +1159,21 @@ func runLabel(
 
 // ── THEME ─────────────────────────────────────────────────────────────
 
+// themeBatchSize is the number of labels per mapping batch in pass 2.
+// Sized so the model reliably maps every label — LLMs skip entries
+// in long enumeration tasks. 100 labels ≈ 1500 output tokens, well
+// within budget. Batches run in parallel so call count doesn't
+// affect wall time.
+const themeBatchSize = 100
+
 // runTheme consolidates a fragmented label set into canonical themes.
 // This handles the cold-start case where parallel labeling produces hundreds of
 // unique labels because conversations are labeled without shared vocabulary.
 // The mapping is applied at group time (labels on disk stay pristine).
+//
+// Two passes:
+//  1. Identify 15-25 canonical themes (fixed output, scales with any input size)
+//  2. Map labels → themes in parallel batches (output bounded per batch)
 func runTheme(
 	ctx context.Context,
 	store storage.Store,
@@ -1194,7 +1205,7 @@ func runTheme(
 	}
 	sort.Strings(sorted)
 
-	fp := Fingerprint(append(sorted, Fingerprint(prompts.Theme))...)
+	fp := Fingerprint(append(sorted, Fingerprint(prompts.ThemeIdentify), Fingerprint(prompts.ThemeMap))...)
 
 	// Check cache
 	existing, err := GetThemes(ctx, store)
@@ -1202,39 +1213,137 @@ func runTheme(
 		return existing.Mapping, inference.Usage{}, nil
 	}
 
-	// Build input: one label per line
-	var input strings.Builder
+	// Build label list for pass 1 input
+	var labelList strings.Builder
 	for _, l := range sorted {
-		input.WriteString("- ")
-		input.WriteString(l)
-		input.WriteString("\n")
+		labelList.WriteString("- ")
+		labelList.WriteString(l)
+		labelList.WriteString("\n")
 	}
 
-	resp, usage, err := inference.Converse(ctx, llm, prompts.Theme, input.String(), inference.WithMaxTokens(16384))
+	// ── Pass 1: identify canonical themes (fixed output) ──────────────
+	resp, usage, err := inference.Converse(ctx, llm, prompts.ThemeIdentify, labelList.String(), inference.WithMaxTokens(4096))
 	if err != nil {
-		return nil, usage, fmt.Errorf("theme: %w", err)
+		return nil, usage, fmt.Errorf("theme identify: %w", err)
 	}
 
-	mapping := parseThemeResponse(resp)
+	themes := parseThemeLines(resp)
+	if len(themes) == 0 {
+		return nil, usage, fmt.Errorf("theme identify: no themes found in response")
+	}
 
-	if verbose && len(mapping) > 0 {
-		fmt.Fprintf(os.Stderr, "  Themed %d labels:\n", len(mapping))
+	// ── Pass 2: map labels → themes in parallel batches ───────────────
+	// Retry unmapped labels until full coverage or no progress.
+	themeList := strings.Join(themes, "\n")
+	mapping := map[string]string{}
+	var totalUsage inference.Usage
+	unmapped := sorted
+
+	for round := 1; len(unmapped) > 0; round++ {
+		var mu sync.Mutex
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(10)
+
+		for i := 0; i < len(unmapped); i += themeBatchSize {
+			end := i + themeBatchSize
+			if end > len(unmapped) {
+				end = len(unmapped)
+			}
+			batch := unmapped[i:end]
+
+			g.Go(func() error {
+				var input strings.Builder
+				input.WriteString("THEMES:\n")
+				input.WriteString(themeList)
+				input.WriteString("\n\nLABELS:\n")
+				for _, l := range batch {
+					input.WriteString("- ")
+					input.WriteString(l)
+					input.WriteString("\n")
+				}
+
+				resp, u, err := inference.Converse(gctx, llm, prompts.ThemeMap, input.String(), inference.WithMaxTokens(4096))
+				mu.Lock()
+				totalUsage = totalUsage.Add(u)
+				mu.Unlock()
+				if err != nil && !inference.IsTruncated(err) {
+					return fmt.Errorf("theme map batch: %w", err)
+				}
+
+				batchMapping := parseThemeMappings(resp, batch)
+				mu.Lock()
+				for k, v := range batchMapping {
+					mapping[k] = v
+				}
+				mu.Unlock()
+				return nil
+			})
+		}
+		if err := g.Wait(); err != nil {
+			return nil, totalUsage.Add(usage), fmt.Errorf("theme: %w", err)
+		}
+
+		// Collect labels still missing a mapping
+		var remaining []string
+		for _, l := range unmapped {
+			if _, ok := mapping[l]; !ok {
+				remaining = append(remaining, l)
+			}
+		}
+		if verbose && len(remaining) > 0 {
+			fmt.Fprintf(os.Stderr, "  round %d: mapped %d/%d labels (%d remaining)\n",
+				round, len(unmapped)-len(remaining), len(unmapped), len(remaining))
+		}
+		if len(remaining) == len(unmapped) {
+			// No progress — stop to avoid infinite loop
+			break
+		}
+		unmapped = remaining
+	}
+	totalUsage = totalUsage.Add(usage)
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "  %d themes, mapped %d/%d labels\n", len(themes), len(mapping), len(sorted))
 	}
 
 	// Save
-	themes := &LabelMapping{
+	result := &LabelMapping{
 		Fingerprint: fp,
 		Mapping:     mapping,
 	}
-	if err := PutThemes(ctx, store, themes); err != nil {
-		return nil, usage, fmt.Errorf("save themes: %w", err)
+	if err := PutThemes(ctx, store, result); err != nil {
+		return nil, totalUsage, fmt.Errorf("save themes: %w", err)
 	}
 
-	return mapping, usage, nil
+	return mapping, totalUsage, nil
 }
 
-// parseThemeResponse parses "original → canonical" lines from the LLM response.
-func parseThemeResponse(resp string) map[string]string {
+// parseThemeLines extracts "THEME: <name>" lines from the pass 1 response.
+func parseThemeLines(resp string) []string {
+	var themes []string
+	for _, line := range strings.Split(resp, "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "THEME: "); ok {
+			after = strings.TrimSpace(after)
+			if after != "" {
+				themes = append(themes, after)
+			}
+		}
+	}
+	return themes
+}
+
+// parseThemeMappings parses "original → canonical" lines from the pass 2 response.
+// inputLabels are the actual labels sent to the model; the parser resolves the
+// model's output against them case-insensitively since models often rephrase or
+// re-capitalize labels instead of copying them verbatim.
+func parseThemeMappings(resp string, inputLabels []string) map[string]string {
+	// Build case-insensitive lookup: lowered → original
+	lookup := make(map[string]string, len(inputLabels))
+	for _, l := range inputLabels {
+		lookup[strings.ToLower(l)] = l
+	}
+
 	mapping := map[string]string{}
 	for _, line := range strings.Split(resp, "\n") {
 		line = strings.TrimSpace(line)
@@ -1257,7 +1366,14 @@ func parseThemeResponse(resp string) map[string]string {
 		// Strip surrounding quotes
 		from = strings.Trim(from, "\"'")
 		to = strings.Trim(to, "\"'")
-		if from != "" && to != "" && from != to {
+		if from == "" || to == "" {
+			continue
+		}
+		// Resolve against input labels case-insensitively
+		if original, ok := lookup[strings.ToLower(from)]; ok {
+			from = original
+		}
+		if from != to {
 			mapping[from] = to
 		}
 	}
