@@ -356,19 +356,25 @@ var dimLabels = map[string]string{
 	"awareness": "Awareness",
 }
 
-// printSummaryTable prints the per-case verdict table, grouped by outcome:
+// printSummaryTable prints a per-case score grid, grouped by outcome:
 // muse-preferred first, then neither, then base-preferred, then errors.
 func printSummaryTable(w io.Writer, results []evalResult) {
 	type row struct {
-		icon string
-		id   string
-		text string
-		rank int // sort key: 0=muse, 1=neither, 2=base, 3=error
+		icon   string
+		id     string
+		scores string // pre-formatted "N→N  N→N  N→N" or empty for errors
+		pref   string
+		rank   int // sort key: 0=muse, 1=neither, 2=base, 3=error
 	}
+
 	var rows []row
+	var maxID int
 	for _, r := range results {
+		if len(r.Question.ID) > maxID {
+			maxID = len(r.Question.ID)
+		}
 		if r.Error != nil {
-			rows = append(rows, row{"!", r.Question.ID, r.Error.Error(), 3})
+			rows = append(rows, row{"!", r.Question.ID, "", "error", 3})
 			continue
 		}
 		icon, rank := "~", 1
@@ -378,11 +384,23 @@ func printSummaryTable(w io.Writer, results []evalResult) {
 		case "base":
 			icon, rank = "✗", 2
 		}
-		rows = append(rows, row{icon, r.Question.ID, truncate(r.Rationale, 60), rank})
+		var parts []string
+		for _, dim := range allDims {
+			parts = append(parts, fmt.Sprintf("%d→%d", r.BaseScores.Values[dim], r.MuseScores.Values[dim]))
+		}
+		rows = append(rows, row{icon, r.Question.ID, strings.Join(parts, "  "), r.Preferred, rank})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].rank < rows[j].rank })
+
+	// Header — column positions match data rows (icon + space + id + gap + scores)
+	fmt.Fprintf(w, "%sRea  Voi  Awa\n", strings.Repeat(" ", maxID+6))
+	fmt.Fprintf(w, "  %s\n", strings.Repeat("─", maxID+20))
 	for _, r := range rows {
-		fmt.Fprintf(w, "  %s %-28s %s\n", r.icon, r.id, r.text)
+		if r.scores == "" {
+			fmt.Fprintf(w, "  %s %-*s  %s\n", r.icon, maxID, r.id, r.pref)
+		} else {
+			fmt.Fprintf(w, "  %s %-*s  %s   %s\n", r.icon, maxID, r.id, r.scores, r.pref)
+		}
 	}
 }
 
@@ -514,12 +532,9 @@ func printEvalDetail(w io.Writer, results []evalResult) {
 		}
 		fmt.Fprintf(w, "── %s (%s) %s\n\n", r.Question.ID, r.Question.Category,
 			strings.Repeat("─", max(0, 72-len(r.Question.ID)-len(r.Question.Category))))
-		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(r.Question.Prompt))
 
-		fmt.Fprintf(w, "Base:\n%s\n\n", r.BaseResponse)
-		fmt.Fprintf(w, "Muse:\n%s\n\n", r.MuseResponse)
-
-		fmt.Fprintf(w, "Scores:  ")
+		// Scores
+		fmt.Fprintf(w, "  ")
 		for _, dim := range allDims {
 			bs := r.BaseScores.Values[dim]
 			ms := r.MuseScores.Values[dim]
@@ -531,11 +546,14 @@ func printEvalDetail(w io.Writer, results []evalResult) {
 		}
 		fmt.Fprintln(w)
 
-		fmt.Fprintf(w, "Preferred: %s", r.Preferred)
+		// Preference
+		fmt.Fprintf(w, "  Preferred: %s\n", r.Preferred)
+
+		// Rationale — wrapped paragraph
 		if r.Rationale != "" {
-			fmt.Fprintf(w, " — %s", r.Rationale)
+			fmt.Fprintf(w, "\n%s\n", wordWrap(r.Rationale, 74, "  "))
 		}
-		fmt.Fprintf(w, "\n\n")
+		fmt.Fprintln(w)
 	}
 }
 
@@ -551,11 +569,25 @@ func transferGroup(category string) string {
 	}
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// wordWrap breaks s into lines of at most width display columns,
+// splitting on word boundaries and prefixing each line with indent.
+func wordWrap(s string, width int, indent string) string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return ""
 	}
-	return s[:n-3] + "..."
+	var lines []string
+	line := indent + words[0]
+	for _, w := range words[1:] {
+		if len(line)+1+len(w) > width {
+			lines = append(lines, line)
+			line = indent + w
+		} else {
+			line += " " + w
+		}
+	}
+	lines = append(lines, line)
+	return strings.Join(lines, "\n")
 }
 
 // shortModel strips common provider prefixes from model identifiers.
