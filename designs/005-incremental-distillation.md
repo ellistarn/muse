@@ -71,6 +71,7 @@ of evidence is conveyed through natural language:
 ├── compose/
 │   ├── labels/{source}/{conversation_id}.json             # clustering-specific
 │   └── normalization.json                                 # clustering-specific
+├── sessions/                                              # ask sessions, not compose input
 ├── versions/{timestamp}/
 │   ├── muse.md                                            # output, syncable
 │   └── diff.md                                            # output, syncable

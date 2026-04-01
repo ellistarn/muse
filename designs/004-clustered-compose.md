@@ -115,6 +115,7 @@ the compose system, nested under `compose/`.
 ├── compose/
 │   ├── labels/{source}/{conversation_id}.json                 # syncable
 │   └── themes.json                                            # label mapping, ephemeral
+├── sessions/                                                  # ask sessions, not compose input
 ├── versions/{timestamp}/muse.md                               # output, syncable
 ├── versions/{timestamp}/diff.md                               # output, syncable
 ```
