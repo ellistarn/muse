@@ -18,8 +18,9 @@ func newAddCmd() *cobra.Command {
 will be included in future "muse compose" runs automatically.
 
 Run "muse sources" to see available sources and their status.`,
-		Example: `  muse add github    # add GitHub PRs and issues
-  muse add slack     # add Slack conversations`,
+		Example: `  muse add github-issues    # add GitHub issues
+  muse add github-prs       # add GitHub PRs
+  muse add slack             # add Slack conversations`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()

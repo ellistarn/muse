@@ -51,7 +51,15 @@ func printSources(ctx context.Context, w io.Writer, store storage.Store) error {
 		if s.OptIn {
 			tag = " (opt-in)"
 		}
-		fmt.Fprintf(w, "  %-14s %-10s%s\n", s.Name, status, tag)
+		fmt.Fprintf(w, "  %-16s %-10s%s\n", s.Name, status, tag)
 	}
+
+	// Detect stale "github" source from before the issues/prs split.
+	if activeSet["github"] && !activeSet["github-issues"] && !activeSet["github-prs"] {
+		fmt.Fprintf(w, "\n  The \"github\" source has been split into \"github-issues\" and \"github-prs\".\n")
+		fmt.Fprintf(w, "  Run: muse add github-issues   and/or   muse add github-prs\n")
+		fmt.Fprintf(w, "  Then: muse remove github\n")
+	}
+
 	return nil
 }

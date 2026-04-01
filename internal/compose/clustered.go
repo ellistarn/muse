@@ -580,7 +580,7 @@ const maxAssistantChars = 500
 // the owner and other people (not AI assistants).
 func isHumanSource(source string) bool {
 	switch source {
-	case "slack", "github":
+	case "slack", "github-issues", "github-prs":
 		return true
 	default:
 		return false

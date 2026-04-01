@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	githubSource     = "github"
 	maxDiffHunkLines = 8
 
 	// Concurrency for parallel thread fetching.
@@ -166,14 +165,100 @@ func retryAfterDuration(resp *http.Response) time.Duration {
 	return 0
 }
 
+// ── Shared state ──────────────────────────────────────────────────────
+
+// githubShared coordinates resources between github-issues and github-prs
+// providers. Both share authentication, rate limiting, and the HTTP cache
+// because they hit the same GitHub API with the same token. Refcounted so
+// the transport is created once and cleaned up when the last provider finishes.
+var githubShared struct {
+	mu        sync.Mutex
+	transport *githubTransport
+	cache     *httpCache
+	client    *github.Client
+	username  string
+	cacheDir  string
+	refs      int
+	cancel    context.CancelFunc
+}
+
+// acquireGitHub returns the shared GitHub client, username, and cache directory.
+// The first caller initializes the shared state; subsequent callers reuse it.
+// Returns (nil, "", "", nil) if no GitHub token is available.
+func acquireGitHub(logFn func(string)) (*github.Client, string, string, error) {
+	githubShared.mu.Lock()
+	defer githubShared.mu.Unlock()
+
+	if githubShared.refs == 0 {
+		token := resolveGitHubToken()
+		if token == "" {
+			return nil, "", "", nil
+		}
+		cacheDir, err := githubCacheDir()
+		if err != nil {
+			return nil, "", "", err
+		}
+		httpCache, err := newHTTPCache(cacheDir)
+		if err != nil {
+			return nil, "", "", err
+		}
+		// Background context for the transport's AIMD limiters — they live
+		// until Close(), not tied to any single provider's request context.
+		ctx, cancel := context.WithCancel(context.Background())
+		transport := newGitHubTransport(ctx, httpCache, logFn)
+		httpClient := &http.Client{Transport: transport}
+		client := github.NewClient(httpClient).WithAuthToken(token)
+
+		username, err := resolveGitHubUsername(context.Background(), client)
+		if err != nil {
+			transport.Close()
+			cancel()
+			return nil, "", "", err
+		}
+
+		githubShared.transport = transport
+		githubShared.cache = httpCache
+		githubShared.client = client
+		githubShared.username = username
+		githubShared.cacheDir = cacheDir
+		githubShared.cancel = cancel
+	}
+	githubShared.refs++
+	return githubShared.client, githubShared.username, githubShared.cacheDir, nil
+}
+
+// releaseGitHub decrements the reference count and cleans up when the last
+// provider finishes.
+func releaseGitHub() {
+	githubShared.mu.Lock()
+	defer githubShared.mu.Unlock()
+	githubShared.refs--
+	if githubShared.refs == 0 {
+		githubShared.transport.Close()
+		githubShared.cancel()
+		githubShared.cache.prune(maxHTTPCacheEntries)
+		githubShared.transport = nil
+		githubShared.cache = nil
+		githubShared.client = nil
+		githubShared.username = ""
+		githubShared.cacheDir = ""
+		githubShared.cancel = nil
+	}
+}
+
 // ── Types ──────────────────────────────────────────────────────────────
 
-// GitHub reads conversations from GitHub PR and issue comment threads.
-// Threads are cached locally so the API cost is paid once; subsequent runs
-// only fetch threads updated since the last sync.
-type GitHub struct{}
+// GitHub reads conversations from GitHub comment threads. Each instance is
+// scoped to either PRs or issues via the kind field. The two instances share
+// authentication and rate limiting (see acquireGitHub) because they hit the
+// same API with the same token.
+type GitHub struct {
+	kind        string // "pr" or "issue" — the GitHub search type qualifier
+	source      string // conversation source name: "github-prs" or "github-issues"
+	displayName string // human-readable: "GitHub PRs" or "GitHub Issues"
+}
 
-func (g *GitHub) Name() string { return "GitHub" }
+func (g *GitHub) Name() string { return g.displayName }
 
 // cachedThread stores raw API data for a single GitHub thread.
 // Stored upstream of conversation assembly so formatting changes
@@ -217,62 +302,44 @@ type githubMessage struct {
 // ── Provider ───────────────────────────────────────────────────────────
 
 func (g *GitHub) Conversations(ctx context.Context, progress func(SyncProgress)) ([]Conversation, error) {
-	token := resolveGitHubToken()
-	if token == "" {
-		return nil, nil
+	logFn := func(msg string) {
+		progress(SyncProgress{Phase: "log", Detail: msg})
 	}
+	client, username, cacheDir, err := acquireGitHub(logFn)
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		return nil, nil // no token
+	}
+	defer releaseGitHub()
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
-	cacheDir, err := githubCacheDir()
-	if err != nil {
-		return nil, err
-	}
+	isPR := g.kind == "pr"
+	state := loadGitHubSyncState(cacheDir, g.kind)
 
-	httpResponseCache, err := newHTTPCache(cacheDir)
-	if err != nil {
-		return nil, err
-	}
-
-	logFn := func(msg string) {
-		progress(SyncProgress{Phase: "log", Detail: msg})
-	}
-	transport := newGitHubTransport(ctx, httpResponseCache, logFn)
-	defer transport.Close()
-	httpClient := &http.Client{Transport: transport}
-	client := github.NewClient(httpClient).WithAuthToken(token)
-
-	username, err := resolveGitHubUsername(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-
-	state := loadGitHubSyncState(cacheDir)
-
-	// Username changed → invalidate cache
+	// Username changed → invalidate thread cache
 	if state.Username != "" && state.Username != username {
 		os.RemoveAll(filepath.Join(cacheDir, "threads"))
 		state = githubSyncState{}
 	}
 
-	// Sync: discover and fetch threads from the API
+	// Sync: discover and fetch threads for this kind from the API
 	syncStart := time.Now()
-	if err := syncGitHubThreads(ctx, client, username, cacheDir, state, progress); err != nil {
+	if err := syncGitHubKind(ctx, client, username, cacheDir, g.kind, isPR, state, progress); err != nil {
 		// Partial sync is fine — cache what we got. Don't advance the sync
 		// timestamp so the next run retries.
 		progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("warning: sync incomplete: %v", err)})
 	} else {
-		saveGitHubSyncState(cacheDir, githubSyncState{
+		saveGitHubSyncState(cacheDir, g.kind, githubSyncState{
 			LastSync: syncStart,
 			Username: username,
 		})
 	}
 
-	// Prune old HTTP cache entries to bound disk growth.
-	httpResponseCache.prune(maxHTTPCacheEntries)
-
-	// Assemble conversations from everything in cache
+	// Assemble conversations from cached threads of this kind
 	threads, err := loadAllCachedThreads(cacheDir)
 	if err != nil {
 		return nil, err
@@ -280,7 +347,10 @@ func (g *GitHub) Conversations(ctx context.Context, progress func(SyncProgress))
 
 	var conversations []Conversation
 	for _, t := range threads {
-		conv := assembleCachedConversation(username, t)
+		if t.IsPR != isPR {
+			continue // skip threads belonging to the other provider
+		}
+		conv := assembleCachedConversation(username, g.source, t)
 		if conv != nil {
 			conversations = append(conversations, *conv)
 		}
@@ -335,8 +405,8 @@ func githubCacheDir() (string, error) {
 	return dir, nil
 }
 
-func loadGitHubSyncState(cacheDir string) githubSyncState {
-	data, err := os.ReadFile(filepath.Join(cacheDir, "state.json"))
+func loadGitHubSyncState(cacheDir, kind string) githubSyncState {
+	data, err := os.ReadFile(filepath.Join(cacheDir, fmt.Sprintf("state-%s.json", kind)))
 	if err != nil {
 		return githubSyncState{}
 	}
@@ -345,9 +415,9 @@ func loadGitHubSyncState(cacheDir string) githubSyncState {
 	return state
 }
 
-func saveGitHubSyncState(cacheDir string, state githubSyncState) {
+func saveGitHubSyncState(cacheDir, kind string, state githubSyncState) {
 	data, _ := json.Marshal(state)
-	os.WriteFile(filepath.Join(cacheDir, "state.json"), data, 0o644)
+	os.WriteFile(filepath.Join(cacheDir, fmt.Sprintf("state-%s.json", kind)), data, 0o644)
 }
 
 func threadCachePath(cacheDir string, owner, repo string, number int, isPR bool) string {
@@ -404,65 +474,42 @@ func loadAllCachedThreads(cacheDir string) ([]cachedThread, error) {
 
 // ── Sync ───────────────────────────────────────────────────────────────
 
-func syncGitHubThreads(ctx context.Context, client *github.Client, username, cacheDir string, state githubSyncState, progress func(SyncProgress)) error {
+func syncGitHubKind(ctx context.Context, client *github.Client, username, cacheDir, kind string, isPR bool, state githubSyncState, progress func(SyncProgress)) error {
 	if state.LastSync.IsZero() {
-		return syncGitHubFull(ctx, client, username, cacheDir, progress)
+		return syncGitHubKindFull(ctx, client, username, cacheDir, kind, isPR, progress)
 	}
-	return syncGitHubIncremental(ctx, client, username, cacheDir, state.LastSync, progress)
+	return syncGitHubKindIncremental(ctx, client, username, cacheDir, kind, isPR, state.LastSync, progress)
 }
 
-func syncGitHubFull(ctx context.Context, client *github.Client, username, cacheDir string, progress func(SyncProgress)) error {
+func syncGitHubKindFull(ctx context.Context, client *github.Client, username, cacheDir, kind string, isPR bool, progress func(SyncProgress)) error {
 	progress(SyncProgress{Phase: "discovering"})
 
-	for _, isPR := range []bool{true, false} {
-		kind := "pr"
-		if !isPR {
-			kind = "issue"
-		}
-
-		// Check total to decide strategy
-		baseQuery := fmt.Sprintf("involves:%s type:%s", username, kind)
-		total, err := searchGitHubCount(ctx, client, baseQuery)
-		if err != nil {
-			return fmt.Errorf("count %ss: %w", kind, err)
-		}
-
-		if total <= 1000 {
-			issues, err := searchAllGitHubIssues(ctx, client, baseQuery)
-			if err != nil {
-				return fmt.Errorf("search %ss: %w", kind, err)
-			}
-			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
-				return err
-			}
-		} else {
-			if err := dateSegmentedSearch(ctx, client, username, kind, isPR, cacheDir, progress); err != nil {
-				return err
-			}
-		}
+	baseQuery := fmt.Sprintf("involves:%s type:%s", username, kind)
+	total, err := searchGitHubCount(ctx, client, baseQuery)
+	if err != nil {
+		return fmt.Errorf("count %ss: %w", kind, err)
 	}
-	return nil
+
+	if total <= 1000 {
+		issues, err := searchAllGitHubIssues(ctx, client, baseQuery)
+		if err != nil {
+			return fmt.Errorf("search %ss: %w", kind, err)
+		}
+		return fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress)
+	}
+	return dateSegmentedSearch(ctx, client, username, kind, isPR, cacheDir, progress)
 }
 
-func syncGitHubIncremental(ctx context.Context, client *github.Client, username, cacheDir string, since time.Time, progress func(SyncProgress)) error {
+func syncGitHubKindIncremental(ctx context.Context, client *github.Client, username, cacheDir, kind string, isPR bool, since time.Time, progress func(SyncProgress)) error {
 	sinceStr := since.Format("2006-01-02T15:04:05Z")
 	progress(SyncProgress{Phase: "discovering"})
 
-	for _, isPR := range []bool{true, false} {
-		kind := "pr"
-		if !isPR {
-			kind = "issue"
-		}
-		query := fmt.Sprintf("involves:%s type:%s updated:>=%s", username, kind, sinceStr)
-		issues, err := searchAllGitHubIssues(ctx, client, query)
-		if err != nil {
-			return fmt.Errorf("incremental %ss: %w", kind, err)
-		}
-		if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
-			return err
-		}
+	query := fmt.Sprintf("involves:%s type:%s updated:>=%s", username, kind, sinceStr)
+	issues, err := searchAllGitHubIssues(ctx, client, query)
+	if err != nil {
+		return fmt.Errorf("incremental %ss: %w", kind, err)
 	}
-	return nil
+	return fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress)
 }
 
 // dateSegmentedSearch walks yearly intervals most-recent-first, subdividing
@@ -787,7 +834,7 @@ func fetchPRReviews(ctx context.Context, client *github.Client, owner, repo stri
 // from the 2+ owner message threshold. PR descriptions are typically
 // LLM-generated and don't represent the owner's authentic engagement.
 // The body is still included for context after the threshold check passes.
-func assembleCachedConversation(username string, t cachedThread) *Conversation {
+func assembleCachedConversation(username, source string, t cachedThread) *Conversation {
 	var messages []githubMessage
 
 	// Issue body: human-authored opening post, counts toward threshold.
@@ -817,7 +864,7 @@ func assembleCachedConversation(username string, t cachedThread) *Conversation {
 		})
 	}
 
-	conv := assembleGitHubConversation(username, t.Owner, t.Repo, t.Number, t.IsPR, t.Title, t.CreatedAt, t.UpdatedAt, messages)
+	conv := assembleGitHubConversation(username, source, t.Owner, t.Repo, t.Number, t.IsPR, t.Title, t.CreatedAt, t.UpdatedAt, messages)
 
 	// PR body: included for context but annotated as auto-generated.
 	// Prepended after threshold check so it doesn't inflate owner engagement.
@@ -842,7 +889,7 @@ func assembleCachedConversation(username string, t cachedThread) *Conversation {
 
 // assembleGitHubConversation builds a Conversation from pre-formatted messages.
 // Returns nil if the owner has fewer than 2 messages.
-func assembleGitHubConversation(username, owner, repo string, number int, isPR bool, title string, createdAt, updatedAt time.Time, messages []githubMessage) *Conversation {
+func assembleGitHubConversation(username, source, owner, repo string, number int, isPR bool, title string, createdAt, updatedAt time.Time, messages []githubMessage) *Conversation {
 	sort.Slice(messages, func(i, j int) bool {
 		return messages[i].CreatedAt.Before(messages[j].CreatedAt)
 	})
@@ -883,7 +930,7 @@ func assembleGitHubConversation(username, owner, repo string, number int, isPR b
 
 	return &Conversation{
 		SchemaVersion:  1,
-		Source:         githubSource,
+		Source:         source,
 		ConversationID: fmt.Sprintf("%s/%s/%s/%d", owner, repo, kind, number),
 		Project:        fmt.Sprintf("%s/%s", owner, repo),
 		Title:          title,
