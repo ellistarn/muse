@@ -33,7 +33,7 @@ Workflow:
 
   1. muse compose    Discover conversations, observe, and compose muse.md
   2. muse show       Print muse.md
-  3. muse ask        Ask your muse a question (stateless, one-shot)
+  3. muse ask        Ask your muse a question (continues last session)
   4. muse eval       Evaluate how the muse changes responses to design questions
   5. muse listen     Start an MCP server so agents can ask your muse
 

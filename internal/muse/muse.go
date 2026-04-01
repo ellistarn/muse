@@ -30,6 +30,7 @@ type UploadResult struct {
 type AskInput struct {
 	Question   string               // the user's message
 	SessionID  string               // if set, continues an existing conversation
+	New        bool                 // if true, forces a new session (ignores latest)
 	StreamFunc inference.StreamFunc // if set, text deltas are streamed through this callback
 }
 
@@ -47,40 +48,64 @@ type Muse struct {
 	sessions *sessionStore
 }
 
+// Option configures a Muse instance.
+type Option func(*Muse)
+
+// WithSessionsDir enables session persistence under the given directory.
+// Sessions are saved to disk after each turn and the latest session is
+// automatically resumed when no SessionID is provided.
+func WithSessionsDir(dir string) Option {
+	return func(m *Muse) {
+		m.sessions = newSessionStore(dir)
+	}
+}
+
 // New creates a Muse with the given LLM client and document (muse.md content).
 // Pass an empty document for first-run before any composes.
-func New(llm inference.Client, document string) *Muse {
-	return &Muse{
+func New(llm inference.Client, document string, opts ...Option) *Muse {
+	m := &Muse{
 		llm:      llm,
 		document: document,
-		sessions: newSessionStore(),
+		sessions: newSessionStore(""),
 	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 var systemPrompt = prompts.System
 
-// Ask handles a conversation turn. If SessionID is set, continues an existing
-// conversation. Otherwise starts a new one.
+// Ask handles a conversation turn. If SessionID is set, continues that session.
+// If SessionID is empty and session persistence is configured, resumes the
+// latest session from disk. Otherwise starts a new conversation.
+// The system prompt is always refreshed from the current muse.md on resume.
 func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 	var session *Session
 
-	if input.SessionID != "" {
-		// Resume existing conversation
-		s, err := m.sessions.get(input.SessionID)
+	// Resolve which session to use: explicit ID > latest from disk > new.
+	sessionID := input.SessionID
+	if sessionID == "" && !input.New {
+		sessionID = m.sessions.latestID()
+	}
+
+	if sessionID != "" {
+		s, err := m.sessions.get(sessionID)
 		if err != nil {
 			return nil, err
 		}
 		session = s
 	} else {
-		// New conversation
-		doc := m.document
-		if doc == "" {
-			doc = "No muse available yet. Run 'muse compose' to generate one from conversations."
-		}
-		session = &Session{
-			System: fmt.Sprintf(systemPrompt, doc),
-		}
+		session = &Session{}
 	}
+
+	// Always use a fresh system prompt so the current muse.md governs,
+	// even when resuming a session created under an older version.
+	doc := m.document
+	if doc == "" {
+		doc = "No muse available yet. Run 'muse compose' to generate one from conversations."
+	}
+	session.System = fmt.Sprintf(systemPrompt, doc)
 
 	// Hold the session lock for the entire turn so concurrent calls on the
 	// same session are serialized and Messages is never mutated concurrently.
@@ -109,7 +134,7 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 		Content: result.Text,
 	})
 
-	sessionID := m.sessions.save(session)
+	sessionID = m.sessions.save(session)
 	return &AskResult{
 		Response:  result.Text,
 		SessionID: sessionID,

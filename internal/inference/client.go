@@ -4,8 +4,8 @@ import "context"
 
 // Message is a provider-agnostic conversation message.
 type Message struct {
-	Role    string // "user" or "assistant"
-	Content string
+	Role    string `json:"role"` // "user" or "assistant"
+	Content string `json:"content"`
 }
 
 // Response holds the output from a conversation call.

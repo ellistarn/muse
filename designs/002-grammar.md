@@ -15,7 +15,7 @@ Muse           — a document that models the owner's thinking
 ```
 observe : (Source, Text) → [Observation]
 compose : (Muse, [Observation]) → Muse
-ask     : (Muse, Question) → Answer
+ask     : (Muse, Session, Question) → (Answer, Session)
 ```
 
 ### observe
@@ -44,13 +44,15 @@ Folds new observations into the existing muse. Multiple strategies exist
 
 ### ask
 
-Sends a question to the muse. Stateless, one-shot. The muse is loaded as the system prompt.
+Sends a question to the muse within a session. The muse is loaded as the system prompt; the session
+carries message history across invocations. Resumes the latest session by default. See sessions.md.
 
 ## Commands
 
 ```
 muse compose [source...]        # observe new conversations and compose the muse
-muse ask <question>             # ask the muse a question
+muse ask <question>             # ask the muse (resumes current session)
+muse ask --new <question>       # start a fresh session
 muse show                       # print the muse
 muse show --diff                # what changed in the last composition
 muse sync <src> <dst>           # copy data between local and S3
