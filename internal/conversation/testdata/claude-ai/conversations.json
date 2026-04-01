@@ -1,0 +1,75 @@
+[
+  {
+    "uuid": "conv-001",
+    "name": "Help with Go interfaces",
+    "created_at": "2024-06-15T09:00:00.000000+00:00",
+    "updated_at": "2024-06-15T09:05:00.000000+00:00",
+    "chat_messages": [
+      {
+        "uuid": "msg-001",
+        "text": "How should I design an interface for a storage backend?",
+        "sender": "human",
+        "created_at": "2024-06-15T09:00:00.000000+00:00"
+      },
+      {
+        "uuid": "msg-002",
+        "text": "I'd recommend starting with the minimal set of operations your callers actually need.",
+        "sender": "assistant",
+        "created_at": "2024-06-15T09:01:00.000000+00:00"
+      },
+      {
+        "uuid": "msg-003",
+        "text": "That makes sense. What about error handling?",
+        "sender": "human",
+        "created_at": "2024-06-15T09:03:00.000000+00:00"
+      },
+      {
+        "uuid": "msg-004",
+        "text": "Return errors from the interface methods and let callers decide how to handle them.",
+        "sender": "assistant",
+        "created_at": "2024-06-15T09:05:00.000000+00:00"
+      }
+    ]
+  },
+  {
+    "uuid": "conv-002",
+    "name": "",
+    "created_at": "2024-06-16T14:00:00.000000+00:00",
+    "updated_at": "2024-06-16T14:01:00.000000+00:00",
+    "chat_messages": [
+      {
+        "uuid": "msg-005",
+        "text": "What is the capital of France?",
+        "sender": "human",
+        "created_at": "2024-06-16T14:00:00.000000+00:00"
+      },
+      {
+        "uuid": "msg-006",
+        "text": "The capital of France is Paris.",
+        "sender": "assistant",
+        "created_at": "2024-06-16T14:01:00.000000+00:00"
+      }
+    ]
+  },
+  {
+    "uuid": "conv-empty",
+    "name": "Empty conversation",
+    "created_at": "2024-06-17T10:00:00.000000+00:00",
+    "updated_at": "2024-06-17T10:00:00.000000+00:00",
+    "chat_messages": []
+  },
+  {
+    "uuid": "conv-blank-messages",
+    "name": "Blank messages only",
+    "created_at": "2024-06-17T11:00:00.000000+00:00",
+    "updated_at": "2024-06-17T11:00:00.000000+00:00",
+    "chat_messages": [
+      {
+        "uuid": "msg-007",
+        "text": "",
+        "sender": "human",
+        "created_at": "2024-06-17T11:00:00.000000+00:00"
+      }
+    ]
+  }
+]

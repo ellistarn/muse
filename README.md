@@ -44,15 +44,27 @@ Or run as an MCP server so other agents can work with your muse:
 
 Local sources are activated automatically on first run: **Claude Code**, **OpenCode**, **Codex**, **Kiro**.
 
-Network sources require explicit opt-in:
+Network and import sources require explicit opt-in:
 
 ```bash
+muse add claude-ai                  # claude.ai export (see below)
 muse add github-issues              # GitHub issues (requires gh auth)
 muse add github-prs                 # GitHub PRs (requires gh auth)
 muse add slack                      # Slack (set MUSE_SLACK_TOKEN and MUSE_SLACK_WORKSPACE)
 muse remove github-prs              # stop including a source
 muse sources                        # see what's active
 ```
+
+### Claude AI Export
+
+To include your claude.ai conversations:
+
+1. Go to claude.ai → Settings → Export Data
+2. Place the downloaded zip at `~/.muse/imports/claude-ai/`
+3. Run `muse add claude-ai`
+
+An extracted `conversations.json` in the same directory also works.
+Override the directory with `MUSE_CLAUDE_AI_DIR`.
 
 Sources are remembered across runs — `muse compose` processes whatever is active.
 

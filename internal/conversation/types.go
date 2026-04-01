@@ -49,6 +49,7 @@ func Sources() []SourceInfo {
 		{Name: "codex", Provider: &Codex{}},
 		{Name: "kiro", Provider: &Kiro{}},
 		{Name: "kiro-cli", Provider: &KiroCLI{}},
+		{Name: "claude-ai", Provider: &ClaudeAI{}, OptIn: true},
 		{Name: "github-issues", Provider: &GitHub{kind: "issue", source: "github-issues", displayName: "GitHub Issues"}, OptIn: true},
 		{Name: "github-prs", Provider: &GitHub{kind: "pr", source: "github-prs", displayName: "GitHub PRs"}, OptIn: true},
 		{Name: "slack", Provider: &Slack{}, OptIn: true},
