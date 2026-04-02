@@ -2,7 +2,8 @@ package inference
 
 import (
 	"context"
-	"strings"
+	"errors"
+	"fmt"
 )
 
 // Message is a provider-agnostic conversation message.
@@ -15,6 +16,23 @@ type Message struct {
 type Response struct {
 	Text  string
 	Usage Usage
+}
+
+// TruncatedError indicates the response was cut short by the max token limit.
+// All providers return partial content alongside this error — callers can
+// parse resp.Text even when the error is present.
+type TruncatedError struct {
+	OutputTokens int
+}
+
+func (e *TruncatedError) Error() string {
+	return fmt.Sprintf("response truncated: hit max token limit (%d output tokens)", e.OutputTokens)
+}
+
+// IsTruncated reports whether err is a max-token truncation error.
+func IsTruncated(err error) bool {
+	var te *TruncatedError
+	return errors.As(err, &te)
 }
 
 // Client is the inference interface. Providers implement multi-turn
@@ -42,12 +60,4 @@ func ConverseStream(ctx context.Context, c Client, system, user string, fn Strea
 		return "", Usage{}, err
 	}
 	return resp.Text, resp.Usage, err
-}
-
-// IsTruncated reports whether err is a max-token truncation error.
-// All providers (Anthropic, Bedrock, OpenAI) return partial content
-// alongside this error — callers can use the response text even when
-// IsTruncated is true.
-func IsTruncated(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "response truncated: hit max token limit")
 }

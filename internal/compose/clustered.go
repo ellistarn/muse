@@ -1160,10 +1160,10 @@ func runLabel(
 // ── THEME ─────────────────────────────────────────────────────────────
 
 // themeBatchSize is the number of labels per mapping batch in pass 2.
-// Sized so the model reliably maps every label — LLMs skip entries
+// Sized for LLM reliability, not context window — models skip entries
 // in long enumeration tasks. 100 labels ≈ 1500 output tokens, well
-// within budget. Batches run in parallel so call count doesn't
-// affect wall time.
+// within budget. Throughput scales via concurrency (SetLimit), not
+// batch size; providers handle backpressure via AIMD rate limiting.
 const themeBatchSize = 100
 
 // runTheme consolidates a fragmented label set into canonical themes.
@@ -1242,7 +1242,7 @@ func runTheme(
 	for round := 1; len(unmapped) > 0; round++ {
 		var mu sync.Mutex
 		g, gctx := errgroup.WithContext(ctx)
-		g.SetLimit(10)
+		g.SetLimit(50)
 
 		for i := 0; i < len(unmapped); i += themeBatchSize {
 			end := i + themeBatchSize
@@ -1283,10 +1283,10 @@ func runTheme(
 			return nil, totalUsage.Add(usage), fmt.Errorf("theme: %w", err)
 		}
 
-		// Collect labels still missing a mapping
+		// Collect labels still missing a mapping (keys are lowercased)
 		var remaining []string
 		for _, l := range unmapped {
-			if _, ok := mapping[l]; !ok {
+			if _, ok := mapping[strings.ToLower(l)]; !ok {
 				remaining = append(remaining, l)
 			}
 		}
@@ -1296,6 +1296,7 @@ func runTheme(
 		}
 		if len(remaining) == len(unmapped) {
 			// No progress — stop to avoid infinite loop
+			fmt.Fprintf(os.Stderr, "  warning: %d labels unmapped after retry exhaustion\n", len(remaining))
 			break
 		}
 		unmapped = remaining
@@ -1337,6 +1338,8 @@ func parseThemeLines(resp string) []string {
 // inputLabels are the actual labels sent to the model; the parser resolves the
 // model's output against them case-insensitively since models often rephrase or
 // re-capitalize labels instead of copying them verbatim.
+//
+// Keys are lowercased to match runGroup's case-insensitive label lookup.
 func parseThemeMappings(resp string, inputLabels []string) map[string]string {
 	// Build case-insensitive lookup: lowered → original
 	lookup := make(map[string]string, len(inputLabels))
@@ -1373,8 +1376,10 @@ func parseThemeMappings(resp string, inputLabels []string) map[string]string {
 		if original, ok := lookup[strings.ToLower(from)]; ok {
 			from = original
 		}
-		if from != to {
-			mapping[from] = to
+		// Lowercase key to match runGroup's case-insensitive lookup
+		key := strings.ToLower(from)
+		if key != strings.ToLower(to) {
+			mapping[key] = to
 		}
 	}
 	return mapping

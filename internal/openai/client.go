@@ -120,7 +120,7 @@ func (c *Client) ConverseMessages(ctx context.Context, system string, messages [
 		result = &inference.Response{Text: text, Usage: usage}
 
 		if finishReason == "length" {
-			return fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+			return &inference.TruncatedError{OutputTokens: usage.OutputTokens}
 		}
 		return nil
 	})
@@ -174,7 +174,7 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 		result = &inference.Response{Text: fullText, Usage: usage}
 
 		if finishReason == "length" {
-			return fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+			return &inference.TruncatedError{OutputTokens: usage.OutputTokens}
 		}
 		return nil
 	})

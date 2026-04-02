@@ -3,7 +3,6 @@ package bedrock
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -62,8 +61,8 @@ func TestConverseMessagesPreservesPartialResponseOnTruncation(t *testing.T) {
 	if got, want := resp.Usage.OutputTokens, 456; got != want {
 		t.Fatalf("OutputTokens = %d, want %d", got, want)
 	}
-	if !strings.Contains(err.Error(), "response truncated") {
-		t.Fatalf("err = %v, want truncation error", err)
+	if !inference.IsTruncated(err) {
+		t.Fatalf("err = %v, want TruncatedError", err)
 	}
 }
 

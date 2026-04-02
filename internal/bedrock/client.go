@@ -282,7 +282,7 @@ func (c *Client) converseRawOnce(ctx context.Context, system string, messages []
 	}
 	textValue := text.String()
 	if out.StopReason == types.StopReasonMaxTokens {
-		return textValue, usage, out.StopReason, fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+		return textValue, usage, out.StopReason, &inference.TruncatedError{OutputTokens: usage.OutputTokens}
 	}
 	return textValue, usage, out.StopReason, nil
 }
@@ -352,7 +352,7 @@ func (c *Client) converseStreamOnce(ctx context.Context, sr StreamingRuntime, in
 
 	if stopReason == types.StopReasonMaxTokens {
 		return &inference.Response{Text: fullText, Usage: usage},
-			fmt.Errorf("response truncated: hit max token limit (%d output tokens)", usage.OutputTokens)
+			&inference.TruncatedError{OutputTokens: usage.OutputTokens}
 	}
 
 	return &inference.Response{Text: fullText, Usage: usage}, nil
