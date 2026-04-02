@@ -89,6 +89,24 @@ func ListObservations(ctx context.Context, store storage.Store) ([]SourceConvers
 	return listArtifacts(ctx, store, "observations/")
 }
 
+// CountObservationItems returns the total number of discrete observation items
+// per source by reading each observation file and summing its Items.
+func CountObservationItems(ctx context.Context, store storage.Store) (map[string]int, error) {
+	entries, err := ListObservations(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(entries))
+	for _, e := range entries {
+		obs, err := GetObservations(ctx, store, e.Source, e.ConversationID)
+		if err != nil {
+			return nil, err
+		}
+		counts[e.Source] += len(obs.Items)
+	}
+	return counts, nil
+}
+
 // ListLabels returns all (source, conversationID) pairs that have labels.
 func ListLabels(ctx context.Context, store storage.Store) ([]SourceConversation, error) {
 	return listArtifacts(ctx, store, "compose/labels/")
