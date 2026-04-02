@@ -53,9 +53,10 @@ The owner's messages map to `user`. All peers map to `assistant`. Every message 
 `@displayname:` for attribution — the downstream extract prompt sees who said what.
 
 This reuses the pipeline's existing `user`/`assistant` contract. The labels are structural, not
-semantic — the `@displayname:` prefix in the content carries the actual attribution. The extract
-prompt looks for reasoning, voice, and awareness in the `[human]` messages, which works for Slack
-because the owner's messages are the ones mapped to `user`.
+semantic — the `@displayname:` prefix in the content carries the actual attribution. The human-source
+extract prompt looks for reasoning, voice, and awareness in the `[human]` messages, which works for
+Slack because the owner's messages are the ones mapped to `user`. (Voice is derived exclusively from
+human-to-human conversations; the AI extract prompt captures only reasoning and awareness.)
 
 For Slack, `extractTurns` accepts 1 user turn (instead of the default 2 for AI conversations).
 A thread where the owner makes one substantive point and three peers respond is valid signal —
