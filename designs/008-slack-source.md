@@ -5,9 +5,10 @@ coding-session sources (Claude Code, OpenCode), Slack conversations are between 
 not between a human and an AI assistant. This is where people argue, decide, persuade, and
 coordinate — the signal is different from what shows up in tool-assisted work.
 
-Slack is opt-in: `muse compose slack`. It requires `MUSE_SLACK_TOKEN` (a SAML cookie file path or
-raw token) and `MUSE_SLACK_WORKSPACE` (for SSO, comma-separated for multiple workspaces). It does
-not run on bare `muse compose`.
+Slack is opt-in: `muse add slack`. It uses `MUSE_SLACK_TOKEN` (a SAML cookie file path or
+raw token) and `MUSE_SLACK_WORKSPACE` (for SSO, comma-separated for multiple workspaces). Once
+added, Slack is remembered across runs. If the env vars are not set at compose time, Slack is
+skipped with a log message — it does not block the rest of the pipeline.
 
 ## Model
 
@@ -124,13 +125,13 @@ without re-fetching.
 
 ## Failure modes
 
-**Missing credentials**: Hard error with actionable message. Since Slack is opt-in, a missing
-`MUSE_SLACK_TOKEN` means the user asked for Slack but didn't configure it — silent nil would be
-confusing.
+**Missing credentials**: Skip with a log message. Since Slack is a remembered preference via
+`muse add`, the env vars may not be set in every environment (e.g. a different machine, a CI
+runner). Missing `MUSE_SLACK_TOKEN` returns `(nil, nil)` — the same contract local sources use
+when their data directory doesn't exist. Present but broken credentials (invalid token, expired
+SSO) are real errors.
 
-**Sync failure**: Hard error. Unlike default providers that fail gracefully (the user didn't ask
-for them), explicitly-requested sources should fail loudly. Partial results from a broken sync
-are worse than no results.
+**Sync failure**: Hard error. Partial results from a broken sync are worse than no results.
 
 **Thread fetch failure**: Individual thread failures are skipped (`continue`). The channel history
 still captures the thread parent message; only the replies are lost. The next incremental sync

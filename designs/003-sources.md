@@ -51,18 +51,20 @@ means muse can produce a muse.md from a subset of conversations without the user
 
 ## Opt-in boundary
 
-**`muse compose` with no arguments never makes network calls.**
+**`muse compose` with no arguments never makes network calls** unless opt-in sources have been
+previously added.
 
 Local sources read from the filesystem or local databases — things already on the machine because the
 user ran the tool. They are scanned unconditionally. If the data isn't there, the source returns
-nothing. Network sources reach out to APIs and require explicit selection: `muse compose github`,
-`muse compose slack`.
+nothing. Network sources reach out to APIs and require explicit activation: `muse add github-issues`,
+`muse add slack`. Once added, a source is remembered across runs via observation directories.
 
-When the user explicitly names a source, failure is fatal — the user asked for it and silence would
-mask the problem. This includes missing credentials: if `muse compose github` is run without a token,
-that is an error, not a silent no-op. When running with defaults, individual source failures are
-warnings and the source is skipped — a broken local database shouldn't block the other sources that
-work.
+A remembered source whose credentials are missing is skipped, not an error — the user may run
+`muse compose` from a machine or environment where the env vars aren't configured. The source logs
+that it's being skipped and returns nothing, the same contract local sources use when their data
+directory doesn't exist. Present but broken credentials (invalid token, expired SSO, wrong scopes)
+are real errors. When running with defaults, individual source failures are warnings and the source
+is skipped — a broken local database shouldn't block the other sources that work.
 
 ## Caching and sync
 
