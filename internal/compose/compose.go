@@ -378,7 +378,7 @@ const maxChunkChars = 200_000
 // the assistant message that preceded a human response with that human message.
 // For AI conversations, requires at least 2 human turns (corrections/preferences).
 // For peer conversations (e.g. Slack), a single human turn suffices since even
-// one substantive statement reveals reasoning and voice.
+// one substantive statement reveals reasoning, awareness, and voice.
 func extractTurns(conv *conversation.Conversation) []turn {
 	var userTurns int
 	for _, msg := range conv.Messages {

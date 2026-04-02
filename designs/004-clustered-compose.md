@@ -37,11 +37,13 @@ COMPOSE    per-cluster summarize → compose with noise
 The observe step routes to different prompts based on source type:
 
 - **AI conversations** (claude-code, opencode, kiro, codex): Uses the standard observe prompt.
-  Signal comes from corrections, course changes, and preferences expressed while directing an AI.
+  Extracts reasoning and awareness only — corrections, course changes, and preferences expressed
+  while directing an AI. Voice is not extracted — AI interactions select for a corrective register.
   `[owner]`/`[assistant]` role labels. Assistant messages truncated to 500 chars.
 
-- **Human conversations** (slack, github): Uses the human observe prompt. Signal comes from
-  positions defended against peers, architectural reasoning explained to colleagues, mentorship,
+- **Human conversations** (slack, github): Uses the human observe prompt. Extracts reasoning,
+  awareness, and voice — the exclusive source for voice observations. Signal comes from positions
+  defended against peers, architectural reasoning explained to colleagues, mentorship,
   organizational judgment. `[owner]`/`[peer]` role labels. Both sides preserved in full because
   peer messages carry context the owner is responding to.
 
@@ -197,7 +199,8 @@ reasoning explained to colleagues, mentorship, strategic reasoning. The `[assist
 caused the LLM to treat peer messages as AI output and ignore them.
 
 The human observe prompt uses `[owner]`/`[peer]` labels and reframes what signal looks like.
-This increased Slack observation yield roughly 3x.
+This increased Slack observation yield roughly 3x. Voice extraction is exclusive to the human
+observe prompt.
 
 ### Why theme instead of normalize?
 

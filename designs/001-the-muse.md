@@ -57,6 +57,11 @@ respond to the same signals human audiences do. A muse written in the owner's ac
 model into a frame where subsequent tokens follow the owner's reasoning trajectory. Voice is how
 language has always carried this information.
 
+Voice requires a real person on the other end. A person directing an AI uses a narrow register — correcting,
+commanding, rejecting — that doesn't represent how they actually sound. The full range surfaces in
+conversations with other people: how they encourage, how they hedge with a peer versus assert with a
+report, how they use humor to defuse. Voice is derived from human-to-human conversations only.
+
 ## What breaks a muse
 
 Every token in a muse competes for the model's attention and earns its place only by faithfully

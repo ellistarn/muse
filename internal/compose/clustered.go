@@ -744,7 +744,8 @@ func isRelevant(s string) bool {
 // observationPrefix is the required prefix for structured observation output.
 const observationPrefix = "Observation: "
 
-// quotePrefix is the optional prefix for verbatim voice-carrying quotes.
+// quotePrefix is the optional prefix for verbatim quotes (voice signal from
+// human sources, reasoning anchors from AI sources).
 const quotePrefix = "Quote: "
 
 // parseObservationItems extracts discrete observations from LLM output.
@@ -822,13 +823,13 @@ type observationEntry struct {
 	Source         string
 	ConversationID string
 	Index          int
-	Quote          string // optional verbatim quote carrying voice signal
+	Quote          string // optional verbatim quote (voice from human sources, reasoning anchor from AI sources)
 	Text           string // the analytical observation text
 	Date           string // conversation date (YYYY-MM-DD)
 }
 
 // Format returns the observation as text for LLM consumption. When a quote
-// is present, it's included as a voice exemplar preceding the observation.
+// is present, it's included as an exemplar preceding the observation.
 // The date is included so downstream stages can reason about recency.
 func (e observationEntry) Format() string {
 	var parts []string
