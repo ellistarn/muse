@@ -1296,9 +1296,7 @@ func runTheme(
 				round, len(unmapped)-len(remaining), len(unmapped), len(remaining))
 		}
 		if len(remaining) == len(unmapped) {
-			// No progress — stop to avoid infinite loop
-			fmt.Fprintf(os.Stderr, "  warning: %d labels unmapped after retry exhaustion\n", len(remaining))
-			break
+			return nil, totalUsage.Add(usage), fmt.Errorf("theme map: %d labels unmapped after retry exhaustion", len(remaining))
 		}
 		unmapped = remaining
 	}
@@ -1379,9 +1377,7 @@ func parseThemeMappings(resp string, inputLabels []string) map[string]string {
 		}
 		// Lowercase key to match runGroup's case-insensitive lookup
 		key := strings.ToLower(from)
-		if key != strings.ToLower(to) {
-			mapping[key] = to
-		}
+		mapping[key] = to
 	}
 	return mapping
 }
