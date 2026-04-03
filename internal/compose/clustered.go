@@ -222,6 +222,32 @@ func RunClustered(
 	})
 	logAfter("%d summaries", len(summaries)).Cost(time.Since(synthStart), synthUsage.Cost()).Print()
 
+	// ── THESIS ─────────────────────────────────────────────────────────
+	thesisStart := time.Now()
+	logBefore("thesis", "%d summaries", len(summaries))
+	thesis, thesisUsage, err := runThesis(ctx, composeLLM, summaries)
+	if err != nil {
+		return nil, fmt.Errorf("thesis: %w", err)
+	}
+	totalUsage = totalUsage.Add(thesisUsage)
+	thesisDataSize := 0
+	for _, s := range summaries {
+		thesisDataSize += len(s)
+	}
+	stages = append(stages, StageStats{
+		Name:     "thesis",
+		Model:    composeLLM.Model(),
+		Duration: time.Since(thesisStart),
+		Usage:    thesisUsage,
+		DataSize: thesisDataSize,
+	})
+	logAfter("thesis").Cost(time.Since(thesisStart), thesisUsage.Cost()).Print()
+
+	// Validate that the thesis references every cluster from the input.
+	if err := ValidateThesis(thesis, len(summaries)); err != nil {
+		return nil, err
+	}
+
 	// ── COMPOSE ────────────────────────────────────────────────────────
 	composeStart := time.Now()
 	composeInput := fmt.Sprintf("%d summaries", len(summaries))
@@ -229,7 +255,7 @@ func RunClustered(
 		composeInput += fmt.Sprintf(" + %d outliers", len(noiseObs))
 	}
 	logBefore("compose", "%s", composeInput)
-	muse, _, composeUsage, err := runCompose(ctx, composeLLM, store, summaries, noiseObs)
+	muse, _, composeUsage, err := runCompose(ctx, composeLLM, store, thesis, summaries, noiseObs)
 	if err != nil {
 		return nil, fmt.Errorf("compose: %w", err)
 	}
@@ -1296,7 +1322,18 @@ func runTheme(
 				round, len(unmapped)-len(remaining), len(unmapped), len(remaining))
 		}
 		if len(remaining) == len(unmapped) {
-			return nil, totalUsage.Add(usage), fmt.Errorf("theme map: %d labels unmapped after retry exhaustion", len(remaining))
+			// No progress — map remaining labels to themselves as standalone themes.
+			// These will typically form tiny clusters that fall below the cluster
+			// threshold and end up as noise, which is the correct outcome for labels
+			// that don't fit any canonical theme.
+			for _, l := range remaining {
+				mapping[strings.ToLower(l)] = l
+			}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  round %d: %d labels self-mapped (no theme match)\n", round, len(remaining))
+			}
+			unmapped = nil
+			break
 		}
 		unmapped = remaining
 	}
@@ -1570,18 +1607,56 @@ func runSummarize(
 	return summaries, totalUsage, nil
 }
 
+// ── THESIS ─────────────────────────────────────────────────────────────
+
+// ValidateThesis checks that the thesis output references every cluster
+// by its canonical "Cluster N" identifier. This ensures no cluster was
+// silently dropped before compose runs.
+func ValidateThesis(thesis string, clusterCount int) error {
+	for i := range clusterCount {
+		id := fmt.Sprintf("Cluster %d", i+1)
+		if !strings.Contains(thesis, id) {
+			return fmt.Errorf("thesis: missing %s — thesis output may have dropped a cluster", id)
+		}
+	}
+	return nil
+}
+
+// runThesis extracts identity, thesis, and section structure from cluster
+// summaries. This is a dedicated step so compose only has to write, not
+// discover structure and write simultaneously.
+func runThesis(
+	ctx context.Context,
+	llm inference.Client,
+	summaries []string,
+) (string, inference.Usage, error) {
+	var input strings.Builder
+	for i, summary := range summaries {
+		fmt.Fprintf(&input, "### Cluster %d\n\n%s\n\n", i+1, summary)
+	}
+
+	resp, usage, err := inference.Converse(ctx, llm, prompts.Thesis, input.String(), inference.WithMaxTokens(4096))
+	if err != nil {
+		return "", usage, err
+	}
+	return strings.TrimSpace(resp), usage, nil
+}
+
 // ── COMPOSE ────────────────────────────────────────────────────────────
 
-// runCompose combines cluster summaries and noise observations into muse.md.
+// runCompose combines thesis, cluster summaries, and noise observations into muse.md.
 func runCompose(
 	ctx context.Context,
 	llm inference.Client,
 	store storage.Store,
+	thesis string,
 	summaries []string,
 	noiseObs []string,
 ) (string, string, inference.Usage, error) {
 	var input strings.Builder
-	input.WriteString("## Cluster Summaries\n\n")
+	input.WriteString("## Thesis\n\n")
+	input.WriteString(thesis)
+	input.WriteString("\n\n## Cluster Summaries\n\n")
 	for i, summary := range summaries {
 		fmt.Fprintf(&input, "### Cluster %d\n\n%s\n\n", i+1, summary)
 	}
