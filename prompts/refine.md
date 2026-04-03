@@ -4,4 +4,6 @@ The test: would this observation change the muse's reasoning, self-awareness, or
 
 Reject observations about the assistant's behavior or performance — the muse models the owner, not the AI. Also reject observations that are really about the model's defaults disguised as the person's traits — "prefers concise output" may be frustration with a verbose model, not a genuine characteristic.
 
+Reject preferences for specific tools, configurations, or routine workflow habits unless they reveal a principle that would predict other decisions. "Uses X tool" or "prefers Y configuration" tells you nothing about how someone thinks. "Co-locates related data because access patterns are a first-class design consideration" tells you a principle — the tool choice is evidence, but the principle is the observation.
+
 Keep the original wording, "Observation: " prefix, and any "Quote: " lines. Filter, don't rewrite. If an observation survives, its quote (if any) survives with it. If nothing survives, respond with exactly "NONE".

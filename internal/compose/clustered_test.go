@@ -57,3 +57,41 @@ func TestLabelFingerprintIncludesVocabulary(t *testing.T) {
 		t.Error("same vocabulary should produce same fingerprint")
 	}
 }
+
+func TestValidateThesis(t *testing.T) {
+	validThesis := `## Identity
+
+Builds infrastructure at the platform layer.
+
+## Thesis
+
+Systems should converge toward declared intent.
+
+## Structure
+
+- Cluster 1: **core** — convergence as architecture
+- Cluster 2: **core** — naming as design
+- Cluster 3: **supporting** — enriches Cluster 1
+`
+
+	// All clusters referenced — should pass
+	if err := compose.ValidateThesis(validThesis, 3); err != nil {
+		t.Errorf("valid thesis should pass: %v", err)
+	}
+
+	// Missing Cluster 2 — should fail
+	missingCluster := `## Structure
+
+- Cluster 1: **core** — convergence
+- Cluster 3: **supporting** — enriches Cluster 1
+`
+	err := compose.ValidateThesis(missingCluster, 3)
+	if err == nil {
+		t.Error("thesis missing Cluster 2 should fail validation")
+	}
+
+	// Zero clusters — should pass (vacuous truth)
+	if err := compose.ValidateThesis("", 0); err != nil {
+		t.Errorf("zero clusters should pass: %v", err)
+	}
+}

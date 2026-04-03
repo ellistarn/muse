@@ -46,3 +46,6 @@ var JudgePreference string
 
 //go:embed generate-eval.md
 var GenerateEval string
+
+//go:embed thesis.md
+var Thesis string

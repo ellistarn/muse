@@ -21,15 +21,15 @@ parse time. A refine step filters candidates to only those that would change how
 
 The surviving observations are labeled with short thematic labels, themed into canonical patterns,
 and grouped into clusters by exact label match. Labels with 3+ observations form clusters; the rest
-flow through as noise. Each cluster is summarized independently, then composed with noise
-observations into the final muse.md.
+flow through as noise. Each cluster is summarized independently, a thesis step extracts identity and
+section structure, then compose writes the final muse.md against that skeleton.
 
 ```
 conversations ─► OBSERVE ─► observations ─► CLUSTER ─► samples ─► COMPOSE ─► muse.md
 
 OBSERVE    compress → observe (Observation: prefix) → refine → parse
 CLUSTER    label (parallel) → theme (consolidate vocabulary) → group (exact match)
-COMPOSE    per-cluster summarize → compose with noise
+COMPOSE    per-cluster summarize → thesis (identity + structure) → compose with noise
 ```
 
 ### Source-aware observation
@@ -237,6 +237,46 @@ judgment step — it decides what to organize, preserve, or let go.
 Summarization compresses each cluster independently (parallel), then composition organizes across
 cluster summaries. Single-pass would be simpler but forces one LLM call to both summarize and
 organize. Two passes keep each call focused and produce debuggable intermediate artifacts.
+
+### Why a separate thesis step between summarize and compose?
+
+Structure-finding and prose generation are different cognitive tasks that compose badly in one prompt.
+When compose discovers structure and writes simultaneously, it either front-loads a long planning
+phase that crowds out writing quality, or it discovers structure emergently and produces incoherent
+organization. The thesis step extracts identity, governing principle, named tensions, and section
+ordering from cluster summaries as a dedicated pass. Compose receives this skeleton and writes
+against it — it doesn't need to decide what the document is about while also deciding how to say it.
+The thesis is a debuggable intermediate artifact: if the muse's structure is wrong, the thesis shows
+whether the problem is in structure-finding or in prose generation.
+
+The thesis stage boundary has three contracts:
+- **Output**: must produce Identity, Thesis, and Structure sections; may produce a Tensions section
+  when peer commitments exist that don't derive from the governing principle. Structure must
+  reference every input cluster ID by number. The pipeline validates this before proceeding.
+- **Authority**: thesis owns structure. Compose follows the provided identity, thesis, and section
+  ordering — it does not re-derive or override them.
+- **Failure**: if thesis drops a cluster, the pipeline fails before compose runs. Loudly wrong beats
+  silently wrong — compose generating confident prose from an incomplete skeleton is the failure mode
+  that matters.
+
+Thesis uses the compose model (the strongest available), not the summarize model. It is the
+highest-judgment call in the pipeline — deciding what matters costs more to get wrong than deciding
+how to say it.
+
+### Why does the thesis step identify tensions?
+
+A single governing thesis force-fits independent intellectual commitments under one umbrella —
+the document reads as coherent but is dishonest about where the person's thinking is irreducibly
+multi-principled. Multiple theses produce topic-bucket documents. Tensions are the middle ground:
+one governing principle that generates the majority of sections, plus up to two peer commitments
+that coexist with it rather than deriving from it.
+
+Tensions are an integration strategy for compose, not a license to expand. A tension earns its own
+section only when it genuinely pulls against the thesis in ways that require the muse to navigate
+the conflict. Otherwise it is expressed as texture within thesis-motivated sections — the way a
+claim is held, the caveat that accompanies a decision. The compose prompt enforces this: two
+sections about the same practice from different angles should be one section, and a section that
+restates the thesis as applied content is redundant.
 
 ### Why treat each cluster as one idea regardless of size?
 
