@@ -40,6 +40,27 @@ Or run as an MCP server so other agents can work with your muse:
 }
 ```
 
+## Peer Muses
+
+Build a muse for someone else from their public GitHub activity. Useful for anticipating
+how a reviewer thinks before submitting a PR.
+
+```bash
+muse compose github/ellistarn --project karpenter    # build a peer muse
+muse ask --peer github/ellistarn --project karpenter "Review this design"
+```
+
+`--project` narrows to specific repositories. Unqualified names (e.g. `karpenter`) resolve
+by searching GitHub for repos where the target has activity. Qualified names
+(e.g. `aws/karpenter-provider-aws`) match exactly.
+
+Peer muses are stored under `~/.muse/peers/` separately from the owner's muse. No
+credentials from the target are needed — the data is public.
+
+```bash
+muse eval --generative --peer github/ellistarn --project karpenter  # evaluate the peer muse
+```
+
 ## Sources
 
 Local sources are activated automatically on first run: **Claude Code**, **OpenCode**, **Codex**, **Kiro**.

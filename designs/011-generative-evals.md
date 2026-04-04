@@ -24,7 +24,7 @@ to a point) and ask it to respond as the person would. Compare the muse's genera
 what the person actually said. Score the alignment.
 
 ```bash
-muse eval --generative --peer ellistarn --project karpenter --cases 10
+muse eval --generative --peer github/ellistarn --project karpenter --cases 10
 ```
 
 The command:
