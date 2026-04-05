@@ -19,6 +19,7 @@ import (
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/muse"
 	"github.com/ellistarn/muse/internal/storage"
+	"github.com/ellistarn/muse/prompts"
 )
 
 // genEvalCase is a single test case for generative evaluation.
@@ -69,44 +70,6 @@ func severityWeight(severity string) float64 {
 		return 0.5 // default to advisory
 	}
 }
-
-const extractPrompt = `Extract the distinct review concerns from this code review comment.
-Each concern is one actionable item — a distinct thing the reviewer wants changed or flagged.
-A broad claim supported by specific instances is one concern, not multiple.
-
-Classify each concern by severity:
-- "blocking": the reviewer is blocking on this, it must change ("this does not belong here", "this is wrong", "this will break")
-- "advisory": the reviewer wants a change but is not blocking ("consider", "should", "let's")
-- "suggestive": the reviewer is floating an idea or preference ("maybe", "might be nice", "could")
-
-Return a JSON array of objects with "concern" and "severity" fields.
-If the comment has no substantive review concerns (e.g. "LGTM", "looks good"), return an empty array.
-
-Review comment:
-%s`
-
-const alignPrompt = `You are comparing two lists of code review concerns to measure alignment.
-
-Ground truth concerns (what the reviewer actually said):
-%s
-
-Predicted concerns (what the muse predicted):
-%s
-
-For each ground truth concern, find the best matching predicted concern. Score each match:
-- 1.0 if the predicted concern identifies the same issue with similar reasoning
-- 0.5 if the predicted concern is in the same area but frames the issue differently
-- 0.0 if no predicted concern matches
-
-Also identify which predicted concerns have no match in ground truth.
-
-Return JSON:
-{
-  "matches": [{"truth": "...", "predicted": "...", "score": 0.0}],
-  "unmatched_predicted": ["..."],
-  "top_truth_concern": "...",
-  "top_predicted_concern": "..."
-}`
 
 // runGenerativeEval runs the held-out generative evaluation.
 // If museOverride is non-empty, it is read as a file path and used as the muse
@@ -347,8 +310,7 @@ func scoreAlignment(ctx context.Context, llm inference.Client, groundTruth, resp
 
 // extractConcerns calls the LLM to extract review concerns with severity.
 func extractConcerns(ctx context.Context, llm inference.Client, text string) []concern {
-	prompt := fmt.Sprintf(extractPrompt, text)
-	resp, _, err := inference.Converse(ctx, llm, "You extract structured review concerns.", prompt)
+	resp, _, err := inference.Converse(ctx, llm, prompts.ExtractConcerns, text)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "    extractConcerns error: %v\n", err)
 		return nil
@@ -416,8 +378,8 @@ func alignConcerns(ctx context.Context, llm inference.Client, truthConcerns, res
 	truthJSON, _ := json.Marshal(truthTexts)
 	responseJSON, _ := json.Marshal(responseTexts)
 
-	prompt := fmt.Sprintf(alignPrompt, string(truthJSON), string(responseJSON))
-	text, _, err := inference.Converse(ctx, llm, "You align code review concerns.", prompt)
+	input := fmt.Sprintf("Ground truth concerns:\n%s\n\nPredicted concerns:\n%s", string(truthJSON), string(responseJSON))
+	text, _, err := inference.Converse(ctx, llm, prompts.AlignConcerns, input)
 	if err != nil {
 		return genScore{TruthConcerns: len(truthConcerns), MuseConcerns: len(responseConcerns)}
 	}

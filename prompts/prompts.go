@@ -49,3 +49,12 @@ var GenerateEval string
 
 //go:embed thesis.md
 var Thesis string
+
+//go:embed reinforce.md
+var Reinforce string
+
+//go:embed extract-concerns.md
+var ExtractConcerns string
+
+//go:embed align-concerns.md
+var AlignConcerns string

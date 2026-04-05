@@ -14,6 +14,7 @@ import (
 	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/inference"
 	"github.com/ellistarn/muse/internal/storage"
+	"github.com/ellistarn/muse/prompts"
 )
 
 // weightedObservation is an observation with its validated weight.
@@ -23,18 +24,6 @@ type weightedObservation struct {
 	Quote    string
 	Weight   float64
 }
-
-const reinforcePrompt = `You are reviewing an observation about how you think and work.
-Be ruthlessly selective. Most observations are generic things any good reviewer does.
-Only reinforce observations that capture something DISTINCTIVE about your specific
-review style — patterns that distinguish you from other competent reviewers.
-
-Observation: "%s"
-
-Respond with ONLY one of:
-+1  if this captures a distinctive pattern specific to how YOU review (not generic good practice)
- 0  if this is accurate but generic — any experienced reviewer would do this
--1  if this is wrong, misleading, or describes something you actively avoid`
 
 // validateObservations loads a peer's observations and asks their muse to
 // reinforce, ignore, or reject each one. Returns weighted observations.
@@ -92,9 +81,11 @@ func validateObservations(ctx context.Context, peer, project string) ([]weighted
 				return nil
 			}
 
-			// Ask the muse
-			prompt := fmt.Sprintf(reinforcePrompt, obs.Text)
-			resp, _, err := inference.Converse(gctx, llm, document, prompt)
+			// Muse-contextual prompt: the muse is the system context and
+			// task instructions (prompts.Reinforce) go in the user message.
+			// This pattern recurs anywhere the muse guides a task (observation,
+			// judging, etc). See designs/011-generative-evals.md.
+			resp, _, err := inference.Converse(gctx, llm, document, fmt.Sprintf("%s\n\nObservation: \"%s\"", prompts.Reinforce, obs.Text))
 			if err != nil {
 				return nil
 			}

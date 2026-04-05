@@ -153,6 +153,16 @@ held-out semantics but costs $1-3 per build and changes the muse being tested. T
 approach — use the existing muse, test against recent conversations the muse hasn't seen — is
 cheaper and tests the artifact the operator actually uses.
 
+## Prompt architecture
+
+Two patterns for wiring prompts to `inference.Converse`:
+
+1. **Task prompts.** The prompt is the system message, user data is the user message. Every top-level command uses this: `Converse(ctx, llm, prompts.Observe, transcript)`.
+
+2. **Muse-contextual prompts.** The muse document is the system message, task instructions are concatenated into the user message: `Converse(ctx, llm, museDocument, prompts.Reinforce + observation)`. Used when the muse needs to guide the task, not just the response.
+
+Reinforce (012) uses pattern 2 today. Muse-guided observation, muse-guided judging, and any future "think like this person while doing X" task will use the same pattern. Worth discussing whether `inference.Converse` should support this natively (e.g. multiple system inputs, or an explicit muse context parameter) rather than having each call site concatenate.
+
 ## Deferred
 
 ### Automated prompt optimization
