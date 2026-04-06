@@ -131,7 +131,7 @@ Severity-weighted recall delta over baseline, 30 cases per reviewer:
 | Todd | -0.10 | — | **+0.07** | -0.04 |
 | Derek | -0.08 | +0.01 | **+0.11** | +0.25 |
 
-v3 is positive for all four reviewers. No regressions. The biggest improvements:
+v3 is positive for all four reviewers with no regressions. The biggest improvements:
 
 - **Todd**: -0.10 → +0.07. His muse rejected 103 of 194 observations as generic. Removing
   that noise let the distinctive patterns through.
@@ -155,9 +155,9 @@ different mechanisms.
 
 ### Why not skip individual muses entirely?
 
-Individual muses remain useful standalone. `muse ask --peer github/DerekFrank` still works.
-The team muse no longer depends on them for composition — it goes from observations to team
-muse directly — but uses individual muses as the judge in the validation step.
+Individual muses remain useful standalone. The team muse no longer depends on them for
+composition (it goes from observations to team muse directly) but uses individual muses
+as the judge in the validation step.
 
 ### Why validate against observations instead of the muse level?
 

@@ -78,9 +78,9 @@ measurement artifact. A reviewer who thinks "the error handling is fragile, the 
 inconsistent, and the test coverage is thin" might only write about the error handling. The muse
 raises all three. Precision says 0.33; the muse's actual coverage is higher.
 
-This means precision is useful for comparing muse vs baseline (is the muse raising *more
-relevant* concerns?) but the absolute number is not interpretable as muse quality. Recall is the
-better single metric for muse quality, with the caveat that it has its own structural ceiling.
+Precision is useful for comparing muse vs baseline (is the muse raising *more relevant*
+concerns?) but the absolute number is not interpretable as quality. Recall is the better
+single metric, with the caveat that it has its own structural ceiling.
 
 **Recall has a structural ceiling below 1.0.** Reviewers don't state everything they notice.
 A recall of 0.6 may be excellent if reviewers typically state 60% of what they see.
@@ -93,10 +93,9 @@ about whether a field should be an implementation detail — the muse caught the
 concern because Ellis's patterns include "what belongs at which layer." The base model missed it.
 
 **The muse's value is on architecture and judgment, not code correctness.** The base model
-catches bugs, naming issues, and missing error handling. The muse adds the reviewer's specific
-architectural preferences and design instincts. This means the eval is most diagnostic on
-conversations where the reviewer made a judgment call rather than pointed out an obvious defect.
-The parameter tuning loop should weight these cases more heavily.
+catches bugs, naming issues, and missing error handling. The muse adds the reviewer's architectural preferences and design instincts. The eval is
+most diagnostic on conversations where the reviewer made a judgment call rather than pointed
+out an obvious defect, and the parameter tuning loop should weight those cases accordingly.
 
 ### Baseline
 
@@ -157,11 +156,19 @@ cheaper and tests the artifact the operator actually uses.
 
 Two patterns for wiring prompts to `inference.Converse`:
 
-1. **Task prompts.** The prompt is the system message, user data is the user message. Every top-level command uses this: `Converse(ctx, llm, prompts.Observe, transcript)`.
+1. **Task prompts.** The prompt is the system message, user data is the user message.
+   Every top-level command uses this: `Converse(ctx, llm, prompts.Observe, transcript)`.
 
-2. **Muse-contextual prompts.** The muse document is the system message, task instructions are concatenated into the user message: `Converse(ctx, llm, museDocument, prompts.Reinforce + observation)`. Used when the muse needs to guide the task, not just the response.
+2. **Muse-contextual prompts.** The muse document is the system message, task instructions
+   are concatenated into the user message:
+   `Converse(ctx, llm, museDocument, prompts.Reinforce + observation)`.
+   Used when the muse needs to guide the task, not just shape the response.
 
-Reinforce (012) uses pattern 2 today. Muse-guided observation, muse-guided judging, and any future "think like this person while doing X" task will use the same pattern. Worth discussing whether `inference.Converse` should support this natively (e.g. multiple system inputs, or an explicit muse context parameter) rather than having each call site concatenate.
+Reinforce (012) uses pattern 2 today. Muse-guided observation, muse-guided judging, and
+any "think like this person while doing X" task will follow the same pattern. Worth
+discussing whether `inference.Converse` should support this natively (multiple system
+inputs, or an explicit muse context parameter) rather than having each call site
+concatenate.
 
 ## Deferred
 

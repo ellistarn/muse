@@ -72,8 +72,7 @@ threshold 1 vs 2.
 
 Peer muses are built entirely from GitHub conversations, which are human-to-human. The human
 observe prompt extracts reasoning, awareness, and voice — voice extraction is exclusive to human
-conversations (#145). This is a natural fit: peer muses get the full observation pipeline without
-any prompt changes.
+conversations (#145). Peer muses get the full observation pipeline without prompt changes.
 
 ### Using peer muses
 
@@ -110,9 +109,9 @@ of conversations produces a noisy muse without scoping.
 
 ### Why reuse the human observe prompt?
 
-The reviewer signal — pushback, positions defended, patterns flagged — is what the human observe
-prompt already extracts. A reviewer-specific prompt would extract the same things plus code-specific
-patterns. Worth trying as a refinement after the base case works.
+The reviewer signal (pushback, positions defended, patterns flagged) is what the human observe
+prompt already extracts. A reviewer-specific prompt would add code-level patterns on top.
+Worth trying as a refinement after the base case works.
 
 ## Deferred
 

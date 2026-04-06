@@ -43,13 +43,13 @@ The priority queue orders by last-modified timestamp: file modification time for
 failure is soft: the next run picks up what was missed.
 
 Sources that produce conversations newest-first enable early termination under `--limit`.
-Local sources sort by modification time. API sources with incremental sync fetch newest-first.
+Local sources sort by modification time; API sources with incremental sync fetch newest-first.
 
 ## Errors
 
-A conversation-level error (bad JSON, missing field) is logged and skipped. A source-level
-error (missing directory, auth failure) closes that source. Other sources continue. An observe
-error stops the pipeline.
+Errors are scoped to minimize blast radius. A conversation-level error (bad JSON, missing
+field) is logged and skipped. A source-level error (missing directory, auth failure) closes
+that source but others continue. An observe error stops the pipeline.
 
 ## Decisions
 
@@ -61,9 +61,9 @@ benefit because the bottleneck is the slowest source.
 
 ### Why a priority queue for limit?
 
-First-come-first-served is unfair to slow API sources (local sources consume the budget).
-Even distribution introduces recency bias. The priority queue guarantees the N newest regardless
-of discovery order.
+First-come-first-served lets fast local sources consume the entire budget before slow API
+sources finish. Distributing the budget evenly across sources sacrifices recency. The priority
+queue guarantees the N newest regardless of discovery order.
 
 ### Why track completion at the upload level?
 
