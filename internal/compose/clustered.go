@@ -431,7 +431,7 @@ func runObserve(
 				convBytes := conversationDataSize(conv)
 
 				start := time.Now()
-				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose)
+				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, opts.PreserveContext)
 				n := counter.Add(1)
 				if err != nil {
 					return fmt.Errorf("observe %s: %w", entry.Key, err)
@@ -499,8 +499,8 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]Observation, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, verbose)
+func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose, preserveContext bool) ([]Observation, inference.Usage, error) {
+	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, preserveContext)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -539,13 +539,13 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 // prompt in chunks, and refines the candidates into a single text.
 // Both the map-reduce path (which wants raw text) and the clustering path
 // (which further parses into discrete items) call this function.
-func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) (string, inference.Usage, error) {
+func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose, preserveContext bool) (string, inference.Usage, error) {
 	turns := extractTurns(conv)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
 	}
 
-	chunks := compressConversation(turns, conv.Source)
+	chunks := compressConversation(turns, conv.Source, preserveContext)
 	if len(chunks) == 0 {
 		return "", inference.Usage{}, nil
 	}
@@ -602,6 +602,16 @@ func observeAndRefine(ctx context.Context, client inference.Client, conv *conver
 // full assistant text.
 const maxAssistantChars = 500
 
+// maxAssistantCharsPreserved is the limit when the owner's response looks like
+// a correction or edit directive. Short owner responses to long assistant turns
+// are likely reacting to specific content, so we preserve more context.
+const maxAssistantCharsPreserved = 2000
+
+// maxCorrectionWords is the word count threshold for detecting owner corrections.
+// Messages shorter than this that follow a long assistant turn are likely
+// reacting to specific content in that turn.
+const maxCorrectionWords = 50
+
 // isHumanSource returns true for sources where conversations are between
 // the owner and other people (not AI assistants).
 func isHumanSource(source string) bool {
@@ -616,7 +626,11 @@ func isHumanSource(source string) bool {
 // compressConversation mechanically compresses turns for observation: strips
 // code blocks, collapses tool output to [tool: name] markers, and truncates
 // long assistant/peer messages. Returns chunked text ready for the observe prompt.
-func compressConversation(turns []turn, source string) []string {
+//
+// When preserveContext is true, short owner messages (likely corrections or edit
+// directives) get more preceding assistant context preserved, so the observe
+// prompt can see what the owner was reacting to.
+func compressConversation(turns []turn, source string, preserveContext bool) []string {
 	var chunks []string
 	var b strings.Builder
 
@@ -629,7 +643,11 @@ func compressConversation(turns []turn, source string) []string {
 	for _, t := range turns {
 		var entry string
 		if t.assistantContent != "" {
-			compressed := compressAssistant(t.assistantContent)
+			limit := maxAssistantChars
+			if preserveContext && isLikelyCorrection(t.humanContent) {
+				limit = maxAssistantCharsPreserved
+			}
+			compressed := compressAssistantWithLimit(t.assistantContent, limit)
 			entry = fmt.Sprintf("%s: %s\n%s: %s\n\n", peerLabel, compressed, ownerLabel, t.humanContent)
 		} else {
 			entry = fmt.Sprintf("%s: %s\n\n", ownerLabel, t.humanContent)
@@ -647,15 +665,24 @@ func compressConversation(turns []turn, source string) []string {
 	return chunks
 }
 
+// isLikelyCorrection returns true when an owner message is short enough to be
+// a correction or edit directive rather than a substantive new contribution.
+func isLikelyCorrection(humanContent string) bool {
+	words := len(strings.Fields(humanContent))
+	return words > 0 && words <= maxCorrectionWords
+}
+
 // compressAssistant strips code blocks, collapses tool markers, and truncates.
 func compressAssistant(content string) string {
-	// Strip fenced code blocks (```...```)
-	result := stripCodeBlocks(content)
+	return compressAssistantWithLimit(content, maxAssistantChars)
+}
 
-	// Truncate if still too long
+// compressAssistantWithLimit strips code blocks and truncates to the given limit.
+func compressAssistantWithLimit(content string, limit int) string {
+	result := stripCodeBlocks(content)
 	result = strings.TrimSpace(result)
-	if len(result) > maxAssistantChars {
-		result = result[:maxAssistantChars] + "..."
+	if len(result) > limit {
+		result = result[:limit] + "..."
 	}
 	return result
 }

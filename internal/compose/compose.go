@@ -59,6 +59,9 @@ type BaseOptions struct {
 	Limit int
 	// Verbose enables per-item progress logging.
 	Verbose bool
+	// PreserveContext keeps more assistant context before owner corrections,
+	// so the observe prompt can see what the owner was reacting to.
+	PreserveContext bool
 }
 
 // Options configures a map-reduce compose run.
@@ -287,7 +290,7 @@ type turn struct {
 }
 
 func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, false)
+	refined, usage, err := observeAndRefine(ctx, client, conv, false, false)
 	if err != nil {
 		return "", usage, err
 	}

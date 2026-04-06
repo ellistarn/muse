@@ -25,6 +25,7 @@ func newComposeCmd() *cobra.Command {
 	var learn bool
 	var limit int
 	var method string
+	var preserveContext bool
 	cmd := &cobra.Command{
 		Use:   "compose",
 		Short: "Compose a muse from conversations",
@@ -87,7 +88,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 
 			switch method {
 			case "clustering":
-				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, reobserve, relabel, limit, uploaded, uploadBytes)
+				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, reobserve, relabel, preserveContext, limit, uploaded, uploadBytes)
 			case "map-reduce":
 				return runMapReduceCompose(ctx, cmd.OutOrStdout(), store, reobserve, learn, limit)
 			default:
@@ -100,10 +101,11 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 	cmd.Flags().BoolVar(&learn, "learn", false, "skip observe, recompose muse from existing observations (map-reduce only)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "max conversations to observe per run (0 = no limit)")
 	cmd.Flags().StringVar(&method, "method", "clustering", "composition method: clustering or map-reduce")
+	cmd.Flags().BoolVar(&preserveContext, "preserve-context", false, "keep more assistant context before owner corrections during observation")
 	return cmd
 }
 
-func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, reobserve, relabel bool, limit, uploaded, uploadBytes int) error {
+func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, reobserve, relabel, preserveContext bool, limit, uploaded, uploadBytes int) error {
 	observeLLM, err := newLLMClient(ctx, TierFast)
 	if err != nil {
 		return err
@@ -120,9 +122,10 @@ func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.St
 		composeLLM, // compose
 		compose.ClusteredOptions{
 			BaseOptions: compose.BaseOptions{
-				Reobserve: reobserve,
-				Limit:     limit,
-				Verbose:   verbose,
+				Reobserve:       reobserve,
+				Limit:           limit,
+				Verbose:         verbose,
+				PreserveContext: preserveContext,
 			},
 			Relabel:     relabel,
 			Uploaded:    uploaded,
