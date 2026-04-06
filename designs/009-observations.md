@@ -8,17 +8,43 @@ are not re-observed.
 ## Pipeline
 
 ```
-sources --> upload channel --> upload --> observe channel --> observe --> label
+sources --> upload channel --> upload --> observe channel --> compress --> observe --> label
 ```
 
 Three stages run concurrently, connected by two channels:
 
 - **Sources** discover conversations and push them to the upload channel.
 - **Upload** determines which conversations are new or changed and which need observation.
+- **Compress** reduces the conversation to fit the observe context window.
 - **Observe** runs the LLM call and stores the resulting observations.
 
 A conversation can be observed as soon as it is uploaded, without waiting for all sources to
 finish discovering. Label waits for all observations to complete.
+
+## Compression
+
+The observe prompt asks for strong, specific observations anchored in concrete examples.
+"Weak: 'Prefers composition over inheritance.' Strong: 'Avoids struct embedding in Go
+because it hides the dependency graph and makes refactoring brittle.'" Specificity requires
+context: what the owner was reacting to, not just what they said.
+
+Compression currently strips that context. Owner messages are preserved in full. Assistant
+messages have code blocks replaced with `[code block]`, tool calls collapsed to
+`[tool: name]`, and the remainder truncated to 500 characters. Tool inputs and outputs are
+discarded entirely.
+
+This serves the context window constraint but works against the observe prompt's intent.
+When the owner says "on line 12, be more specific," compression preserves the directive but
+strips line 12. The observation captures a general preference instead of a specific
+transformation.
+
+The fix is to make compression context-aware. When the owner's next message is a short
+correction (under ~50 words), the preceding assistant content is likely what prompted it.
+Preserving more of that content (assistant text, code blocks, or tool results depending on
+where the context lives) gives the observe prompt what it needs to produce specific
+observations.
+
+`--preserve-context` enables this. Default off to preserve current token costs.
 
 ## Fingerprinting
 
