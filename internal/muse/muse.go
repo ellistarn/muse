@@ -147,6 +147,13 @@ func (m *Muse) Document() string {
 	return m.document
 }
 
+// SetLatest updates the "latest" session pointer on disk so a subsequent
+// `muse ask` (without --new) resumes this session. Only the CLI path should
+// call this — MCP sessions persist but don't compete for the latest pointer.
+func (m *Muse) SetLatest(sessionID string) {
+	m.sessions.setLatest(sessionID)
+}
+
 // SyncProgressFunc receives sync progress from source providers during Upload.
 // The source parameter identifies which provider sent the update.
 type SyncProgressFunc func(source string, p conversation.SyncProgress)

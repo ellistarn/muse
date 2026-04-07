@@ -17,19 +17,20 @@ A session holds a message history: alternating user and assistant turns. It has 
 on first save) and a system prompt (stored as metadata for debugging). Two sessions never share
 state. A session grows until the user starts a new one.
 
-There are two session lifetimes, determined by the caller:
+Both MCP and CLI sessions are persisted to disk so there is a record of what was discussed. The
+difference is in how sessions are resumed:
 
-- **Process-scoped** (MCP): sessions live in memory and die with the process. Each MCP client
-  connection gets an independent session. This is the right model for MCP because the client
-  lifecycle *is* the session lifecycle — when the client disconnects, the conversation is over.
+- **MCP**: each client connection starts a fresh session. The MCP server never reads the `latest`
+  pointer and never writes it. When the client disconnects, the session remains on disk but is not
+  automatically resumed by any future connection.
 
-- **Persisted** (CLI): sessions survive process exits. `muse ask` resumes the latest session by
-  default, because the CLI invocation boundary is artificial — the user is in the same conversation,
-  they just pressed Enter in their shell. `--new` starts a fresh session when the user's intent has
-  actually changed.
+- **CLI**: `muse ask` resumes the latest session by default, because the CLI invocation boundary is
+  artificial — the user is in the same conversation, they just pressed Enter in their shell. `--new`
+  starts a fresh session when the user's intent has actually changed.
 
-Both operate on the same session model. The persistence boundary is a construction-time decision, not
-a model distinction.
+The `latest` pointer is a CLI UX concern — it is updated by `muse ask` after each turn, never by the
+MCP path. MCP sessions persist to the same directory but never interact with the `latest` pointer in
+either direction.
 
 ## Storage
 

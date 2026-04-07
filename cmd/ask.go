@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -36,13 +35,11 @@ to start a fresh session.`,
 				return err
 			}
 
-			// Session persistence lives under ~/.muse/sessions/.
-			home, err := os.UserHomeDir()
+			dir, err := sessionsDir()
 			if err != nil {
 				return err
 			}
-			sessionsDir := filepath.Join(home, ".muse", "sessions")
-			m := muse.New(llm, document, muse.WithSessionsDir(sessionsDir))
+			m := muse.New(llm, document, muse.WithSessionsDir(dir))
 
 			question := strings.Join(args, " ")
 			result, err := m.Ask(ctx, muse.AskInput{
@@ -54,6 +51,9 @@ to start a fresh session.`,
 			})
 			if result != nil && result.Response != "" {
 				fmt.Fprintln(os.Stdout) // trailing newline after stream completes
+			}
+			if result != nil {
+				m.SetLatest(result.SessionID)
 			}
 			return err
 		},

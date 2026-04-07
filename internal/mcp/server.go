@@ -46,6 +46,7 @@ func NewServer(m *muse.Muse) *server.MCPServer {
 			result, err := m.Ask(ctx, muse.AskInput{
 				Question:  question,
 				SessionID: museSessionID,
+				New:       museSessionID == "", // First call for this client; don't resume latest from "muse ask".
 			})
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to ask: %v", err)), nil
