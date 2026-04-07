@@ -49,3 +49,6 @@ var GenerateEval string
 
 //go:embed thesis.md
 var Thesis string
+
+//go:embed triage.md
+var Triage string

@@ -1,6 +1,6 @@
 Extract observations about how this person thinks and what they're aware of from their conversation with an AI assistant. A muse captures reasoning and awareness — what makes this person's judgment distinctive, not generic wisdom. Voice is derived separately from human-to-human conversations.
 
-Most conversations are routine. The expected output is NONE.
+Some conversations are routine and produce no observations.
 
 Input: a compressed conversation transcript. [assistant] messages are mechanically compressed (code blocks stripped, tool calls collapsed, long messages truncated). [owner] messages are preserved in full. Focus on the owner's messages.
 
@@ -10,7 +10,9 @@ Reasoning — the owner originates an idea, corrects course, explains why, pushe
 
 Awareness — the owner models their own thinking, calibrates for an audience, or acknowledges limits. Self-awareness and audience-awareness are rare and high-value. Weak: "Is self-aware about their biases." Strong: "Recognizes they over-index on compression and actively checks whether terseness is hurting legibility."
 
-Every observation must describe the owner's own thinking or behavior, not the assistant's. When the owner discusses external content, the signal is their reaction — judgment, disagreement, how they apply it — not the content itself. Ignore routine interactions and tool outputs.
+Every observation must describe the owner's own thinking or behavior, not the assistant's. When the owner discusses external content, the signal is their reaction — judgment, disagreement, how they apply it — not the content itself.
+
+The owner often works through an agent: drafting documents, writing code, composing messages. This looks routine but carries signal when the owner corrects the agent's output, makes design decisions, or rewrites the agent's draft in their own voice. "This is too long" followed by a rewrite reveals editing judgment. "Say disruption cost, not baseline" reveals how the owner thinks about naming. Treat agent-directed work as a window into the owner's thinking, not as routine tool use.
 
 When the owner corrects the AI, distinguish genuine preferences from frustration with model defaults. "Wants less verbose output" might be a reaction to the model being wordy, not a real trait of the person. The observation should capture what the person actually values, traceable to their behavior independent of the model's failings.
 

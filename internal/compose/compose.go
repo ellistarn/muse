@@ -2,6 +2,7 @@ package compose
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -51,6 +52,17 @@ type HitMiss struct {
 	Miss int
 }
 
+// ContextStrategy controls how much assistant context is preserved during
+// compression before the observe prompt sees the conversation.
+type ContextStrategy string
+
+const (
+	// ContextDefault uses the original fixed 500-char limit for all turns.
+	ContextDefault ContextStrategy = ""
+	// ContextAdaptive interpolates the limit by owner message length (500-2000 chars).
+	ContextAdaptive ContextStrategy = "adaptive"
+)
+
 // BaseOptions contains fields shared across all compose strategies.
 type BaseOptions struct {
 	// Reobserve ignores persisted observations and re-observes all conversations.
@@ -59,9 +71,8 @@ type BaseOptions struct {
 	Limit int
 	// Verbose enables per-item progress logging.
 	Verbose bool
-	// PreserveContext keeps more assistant context before owner corrections,
-	// so the observe prompt can see what the owner was reacting to.
-	PreserveContext bool
+	// Context controls the compression strategy for assistant text.
+	Context ContextStrategy
 }
 
 // Options configures a map-reduce compose run.
@@ -290,7 +301,7 @@ type turn struct {
 }
 
 func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, false, false)
+	refined, usage, err := observeAndRefine(ctx, client, conv, false, ContextDefault)
 	if err != nil {
 		return "", usage, err
 	}
@@ -425,4 +436,197 @@ func extractTurns(conv *conversation.Conversation) []turn {
 		}
 	}
 	return turns
+}
+
+// lowSignalPatterns matches owner messages that carry no distinctive reasoning:
+// confirmations, mechanical directives, and single-word responses.
+var lowSignalPatterns = []string{
+	"yes",
+	"yeah",
+	"yep",
+	"sure",
+	"ok",
+	"okay",
+	"do it",
+	"go ahead",
+	"looks good",
+	"lgtm",
+	"sounds good",
+	"thanks",
+	"thank you",
+	"no",
+	"nope",
+	"never mind",
+	"nevermind",
+}
+
+// mechanicalPrefixes matches owner messages that are agent directives without
+// reasoning: git operations, file management, and execution commands.
+var mechanicalPrefixes = []string{
+	"commit",
+	"push",
+	"squash",
+	"rebase",
+	"merge",
+	"deploy",
+	"run ",
+	"install",
+	"delete ",
+	"remove ",
+	"create ",
+}
+
+// filterLowSignalTurns removes turns where the owner's message is a
+// confirmation, mechanical directive, or otherwise carries no distinctive
+// reasoning. Keeps turns where the owner makes decisions, corrects something,
+// or explains why.
+func filterLowSignalTurns(turns []turn) []turn {
+	var kept []turn
+	for _, t := range turns {
+		if isLowSignal(t.humanContent) {
+			continue
+		}
+		kept = append(kept, t)
+	}
+	return kept
+}
+
+// minSignalWords is the minimum word count for a turn to be considered
+// potentially high-signal. Shorter messages are kept only if they contain
+// a question or quotation, which suggest reasoning or correction.
+const minSignalWords = 15
+
+func isLowSignal(content string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(content))
+	words := strings.Fields(normalized)
+
+	// Interrupted requests are always noise
+	if strings.Contains(normalized, "[request interrupted") {
+		return true
+	}
+
+	// Exact-match confirmations at any length
+	clean := strings.TrimRight(normalized, ".!?,")
+	for _, p := range lowSignalPatterns {
+		if clean == p {
+			return true
+		}
+	}
+
+	// Short messages that are mechanical directives
+	if len(words) <= 8 {
+		for _, prefix := range mechanicalPrefixes {
+			if strings.HasPrefix(normalized, prefix) {
+				return true
+			}
+		}
+	}
+
+	// Below the word threshold, keep only if the message asks a question
+	// or contains a quotation (both suggest reasoning or correction)
+	if len(words) < minSignalWords {
+		hasQuestion := strings.Contains(content, "?")
+		hasQuote := strings.Contains(content, "\"")
+		if !hasQuestion && !hasQuote {
+			return true
+		}
+	}
+
+	return false
+}
+
+// triageTurns uses a cheap LLM call to classify turns as reasoning vs
+// housekeeping. Returns only the turns classified as reasoning.
+func triageTurns(ctx context.Context, client inference.Client, turns []turn, source string, verbose bool) ([]turn, inference.Usage, error) {
+	// Build numbered turn text for the triage prompt
+	var b strings.Builder
+	ownerLabel := "[owner]"
+	peerLabel := "[assistant]"
+	if isHumanSource(source) {
+		peerLabel = "[peer]"
+	}
+	for i, t := range turns {
+		if t.assistantContent != "" {
+			// Compress assistant to minimal context for triage (cheap pass)
+			compressed := strings.TrimSpace(t.assistantContent)
+			if len(compressed) > 200 {
+				compressed = compressed[:200] + "..."
+			}
+			fmt.Fprintf(&b, "Turn %d:\n%s: %s\n%s: %s\n\n", i+1, peerLabel, compressed, ownerLabel, t.humanContent)
+		} else {
+			fmt.Fprintf(&b, "Turn %d:\n%s: %s\n\n", i+1, ownerLabel, t.humanContent)
+		}
+	}
+
+	triageInput := b.String()
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    triage input (%d chars):\n", len(triageInput))
+		lines := strings.Split(triageInput, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "Turn ") || strings.HasPrefix(line, "[owner]") {
+				if len(line) > 100 {
+					line = line[:100] + "..."
+				}
+				fmt.Fprintf(os.Stderr, "      %s\n", line)
+			}
+		}
+	}
+
+	start := time.Now()
+	resp, usage, err := inference.Converse(ctx, client, prompts.Triage, triageInput, inference.WithMaxTokens(1024))
+	if err != nil {
+		return nil, usage, err
+	}
+
+	// Parse the JSON array of turn numbers
+	indices := parseTriageResponse(resp, len(turns))
+
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    triage %d → %d turns (%s, $%.4f) raw: %s\n",
+			len(turns), len(indices), time.Since(start).Round(time.Millisecond), usage.Cost(), strings.TrimSpace(resp))
+	}
+
+	var kept []turn
+	indexSet := make(map[int]bool)
+	for _, idx := range indices {
+		indexSet[idx] = true
+	}
+	for i, t := range turns {
+		if indexSet[i+1] { // turns are 1-indexed in the prompt
+			kept = append(kept, t)
+		}
+	}
+	return kept, usage, nil
+}
+
+// parseTriageResponse extracts turn numbers from the triage LLM response.
+// The response may contain multiple JSON arrays if the model self-corrects.
+// We take the last valid array, which is the model's final answer.
+func parseTriageResponse(resp string, maxTurns int) []int {
+	// Find all JSON arrays in the response, take the last one
+	var lastValid []int
+	for i := 0; i < len(resp); i++ {
+		if resp[i] != '[' {
+			continue
+		}
+		// Find matching ]
+		end := strings.Index(resp[i:], "]")
+		if end < 0 {
+			continue
+		}
+		candidate := resp[i : i+end+1]
+		var numbers []int
+		if err := json.Unmarshal([]byte(candidate), &numbers); err == nil {
+			lastValid = numbers
+		}
+		i = i + end
+	}
+
+	var valid []int
+	for _, n := range lastValid {
+		if n >= 1 && n <= maxTurns {
+			valid = append(valid, n)
+		}
+	}
+	return valid
 }

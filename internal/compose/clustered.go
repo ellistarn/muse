@@ -431,7 +431,7 @@ func runObserve(
 				convBytes := conversationDataSize(conv)
 
 				start := time.Now()
-				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, opts.PreserveContext)
+				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, opts.Context)
 				n := counter.Add(1)
 				if err != nil {
 					return fmt.Errorf("observe %s: %w", entry.Key, err)
@@ -492,6 +492,26 @@ func conversationDataSize(conv *conversation.Conversation) int {
 	return n
 }
 
+// ObserveForTestVerbose runs the full observe pipeline on a single conversation,
+// returning the raw observe output and parsed observations.
+func ObserveForTestVerbose(ctx context.Context, client inference.Client, conv *conversation.Conversation, ctxStrategy ContextStrategy) (string, []Observation, inference.Usage, error) {
+	raw, usage, err := observeAndRefine(ctx, client, conv, true, ctxStrategy)
+	if err != nil {
+		return "", nil, usage, err
+	}
+	if raw == "" {
+		return "", nil, usage, nil
+	}
+	items := parseObservationItems(raw)
+	var relevant []Observation
+	for _, item := range items {
+		if isRelevant(item.Text) {
+			relevant = append(relevant, item)
+		}
+	}
+	return raw, relevant, usage, nil
+}
+
 // observeAndParse runs the observe pipeline on a conversation and returns
 // discrete observations (not a markdown blob).
 //
@@ -499,8 +519,8 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose, preserveContext bool) ([]Observation, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, preserveContext)
+func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, ctxStrategy ContextStrategy) ([]Observation, inference.Usage, error) {
+	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, ctxStrategy)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -539,16 +559,13 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 // prompt in chunks, and refines the candidates into a single text.
 // Both the map-reduce path (which wants raw text) and the clustering path
 // (which further parses into discrete items) call this function.
-func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose, preserveContext bool) (string, inference.Usage, error) {
+func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, ctxStrategy ContextStrategy) (string, inference.Usage, error) {
 	turns := extractTurns(conv)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
 	}
 
-	chunks := compressConversation(turns, conv.Source, preserveContext)
-	if len(chunks) == 0 {
-		return "", inference.Usage{}, nil
-	}
+	var totalUsage inference.Usage
 
 	// Select the appropriate observe prompt based on source type
 	observePrompt := prompts.Observe
@@ -556,61 +573,118 @@ func observeAndRefine(ctx context.Context, client inference.Client, conv *conver
 		observePrompt = prompts.ObserveHuman
 	}
 
-	var totalUsage inference.Usage
+	// For large conversations, concentrate signal: filter → triage → owner-only.
+	// The observe prompt works well on concentrated input but returns NONE when
+	// high-signal turns are diluted by mechanical agent interaction.
+	observeInput := ""
+	if len(turns) > 10 {
+		// Mechanical filter
+		filtered := filterLowSignalTurns(turns)
+		if verbose && len(filtered) < len(turns) {
+			fmt.Fprintf(os.Stderr, "    filter %d → %d turns (%d low-signal removed)\n",
+				len(turns), len(filtered), len(turns)-len(filtered))
+		}
+		if len(filtered) == 0 {
+			return "", totalUsage, nil
+		}
 
-	// Observe (Pass 1)
-	var allCandidates []string
-	for i, chunk := range chunks {
+		// LLM triage
+		triaged := filtered
+		if len(filtered) > 10 {
+			t, usage, err := triageTurns(ctx, client, filtered, conv.Source, verbose)
+			totalUsage = totalUsage.Add(usage)
+			if err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "    triage error, falling back: %v\n", err)
+				}
+			} else if len(t) > 0 {
+				triaged = t
+			}
+		}
+		if len(triaged) == 0 {
+			return "", totalUsage, nil
+		}
+
+		// Owner-only: strip assistant context entirely
+		var b strings.Builder
+		for _, t := range triaged {
+			fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+		}
+		observeInput = b.String()
+		if verbose {
+			fmt.Fprintf(os.Stderr, "    owner-only %d turns, %d chars\n", len(triaged), len(observeInput))
+		}
+	}
+
+	// For small conversations, use the original compression pipeline
+	if observeInput == "" {
+		chunks := compressConversation(turns, conv.Source, ctxStrategy)
+		if len(chunks) == 0 {
+			return "", totalUsage, nil
+		}
+		// Small conversations: observe + refine as before
+		var allCandidates []string
+		for i, chunk := range chunks {
+			start := time.Now()
+			obs, usage, err := inference.Converse(ctx, client, observePrompt, chunk, inference.WithMaxTokens(4096))
+			totalUsage = totalUsage.Add(usage)
+			if verbose {
+				fmt.Fprintf(os.Stderr, "      observe[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
+					i+1, len(chunks), len(chunk), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+			}
+			if err != nil && obs == "" {
+				return "", totalUsage, err
+			}
+			if obs != "" && !isEmpty(obs) {
+				allCandidates = append(allCandidates, obs)
+			}
+		}
+		if len(allCandidates) == 0 {
+			return "", totalUsage, nil
+		}
+		candidates := strings.Join(allCandidates, "\n\n")
 		start := time.Now()
-		obs, usage, err := inference.Converse(ctx, client, observePrompt, chunk, inference.WithMaxTokens(4096))
+		refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if verbose {
-			fmt.Fprintf(os.Stderr, "      observe[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
-				i+1, len(chunks), len(chunk), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+			fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+				len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
 		}
-		if err != nil && obs == "" {
+		if err != nil && refined == "" {
 			return "", totalUsage, err
 		}
-		if obs != "" && !isEmpty(obs) {
-			allCandidates = append(allCandidates, obs)
+		if isEmpty(refined) {
+			return "", totalUsage, nil
 		}
-	}
-	if len(allCandidates) == 0 {
-		return "", totalUsage, nil
+		return refined, totalUsage, nil
 	}
 
-	// Refine (Pass 2)
-	candidates := strings.Join(allCandidates, "\n\n")
+	// Large conversations: single observe pass on owner-only text, no refine
 	start := time.Now()
-	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	obs, usage, err := inference.Converse(ctx, client, observePrompt, observeInput, inference.WithMaxTokens(4096))
 	totalUsage = totalUsage.Add(usage)
 	if verbose {
-		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
-			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+		fmt.Fprintf(os.Stderr, "      observe %d chars → %d chars (%s, $%.4f)\n",
+			len(observeInput), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 	}
-	if err != nil && refined == "" {
+	if err != nil && obs == "" {
 		return "", totalUsage, err
 	}
-	if isEmpty(refined) {
+	if isEmpty(obs) {
 		return "", totalUsage, nil
 	}
-	return refined, totalUsage, nil
+	return obs, totalUsage, nil
 }
 
-// maxAssistantChars caps truncated assistant messages. Long assistant output is
-// mostly code or tool results — the human's reaction is what matters, not the
-// full assistant text.
-const maxAssistantChars = 500
-
-// maxAssistantCharsPreserved is the limit when the owner's response looks like
-// a correction or edit directive. Short owner responses to long assistant turns
-// are likely reacting to specific content, so we preserve more context.
-const maxAssistantCharsPreserved = 2000
-
-// maxCorrectionWords is the word count threshold for detecting owner corrections.
-// Messages shorter than this that follow a long assistant turn are likely
-// reacting to specific content in that turn.
-const maxCorrectionWords = 50
+// Assistant text limits for adaptive compression. Short owner messages are
+// likely corrections reacting to specific content, so we preserve more of the
+// preceding assistant turn. Long owner messages carry their own context.
+const (
+	minAssistantChars = 500  // limit for long owner messages (>= maxOwnerWords)
+	maxAssistantChars = 2000 // limit for very short owner messages (<= minOwnerWords)
+	minOwnerWords     = 5    // at or below this, full context preserved
+	maxOwnerWords     = 100  // at or above this, minimal context preserved
+)
 
 // isHumanSource returns true for sources where conversations are between
 // the owner and other people (not AI assistants).
@@ -626,11 +700,7 @@ func isHumanSource(source string) bool {
 // compressConversation mechanically compresses turns for observation: strips
 // code blocks, collapses tool output to [tool: name] markers, and truncates
 // long assistant/peer messages. Returns chunked text ready for the observe prompt.
-//
-// When preserveContext is true, short owner messages (likely corrections or edit
-// directives) get more preceding assistant context preserved, so the observe
-// prompt can see what the owner was reacting to.
-func compressConversation(turns []turn, source string, preserveContext bool) []string {
+func compressConversation(turns []turn, source string, ctx ContextStrategy) []string {
 	var chunks []string
 	var b strings.Builder
 
@@ -643,9 +713,9 @@ func compressConversation(turns []turn, source string, preserveContext bool) []s
 	for _, t := range turns {
 		var entry string
 		if t.assistantContent != "" {
-			limit := maxAssistantChars
-			if preserveContext && isLikelyCorrection(t.humanContent) {
-				limit = maxAssistantCharsPreserved
+			limit := minAssistantChars
+			if ctx == ContextAdaptive {
+				limit = assistantCharLimit(t.humanContent)
 			}
 			compressed := compressAssistantWithLimit(t.assistantContent, limit)
 			entry = fmt.Sprintf("%s: %s\n%s: %s\n\n", peerLabel, compressed, ownerLabel, t.humanContent)
@@ -665,11 +735,20 @@ func compressConversation(turns []turn, source string, preserveContext bool) []s
 	return chunks
 }
 
-// isLikelyCorrection returns true when an owner message is short enough to be
-// a correction or edit directive rather than a substantive new contribution.
-func isLikelyCorrection(humanContent string) bool {
+// assistantCharLimit returns the truncation limit for an assistant message
+// based on the length of the owner's response. Interpolates linearly between
+// maxAssistantChars (short owner messages) and minAssistantChars (long ones).
+func assistantCharLimit(humanContent string) int {
 	words := len(strings.Fields(humanContent))
-	return words > 0 && words <= maxCorrectionWords
+	if words <= minOwnerWords {
+		return maxAssistantChars
+	}
+	if words >= maxOwnerWords {
+		return minAssistantChars
+	}
+	// Linear interpolation
+	frac := float64(words-minOwnerWords) / float64(maxOwnerWords-minOwnerWords)
+	return maxAssistantChars - int(frac*float64(maxAssistantChars-minAssistantChars))
 }
 
 // compressAssistant strips code blocks, collapses tool markers, and truncates.

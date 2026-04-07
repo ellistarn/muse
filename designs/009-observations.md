@@ -38,13 +38,68 @@ When the owner says "on line 12, be more specific," compression preserves the di
 strips line 12. The observation captures a general preference instead of a specific
 transformation.
 
-The fix is to make compression context-aware. When the owner's next message is a short
-correction (under ~50 words), the preceding assistant content is likely what prompted it.
-Preserving more of that content (assistant text, code blocks, or tool results depending on
-where the context lives) gives the observe prompt what it needs to produce specific
-observations.
+### Approaches attempted and abandoned
 
-`--preserve-context` enables this. Default off to preserve current token costs.
+**A: Adaptive compression.** Scale the assistant text limit by owner message length
+(500-2000 chars). More context diluted signal: 17k chars produced 0 observations while
+13k produced 5. The extra context made the conversation look more routine.
+
+**B: Prompt-driven extraction.** Ask the observe prompt for transformations, not just
+principles. Made the LLM more cautious, producing fewer observations.
+
+**C: Context-aware prompting.** Ask the LLM to reason about what context each response
+requires. Same regression as B.
+
+**D: Mechanical turn filtering.** Remove confirmations and short directives before
+observe. Insufficient: many low-signal turns survive word-count and pattern filters.
+
+**E: LLM triage + full conversation.** Cheap LLM call classifies turns as reasoning vs
+housekeeping, then pass triaged turns through the standard compression pipeline. Triage
+works well, but observe still returns NONE on the compressed triaged conversation.
+
+### What we found
+
+The observe prompt produces strong observations from concentrated owner input: 6 curated
+owner messages produce 5-6 observations with specific quotes and reasoning. The same
+messages embedded in a full compressed conversation (with assistant text, tool markers,
+and mechanical turns) produce NONE consistently.
+
+The problem is not context preservation, compression limits, or prompt wording. It is
+volume. The observe prompt gives up when there are too many messages to evaluate,
+regardless of their quality. Assistant context makes this worse by making every
+conversation look like routine agent direction.
+
+### Solution: triage + owner-only observe
+
+For conversations with more than 10 turns:
+
+1. **Mechanical filter.** Remove confirmations, mechanical directives, interrupted
+   requests. Pattern matching on known low-signal phrases.
+2. **LLM triage.** Cheap classification pass identifies which remaining turns contain
+   reasoning, decisions, corrections, or design thinking.
+3. **Owner-only observe.** Feed only the owner's messages from triaged turns to the
+   observe prompt. No assistant context, no compression, no refine step.
+
+For small conversations (10 turns or fewer), the original pipeline works: compress
+the full conversation and run observe + refine.
+
+Results on two test conversations:
+
+| Conversation | Turns | Old pipeline | New pipeline |
+|---|---|---|---|
+| RFC design session (104 msgs, 27 turns) | 27 → 15 → 11 | 0 observations | 7 observations |
+| Orwell pass editing (211 msgs, 26 turns) | 26 → 19 → 16 | 0 observations | 9 observations |
+
+The observations are specific: "Uses formal analysis to constrain the design space,
+then derives a natural set ({1, 2, 3}) rather than making it configurable beyond what
+the math supports." "Monitors the AI's vocabulary for jargon that doesn't match how
+they actually speak, and flags it directly."
+
+### Prompt update: agent-directed work
+
+The observe prompt now recognizes that agent-directed work carries signal. When the
+owner corrects the agent's draft, makes design decisions through the agent, or rewrites
+the agent's output in their own voice, the prompt treats it as reasoning, not routine.
 
 ## Fingerprinting
 
