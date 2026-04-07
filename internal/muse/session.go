@@ -79,7 +79,21 @@ func (s *sessionStore) latestID() string {
 	return string(data)
 }
 
-// persistSession writes a session to disk and updates the latest pointer.
+// setLatest updates the latest pointer on disk so the CLI can resume.
+// Only callers that own the "resume last session" UX should call this.
+// Fire-and-forget: the latest pointer is a convenience shortcut, not
+// a correctness requirement — a failure here means the next `muse ask`
+// starts a new session instead of resuming, which is acceptable.
+func (s *sessionStore) setLatest(id string) {
+	if s.dir == "" {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(s.dir, "latest"), []byte(id), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to update latest pointer: %v\n", err)
+	}
+}
+
+// persistSession writes a session to disk.
 func persistSession(dir string, session *Session) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -88,10 +102,7 @@ func persistSession(dir string, session *Session) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, session.ID+".json"), data, 0o644); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "latest"), []byte(session.ID), 0o644)
+	return os.WriteFile(filepath.Join(dir, session.ID+".json"), data, 0o644)
 }
 
 // loadSession reads a session from disk.
