@@ -63,7 +63,7 @@ Import external data from proprietary systems using plugins — executables name
 ```bash
 muse import code-reviews            # run muse-code-reviews plugin
 muse import internal-chat           # run muse-internal-chat plugin
-muse import                         # re-import all previously imported sources
+muse import                         # re-import all previously imported sources (any source imported at least once)
 ```
 
 Plugins receive `MUSE_OUTPUT_DIR` and write Conversation JSON files plus a `.muse-source.json`

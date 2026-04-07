@@ -48,6 +48,10 @@ re-syncs it on subsequent runs. `muse import code-reviews` activates the code-re
 `muse import` re-runs it on subsequent runs. Presence of the conversation directory is the
 activation record, the same mechanism built-in sources use.
 
+`muse remove {name}` works identically for import sources and built-in sources — it deletes the
+observation directory, deactivating the source from compose. Conversations persist in storage.
+Re-importing with `muse import {name}` re-activates the source.
+
 ## Output contract
 
 A plugin receives one environment variable: `MUSE_OUTPUT_DIR`, pointing to a writable temporary
@@ -61,9 +65,10 @@ directory. The plugin writes its output there:
   {"type": "human"}
   ```
   Valid values: `human` or `ai`. This is required. A plugin that does not write it has failed its
-  contract.
+  contract. Unknown or empty type values are a validation error — muse rejects the entire import run.
 
-The `Source` field in each conversation is overwritten by muse to match the source name. The plugin's
+The `Source` field in each conversation is overwritten by muse to match the source name — the
+argument to `muse import`, which is also the directory name under `conversations/`. The plugin's
 opinion about its own source name does not matter — muse is the system of record. This decouples
 plugin authorship from muse naming: the same binary installed as `muse-code-reviews` and
 `muse-cr` (via symlink) produces two independent sources.
@@ -98,6 +103,24 @@ writes what it has and exits 0.
 Malformed JSON files are individually rejected with a diagnostic identifying the file and the
 failure. Valid files from the same run are still imported. A conversation missing `ConversationID`
 fails validation.
+
+Exit 0 with `.muse-source.json` but zero conversation files is a warning, not an error — the plugin
+may legitimately have nothing new to report. Exit 0 without `.muse-source.json` is still a contract
+violation and an error. This distinction separates "plugin had nothing to report" from "plugin is
+broken."
+
+## Idempotency
+
+Conversations are identified by `ConversationID`. On re-import: conversations with a newer
+`UpdatedAt` overwrite the stored version, new conversation IDs are added, and conversations the
+plugin no longer produces are left in storage unchanged. Import never automatically deletes
+conversations.
+
+This is a deliberate choice. Automatic deletion would mean a plugin bug — a filter that's too
+aggressive, a pagination error, a credentials expiry that returns zero results — could silently
+destroy previously-imported data. The tradeoff is that stale conversations persist if a plugin stops
+producing them. To remove stale conversations, remove the source with `muse remove {name}` and
+re-import, or delete individual conversation files from storage.
 
 ## Plugin configuration
 
@@ -142,7 +165,3 @@ want both.
 **Incremental import.** Muse currently writes all conversations the plugin produces, diffing against
 storage by `ConversationID` and `UpdatedAt`. The plugin is responsible for its own incremental sync
 logic. **Revisit when:** plugin authors need muse to pass the last-import timestamp or similar state.
-
-**Plugin removal.** `muse remove {name}` could delete the conversation and observation directories
-for an import source, the same as it does for built-in sources. Not committed here because the
-existing `RemoveSource()` may already handle it — the source name is just a directory prefix.
