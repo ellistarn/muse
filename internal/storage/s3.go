@@ -329,7 +329,7 @@ func parseConversationKey(key string) (src, conversationID string) {
 	}
 	src = parts[0]
 	conversationID = strings.TrimSuffix(parts[1], ".json")
-	if src == "" || conversationID == "" {
+	if src == "" || conversationID == "" || strings.HasPrefix(conversationID, ".") {
 		return "", ""
 	}
 	return src, conversationID

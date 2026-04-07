@@ -56,6 +56,20 @@ muse sources                        # see what's active
 
 Sources are remembered across runs — `muse compose` processes whatever is active.
 
+## Import Plugins
+
+Import external data from proprietary systems using plugins — executables named `muse-{name}` on `$PATH`:
+
+```bash
+muse import code-reviews            # run muse-code-reviews plugin
+muse import internal-chat           # run muse-internal-chat plugin
+muse import                         # re-import all previously imported sources
+```
+
+Plugins receive `MUSE_OUTPUT_DIR` and write Conversation JSON files plus a `.muse-source.json`
+metadata file. See `examples/muse-test-plugin/` for a reference implementation and
+`designs/010-import.md` for the full design.
+
 ## Storage
 
 By default, data is stored locally at `~/.muse/`. To use an S3 bucket instead (for sharing across
