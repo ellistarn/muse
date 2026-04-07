@@ -59,11 +59,13 @@ func runEvalContext(ctx context.Context, convID string) error {
 	}
 
 	strategies := []struct {
-		name    string
-		ctx     compose.ContextStrategy
+		name string
+		ctx  compose.ContextStrategy
+		mode compose.ObserveMode
 	}{
-		{"default (500 chars)", compose.ContextDefault},
-		{"adaptive (500-2000)", compose.ContextAdaptive},
+		{"windowed", compose.ContextDefault, compose.ObserveWindowed},
+		{"triage-owner-only", compose.ContextDefault, compose.ObserveTriageOwnerOnly},
+		{"full-conversation (baseline)", compose.ContextDefault, compose.ObserveFullConversation},
 	}
 
 	results := make([][]compose.Observation, len(strategies))
@@ -71,7 +73,7 @@ func runEvalContext(ctx context.Context, convID string) error {
 	for i, s := range strategies {
 		fmt.Fprintf(os.Stderr, "--- strategy: %s ---\n", s.name)
 
-		raw, obs, usage, err := compose.ObserveForTestVerbose(ctx, llm, &conv, s.ctx)
+		raw, obs, usage, err := compose.ObserveForTestVerbose(ctx, llm, &conv, s.ctx, s.mode)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
 			continue
@@ -79,7 +81,9 @@ func runEvalContext(ctx context.Context, convID string) error {
 		results[i] = obs
 		fmt.Fprintf(os.Stderr, "  observations: %d  tokens: %dk in / %dk out  cost: $%.4f\n",
 			len(obs), usage.InputTokens/1000, usage.OutputTokens/1000, usage.Cost())
-		fmt.Fprintf(os.Stderr, "  raw output (%d chars): %s\n", len(raw), raw[:min(len(raw), 500)])
+		if len(raw) > 0 {
+			fmt.Fprintf(os.Stderr, "  raw output (%d chars): %s\n", len(raw), raw[:min(len(raw), 500)])
+		}
 		fmt.Fprintln(os.Stderr)
 	}
 

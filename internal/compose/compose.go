@@ -63,6 +63,20 @@ const (
 	ContextAdaptive ContextStrategy = "adaptive"
 )
 
+// ObserveMode controls the observation strategy for large conversations.
+type ObserveMode string
+
+const (
+	// ObserveWindowed uses sliding-window observation (default).
+	ObserveWindowed ObserveMode = ""
+	// ObserveTriageOwnerOnly uses the triage + owner-only path.
+	ObserveTriageOwnerOnly ObserveMode = "triage-owner-only"
+	// ObserveFullConversation compresses the full conversation and observes
+	// in chunks. This is the original path that exhibits context rot on long
+	// conversations — kept for eval comparison only.
+	ObserveFullConversation ObserveMode = "full-conversation"
+)
+
 // BaseOptions contains fields shared across all compose strategies.
 type BaseOptions struct {
 	// Reobserve ignores persisted observations and re-observes all conversations.
@@ -301,7 +315,7 @@ type turn struct {
 }
 
 func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, false, ContextDefault)
+	refined, usage, err := observeAndRefine(ctx, client, conv, false, ContextDefault, ObserveWindowed)
 	if err != nil {
 		return "", usage, err
 	}

@@ -353,8 +353,10 @@ func runObserve(
 	sort.Strings(sources)
 	discovered := len(entries)
 
-	// Compute prompt chain hash for fingerprinting
-	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine)
+	// Compute prompt chain hash for fingerprinting. Includes window parameters
+	// so changing the observation strategy invalidates cached observations.
+	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine,
+		fmt.Sprintf("window:%d:%d", windowSize, windowStride))
 
 	// Determine which conversations need (re)observation
 	var pending []storage.ConversationEntry
@@ -494,8 +496,8 @@ func conversationDataSize(conv *conversation.Conversation) int {
 
 // ObserveForTestVerbose runs the full observe pipeline on a single conversation,
 // returning the raw observe output and parsed observations.
-func ObserveForTestVerbose(ctx context.Context, client inference.Client, conv *conversation.Conversation, ctxStrategy ContextStrategy) (string, []Observation, inference.Usage, error) {
-	raw, usage, err := observeAndRefine(ctx, client, conv, true, ctxStrategy)
+func ObserveForTestVerbose(ctx context.Context, client inference.Client, conv *conversation.Conversation, ctxStrategy ContextStrategy, mode ObserveMode) (string, []Observation, inference.Usage, error) {
+	raw, usage, err := observeAndRefine(ctx, client, conv, true, ctxStrategy, mode)
 	if err != nil {
 		return "", nil, usage, err
 	}
@@ -520,7 +522,7 @@ func ObserveForTestVerbose(ctx context.Context, client inference.Client, conv *c
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
 func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, ctxStrategy ContextStrategy) ([]Observation, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, ctxStrategy)
+	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, ctxStrategy, ObserveWindowed)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -554,12 +556,21 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 	return relevant, usage, nil
 }
 
+// Window parameters for sliding-window observation. Each window is small
+// enough that local signal survives without being washed out by distant
+// mechanical turns (context rot). Adjacent windows overlap so multi-turn
+// reasoning arcs aren't split across boundaries.
+const (
+	windowSize   = 8 // turns per window
+	windowStride = 4 // advance between windows
+)
+
 // observeAndRefine is the shared core of the observation pipeline. It extracts
 // turns from a conversation, mechanically compresses them, runs the observe
-// prompt in chunks, and refines the candidates into a single text.
+// prompt, and refines the candidates into a single text.
 // Both the map-reduce path (which wants raw text) and the clustering path
 // (which further parses into discrete items) call this function.
-func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, ctxStrategy ContextStrategy) (string, inference.Usage, error) {
+func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, ctxStrategy ContextStrategy, mode ObserveMode) (string, inference.Usage, error) {
 	turns := extractTurns(conv)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
@@ -573,107 +584,247 @@ func observeAndRefine(ctx context.Context, client inference.Client, conv *conver
 		observePrompt = prompts.ObserveHuman
 	}
 
-	// For large conversations, concentrate signal: filter → triage → owner-only.
-	// The observe prompt works well on concentrated input but returns NONE when
-	// high-signal turns are diluted by mechanical agent interaction.
-	observeInput := ""
-	if len(turns) > 10 {
-		// Mechanical filter
-		filtered := filterLowSignalTurns(turns)
-		if verbose && len(filtered) < len(turns) {
-			fmt.Fprintf(os.Stderr, "    filter %d → %d turns (%d low-signal removed)\n",
-				len(turns), len(filtered), len(turns)-len(filtered))
-		}
-		if len(filtered) == 0 {
-			return "", totalUsage, nil
-		}
-
-		// LLM triage
-		triaged := filtered
-		if len(filtered) > 10 {
-			t, usage, err := triageTurns(ctx, client, filtered, conv.Source, verbose)
-			totalUsage = totalUsage.Add(usage)
-			if err != nil {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "    triage error, falling back: %v\n", err)
-				}
-			} else if len(t) > 0 {
-				triaged = t
-			}
-		}
-		if len(triaged) == 0 {
-			return "", totalUsage, nil
-		}
-
-		// Owner-only: strip assistant context entirely
-		var b strings.Builder
-		for _, t := range triaged {
-			fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
-		}
-		observeInput = b.String()
-		if verbose {
-			fmt.Fprintf(os.Stderr, "    owner-only %d turns, %d chars\n", len(triaged), len(observeInput))
+	// For large conversations, dispatch on observe mode.
+	if len(turns) > 10 && mode != ObserveFullConversation {
+		switch mode {
+		case ObserveTriageOwnerOnly:
+			return observeTriageOwnerOnly(ctx, client, turns, conv.Source, observePrompt, verbose, &totalUsage)
+		default:
+			return observeWindowed(ctx, client, turns, conv.Source, observePrompt, ctxStrategy, verbose, &totalUsage)
 		}
 	}
 
-	// For small conversations, use the original compression pipeline
-	if observeInput == "" {
-		chunks := compressConversation(turns, conv.Source, ctxStrategy)
-		if len(chunks) == 0 {
-			return "", totalUsage, nil
-		}
-		// Small conversations: observe + refine as before
-		var allCandidates []string
-		for i, chunk := range chunks {
-			start := time.Now()
-			obs, usage, err := inference.Converse(ctx, client, observePrompt, chunk, inference.WithMaxTokens(4096))
-			totalUsage = totalUsage.Add(usage)
-			if verbose {
-				fmt.Fprintf(os.Stderr, "      observe[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
-					i+1, len(chunks), len(chunk), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
-			}
-			if err != nil && obs == "" {
-				return "", totalUsage, err
-			}
-			if obs != "" && !isEmpty(obs) {
-				allCandidates = append(allCandidates, obs)
-			}
-		}
-		if len(allCandidates) == 0 {
-			return "", totalUsage, nil
-		}
-		candidates := strings.Join(allCandidates, "\n\n")
+	// Small conversations: compress, observe in chunks, refine
+	chunks := compressConversation(turns, conv.Source, ctxStrategy)
+	if len(chunks) == 0 {
+		return "", totalUsage, nil
+	}
+	var allCandidates []string
+	for i, chunk := range chunks {
 		start := time.Now()
-		refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+		obs, usage, err := inference.Converse(ctx, client, observePrompt, chunk, inference.WithMaxTokens(4096))
 		totalUsage = totalUsage.Add(usage)
 		if verbose {
-			fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
-				len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+			fmt.Fprintf(os.Stderr, "      observe[%d/%d] %d chars → %d chars (%s, $%.4f)\n",
+				i+1, len(chunks), len(chunk), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 		}
-		if err != nil && refined == "" {
+		if err != nil && obs == "" {
 			return "", totalUsage, err
 		}
-		if isEmpty(refined) {
-			return "", totalUsage, nil
+		if obs != "" && !isEmpty(obs) {
+			allCandidates = append(allCandidates, obs)
 		}
-		return refined, totalUsage, nil
+	}
+	if len(allCandidates) == 0 {
+		return "", totalUsage, nil
+	}
+	candidates := strings.Join(allCandidates, "\n\n")
+	start := time.Now()
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+	}
+	if err != nil && refined == "" {
+		return "", totalUsage, err
+	}
+	if isEmpty(refined) {
+		return "", totalUsage, nil
+	}
+	return refined, totalUsage, nil
+}
+
+// observeWindowed runs sliding-window observation on a large conversation.
+// Each window is small enough that local signal survives without being
+// diluted by distant mechanical turns.
+func observeWindowed(ctx context.Context, client inference.Client, turns []turn, source, observePrompt string, ctxStrategy ContextStrategy, verbose bool, totalUsage *inference.Usage) (string, inference.Usage, error) {
+	windows := buildWindows(turns, windowSize, windowStride)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    windowed: %d turns → %d windows (size %d, stride %d)\n",
+			len(turns), len(windows), windowSize, windowStride)
 	}
 
-	// Large conversations: single observe pass on owner-only text, no refine
+	var allCandidates []string
+	for i, w := range windows {
+		chunk := compressConversation(w, source, ctxStrategy)
+		input := strings.Join(chunk, "\n")
+		start := time.Now()
+		obs, usage, err := inference.Converse(ctx, client, observePrompt, input, inference.WithMaxTokens(4096))
+		*totalUsage = totalUsage.Add(usage)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
+				i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+		}
+		if err != nil && obs == "" {
+			return "", *totalUsage, err
+		}
+		if obs != "" && !isEmpty(obs) {
+			allCandidates = append(allCandidates, obs)
+		}
+	}
+	if len(allCandidates) == 0 {
+		return "", *totalUsage, nil
+	}
+
+	// Deduplicate across overlapping windows, then refine
+	candidates := deduplicateObservationText(strings.Join(allCandidates, "\n\n"))
+	start := time.Now()
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	*totalUsage = totalUsage.Add(usage)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+	}
+	if err != nil && refined == "" {
+		return "", *totalUsage, err
+	}
+	if isEmpty(refined) {
+		return "", *totalUsage, nil
+	}
+	return refined, *totalUsage, nil
+}
+
+// observeTriageOwnerOnly runs the triage + owner-only observation path.
+// Mechanical filter → LLM triage → strip assistant text → single observe pass.
+func observeTriageOwnerOnly(ctx context.Context, client inference.Client, turns []turn, source, observePrompt string, verbose bool, totalUsage *inference.Usage) (string, inference.Usage, error) {
+	// Mechanical filter
+	filtered := filterLowSignalTurns(turns)
+	if verbose && len(filtered) < len(turns) {
+		fmt.Fprintf(os.Stderr, "    filter %d → %d turns (%d low-signal removed)\n",
+			len(turns), len(filtered), len(turns)-len(filtered))
+	}
+	if len(filtered) == 0 {
+		return "", *totalUsage, nil
+	}
+
+	// LLM triage
+	triaged := filtered
+	if len(filtered) > 10 {
+		t, usage, err := triageTurns(ctx, client, filtered, source, verbose)
+		*totalUsage = totalUsage.Add(usage)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "    triage error, falling back: %v\n", err)
+			}
+		} else if len(t) > 0 {
+			triaged = t
+		}
+	}
+	if len(triaged) == 0 {
+		return "", *totalUsage, nil
+	}
+
+	// Owner-only: strip assistant context entirely
+	var b strings.Builder
+	for _, t := range triaged {
+		fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+	}
+	observeInput := b.String()
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    owner-only %d turns, %d chars\n", len(triaged), len(observeInput))
+	}
+
 	start := time.Now()
 	obs, usage, err := inference.Converse(ctx, client, observePrompt, observeInput, inference.WithMaxTokens(4096))
-	totalUsage = totalUsage.Add(usage)
+	*totalUsage = totalUsage.Add(usage)
 	if verbose {
 		fmt.Fprintf(os.Stderr, "      observe %d chars → %d chars (%s, $%.4f)\n",
 			len(observeInput), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 	}
 	if err != nil && obs == "" {
-		return "", totalUsage, err
+		return "", *totalUsage, err
 	}
 	if isEmpty(obs) {
-		return "", totalUsage, nil
+		return "", *totalUsage, nil
 	}
-	return obs, totalUsage, nil
+	return obs, *totalUsage, nil
+}
+
+// buildWindows splits turns into overlapping windows of the given size and stride.
+// The last window is extended or padded to avoid a tiny tail.
+func buildWindows(turns []turn, size, stride int) [][]turn {
+	if len(turns) <= size {
+		return [][]turn{turns}
+	}
+	var windows [][]turn
+	for start := 0; start < len(turns); start += stride {
+		end := start + size
+		if end > len(turns) {
+			end = len(turns)
+		}
+		// If the remaining turns after this window would be smaller than
+		// stride, extend this window to the end to avoid a tiny tail.
+		if len(turns)-end < stride {
+			end = len(turns)
+		}
+		windows = append(windows, turns[start:end])
+		if end == len(turns) {
+			break
+		}
+	}
+	return windows
+}
+
+// deduplicateObservationText removes duplicate observations from raw LLM output
+// across overlapping windows. Two observations are duplicates if their text
+// (after normalization) is identical or one contains the other.
+func deduplicateObservationText(text string) string {
+	items := parseObservationItems(text)
+	if len(items) == 0 {
+		return text
+	}
+
+	type normalizedObs struct {
+		original Observation
+		norm     string
+	}
+	var normalized []normalizedObs
+	for _, item := range items {
+		n := strings.ToLower(strings.TrimSpace(item.Text))
+		normalized = append(normalized, normalizedObs{original: item, norm: n})
+	}
+
+	// Keep track of which observations survive dedup
+	keep := make([]bool, len(normalized))
+	for i := range keep {
+		keep[i] = true
+	}
+
+	for i := 0; i < len(normalized); i++ {
+		if !keep[i] {
+			continue
+		}
+		for j := i + 1; j < len(normalized); j++ {
+			if !keep[j] {
+				continue
+			}
+			// Exact match
+			if normalized[i].norm == normalized[j].norm {
+				keep[j] = false
+				continue
+			}
+			// Containment: if one contains the other, keep the longer one
+			if strings.Contains(normalized[i].norm, normalized[j].norm) {
+				keep[j] = false
+			} else if strings.Contains(normalized[j].norm, normalized[i].norm) {
+				keep[i] = false
+				break
+			}
+		}
+	}
+
+	var b strings.Builder
+	for i, n := range normalized {
+		if !keep[i] {
+			continue
+		}
+		if n.original.Quote != "" {
+			fmt.Fprintf(&b, "Quote: %s\n", n.original.Quote)
+		}
+		fmt.Fprintf(&b, "Observation: %s\n\n", n.original.Text)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // Assistant text limits for adaptive compression. Short owner messages are
