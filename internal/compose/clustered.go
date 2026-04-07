@@ -2,6 +2,7 @@ package compose
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -330,6 +331,9 @@ func runObserve(
 	opts ClusteredOptions,
 	counter *atomic.Int32,
 ) (*observeResult, error) {
+	// Preload source metadata for import sources so isHumanSource can resolve them
+	humanOverrides := loadHumanSources(ctx, store)
+
 	entries, err := store.ListConversations(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
@@ -431,7 +435,7 @@ func runObserve(
 				convBytes := conversationDataSize(conv)
 
 				start := time.Now()
-				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose)
+				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, humanOverrides)
 				n := counter.Add(1)
 				if err != nil {
 					return fmt.Errorf("observe %s: %w", entry.Key, err)
@@ -499,8 +503,8 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) ([]Observation, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, verbose)
+func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, humanOverrides)
 	if err != nil {
 		return nil, usage, err
 	}
@@ -539,20 +543,20 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 // prompt in chunks, and refines the candidates into a single text.
 // Both the map-reduce path (which wants raw text) and the clustering path
 // (which further parses into discrete items) call this function.
-func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool) (string, inference.Usage, error) {
-	turns := extractTurns(conv)
+func observeAndRefine(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) (string, inference.Usage, error) {
+	turns := extractTurns(conv, humanOverrides)
 	if len(turns) == 0 {
 		return "", inference.Usage{}, nil
 	}
 
-	chunks := compressConversation(turns, conv.Source)
+	chunks := compressConversation(turns, conv.Source, humanOverrides)
 	if len(chunks) == 0 {
 		return "", inference.Usage{}, nil
 	}
 
 	// Select the appropriate observe prompt based on source type
 	observePrompt := prompts.Observe
-	if isHumanSource(conv.Source) {
+	if isHumanSource(conv.Source, humanOverrides) {
 		observePrompt = prompts.ObserveHuman
 	}
 
@@ -603,26 +607,63 @@ func observeAndRefine(ctx context.Context, client inference.Client, conv *conver
 const maxAssistantChars = 500
 
 // isHumanSource returns true for sources where conversations are between
-// the owner and other people (not AI assistants).
-func isHumanSource(source string) bool {
+// the owner and other people (not AI assistants). Built-in human sources are
+// hardcoded. Import sources are resolved via the humanSources override map,
+// which is loaded from source metadata at pipeline start.
+func isHumanSource(source string, overrides map[string]bool) bool {
 	switch source {
 	case "slack", "github-issues", "github-prs":
 		return true
 	default:
-		return false
+		return overrides[source]
 	}
+}
+
+// loadHumanSources reads .muse-source.json metadata for all non-builtin sources
+// that have conversations in storage. Returns a map of source names that declared
+// type "human". Built-in sources are not included — isHumanSource handles those
+// via the hardcoded switch.
+func loadHumanSources(ctx context.Context, store storage.Store) map[string]bool {
+	overrides := make(map[string]bool)
+	builtin := conversation.BuiltinSourceNames()
+
+	entries, err := store.ListConversations(ctx)
+	if err != nil {
+		return overrides
+	}
+
+	seen := make(map[string]bool)
+	for _, e := range entries {
+		if builtin[e.Source] || seen[e.Source] {
+			continue
+		}
+		seen[e.Source] = true
+
+		data, err := store.GetData(ctx, conversation.SourceMetadataKey(e.Source))
+		if err != nil {
+			continue
+		}
+		var meta conversation.SourceMetadata
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if meta.Type == "human" {
+			overrides[e.Source] = true
+		}
+	}
+	return overrides
 }
 
 // compressConversation mechanically compresses turns for observation: strips
 // code blocks, collapses tool output to [tool: name] markers, and truncates
 // long assistant/peer messages. Returns chunked text ready for the observe prompt.
-func compressConversation(turns []turn, source string) []string {
+func compressConversation(turns []turn, source string, humanOverrides map[string]bool) []string {
 	var chunks []string
 	var b strings.Builder
 
 	ownerLabel := "[owner]"
 	peerLabel := "[assistant]"
-	if isHumanSource(source) {
+	if isHumanSource(source, humanOverrides) {
 		peerLabel = "[peer]"
 	}
 

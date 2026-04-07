@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ellistarn/muse/internal/compose"
 	"github.com/ellistarn/muse/internal/conversation"
+	"github.com/ellistarn/muse/internal/importer"
 	"github.com/ellistarn/muse/internal/storage"
 )
 
@@ -79,6 +81,30 @@ func printSources(ctx context.Context, w io.Writer, store storage.Store) error {
 			suffix = " " + suffix
 		}
 		fmt.Fprintf(w, "  %-16s %-10s%s\n", s.Name, status, suffix)
+	}
+
+	// Display import sources (non-builtin sources with conversations in storage)
+	importSources, err := importer.ListImportedSources(ctx, store)
+	if err != nil {
+		return err
+	}
+	sort.Strings(importSources)
+	for _, name := range importSources {
+		status := "inactive"
+		if activeSet[name] {
+			status = "active"
+		}
+		counts := ""
+		c, o := convCounts[name], obsCounts[name]
+		if c > 0 || o > 0 {
+			counts = fmt.Sprintf("%d conversations  %d observations", c, o)
+		}
+		tag := "(import)"
+		suffix := counts + tag
+		if suffix != "" {
+			suffix = " " + suffix
+		}
+		fmt.Fprintf(w, "  %-16s %-10s%s\n", name, status, suffix)
 	}
 
 	return nil

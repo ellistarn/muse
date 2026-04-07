@@ -50,7 +50,7 @@ func (l *LocalStore) ListConversations(_ context.Context) ([]ConversationEntry, 
 			}
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".json") {
+		if d.IsDir() || !strings.HasSuffix(path, ".json") || strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
 		rel, err := filepath.Rel(conversationsDir, path)

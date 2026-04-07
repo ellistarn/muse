@@ -72,6 +72,9 @@ type Options struct {
 // from all observations. Observations are the source of truth for what has been
 // processed; there is no separate state file.
 func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inference.Client, opts Options) (*Result, error) {
+	// Preload source metadata for import sources so isHumanSource can resolve them
+	humanOverrides := loadHumanSources(ctx, store)
+
 	// List all conversations and existing observations
 	entries, err := store.ListConversations(ctx)
 	if err != nil {
@@ -156,7 +159,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 					return
 				}
 				start := time.Now()
-				obs, usage, err := observeConversation(ctx, observeLLM, conv)
+				obs, usage, err := observeConversation(ctx, observeLLM, conv, humanOverrides)
 				n := completed.Add(1)
 				if err != nil {
 					mu.Lock()
@@ -286,8 +289,8 @@ type turn struct {
 	humanContent     string // human's message
 }
 
-func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation) (string, inference.Usage, error) {
-	refined, usage, err := observeAndRefine(ctx, client, conv, false)
+func observeConversation(ctx context.Context, client inference.Client, conv *conversation.Conversation, humanOverrides map[string]bool) (string, inference.Usage, error) {
+	refined, usage, err := observeAndRefine(ctx, client, conv, false, humanOverrides)
 	if err != nil {
 		return "", usage, err
 	}
@@ -379,7 +382,7 @@ const maxChunkChars = 200_000
 // For AI conversations, requires at least 2 human turns (corrections/preferences).
 // For peer conversations (e.g. Slack), a single human turn suffices since even
 // one substantive statement reveals reasoning, awareness, and voice.
-func extractTurns(conv *conversation.Conversation) []turn {
+func extractTurns(conv *conversation.Conversation, humanOverrides map[string]bool) []turn {
 	var userTurns int
 	for _, msg := range conv.Messages {
 		if msg.Role == "user" && len(msg.Content) > 0 {
@@ -387,7 +390,7 @@ func extractTurns(conv *conversation.Conversation) []turn {
 		}
 	}
 	minTurns := 2
-	if isHumanSource(conv.Source) {
+	if isHumanSource(conv.Source, humanOverrides) {
 		minTurns = 1
 	}
 	if userTurns < minTurns {

@@ -157,3 +157,25 @@ type ToolCall struct {
 	Input  json.RawMessage `json:"input,omitempty"`
 	Output json.RawMessage `json:"output,omitempty"`
 }
+
+// SourceMetadata describes properties of a conversation source that the compose
+// pipeline needs but that aren't encoded in the conversation data itself.
+// Import plugins write this as .muse-source.json; muse persists it alongside
+// conversations so compose can read it from storage.
+type SourceMetadata struct {
+	Type string `json:"type"` // "human" or "ai"
+}
+
+// SourceMetadataKey returns the storage key for a source's metadata file.
+func SourceMetadataKey(source string) string {
+	return fmt.Sprintf("conversations/%s/.muse-source.json", source)
+}
+
+// BuiltinSourceNames returns the set of source names registered in Sources().
+func BuiltinSourceNames() map[string]bool {
+	names := make(map[string]bool)
+	for _, s := range Sources() {
+		names[s.Name] = true
+	}
+	return names
+}
