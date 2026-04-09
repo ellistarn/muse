@@ -500,7 +500,7 @@ func syncGitHubKindFull(ctx context.Context, client *github.Client, username, ca
 		if err != nil {
 			return fmt.Errorf("search %ss: %w", kind, err)
 		}
-		return fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress)
+		return fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, "", progress)
 	}
 	return dateSegmentedSearch(ctx, client, username, kind, isPR, cacheDir, progress)
 }
@@ -514,7 +514,7 @@ func syncGitHubKindIncremental(ctx context.Context, client *github.Client, usern
 	if err != nil {
 		return fmt.Errorf("incremental %ss: %w", kind, err)
 	}
-	return fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress)
+	return fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, "", progress)
 }
 
 // dateSegmentedSearch walks yearly intervals most-recent-first, subdividing
@@ -547,7 +547,8 @@ func dateSegmentedSearch(ctx context.Context, client *github.Client, username, k
 			if err != nil {
 				return err
 			}
-			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
+			segment := fmt.Sprintf("%d", year)
+			if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, segment, progress); err != nil {
 				return err
 			}
 		} else {
@@ -571,7 +572,8 @@ func dateSegmentedSearch(ctx context.Context, client *github.Client, username, k
 					return err
 				}
 				if len(issues) > 0 {
-					if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, progress); err != nil {
+					segment := fmt.Sprintf("%s %d", mStart.Month().String()[:3], year)
+					if err := fetchAndCacheIssues(ctx, client, cacheDir, issues, isPR, segment, progress); err != nil {
 						return err
 					}
 				}
@@ -630,15 +632,12 @@ func parseRepoURL(url string) (string, string) {
 // ── Comment fetching ───────────────────────────────────────────────────
 
 // fetchAndCacheIssues fetches comments for each issue in parallel and writes to cache.
-// Threads already cached with the same UpdatedAt are skipped.
-func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir string, issues []*github.Issue, isPR bool, progress func(SyncProgress)) error {
-	errCtx, cancelOnErr := context.WithCancel(ctx)
-	defer cancelOnErr()
-
+// Threads already cached with the same UpdatedAt are skipped. Individual thread
+// failures are logged and skipped — only parent context cancellation (e.g. the
+// 30-minute timeout) returns an error.
+func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir string, issues []*github.Issue, isPR bool, segment string, progress func(SyncProgress)) error {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, fetchWorkers)
-	var mu sync.Mutex
-	var firstErr error
 	var fetched atomic.Int32
 
 	for _, issue := range issues {
@@ -648,7 +647,7 @@ func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir st
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			if errCtx.Err() != nil {
+			if ctx.Err() != nil {
 				return
 			}
 
@@ -665,14 +664,9 @@ func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir st
 				}
 			}
 
-			messages, err := fetchThreadMessages(errCtx, client, owner, repo, issue.GetNumber(), isPR)
+			messages, err := fetchThreadMessages(ctx, client, owner, repo, issue.GetNumber(), isPR)
 			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("fetch %s/%s#%d: %w", owner, repo, issue.GetNumber(), err)
-					cancelOnErr()
-				}
-				mu.Unlock()
+				progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("skipped %s/%s#%d: %v", owner, repo, issue.GetNumber(), err)})
 				return
 			}
 
@@ -691,11 +685,11 @@ func fetchAndCacheIssues(ctx context.Context, client *github.Client, cacheDir st
 			saveCachedThread(cacheDir, t)
 
 			n := fetched.Add(1)
-			progress(SyncProgress{Phase: "fetching", Total: len(issues), Current: int(n)})
+			progress(SyncProgress{Phase: "fetching", Total: len(issues), Current: int(n), Detail: segment})
 		}(issue)
 	}
 	wg.Wait()
-	return firstErr
+	return ctx.Err()
 }
 
 // fetchThreadMessages fetches all comments from a thread as raw cached messages.
