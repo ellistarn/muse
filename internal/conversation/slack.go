@@ -106,18 +106,23 @@ func (s *Slack) Conversations(ctx context.Context, progress func(SyncProgress)) 
 }
 
 func syncWorkspace(ctx context.Context, creds slackCreds, cacheDir string, progress func(SyncProgress)) ([]Conversation, error) {
+	onThrottle := func(label string, rate float64) {
+		progress(SyncProgress{Phase: "log", Detail: fmt.Sprintf("%s rate → %.0f req/s", label, rate)})
+	}
 
 	searchLimiter := throttle.NewAIMDLimiter(ctx, throttle.Config{
-		SeedRate: 0.5,
-		MaxRate:  0.5,
-		Label:    "slack-search",
+		SeedRate:   0.5,
+		MaxRate:    0.5,
+		Label:      "slack-search",
+		OnThrottle: onThrottle,
 	})
 	defer searchLimiter.Close()
 
 	repliesLimiter := throttle.NewAIMDLimiter(ctx, throttle.Config{
-		SeedRate: 2,
-		MaxRate:  2,
-		Label:    "slack-replies",
+		SeedRate:   2,
+		MaxRate:    2,
+		Label:      "slack-replies",
+		OnThrottle: onThrottle,
 	})
 	defer repliesLimiter.Close()
 

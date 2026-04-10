@@ -250,47 +250,113 @@ func runCompose(ctx context.Context, stdout, stderr io.Writer, store storage.Sto
 }
 
 // syncProgressRenderer returns a SyncProgressFunc that renders source sync
-// progress using the stage log system. Each source gets a "sync" stage line
-// that updates as discovery and fetching progress. The renderer is safe for
+// progress as a multi-line block on stderr. Each active source gets its own
+// line, updated in place using ANSI cursor movement. The renderer is safe for
 // concurrent use by multiple providers.
 //
-// The "done" phase only clears the transient bar — summary lines are printed
-// after Upload returns via printSyncSummary, which has access to per-source
-// cache information (new vs cached counts).
+// The "done" phase removes the source's line from the block. Summary lines are
+// printed after Upload returns via printSyncSummary.
 func syncProgressRenderer() muse.SyncProgressFunc {
 	var mu sync.Mutex
 	tty := output.IsTTY()
+	active := map[string]conversation.SyncProgress{}
+	var order []string
 	done := map[string]bool{}
+	lines := 0 // number of progress lines currently rendered
+
+	// renderBlock moves the cursor to the top of the progress block and
+	// re-renders one line per active source. Each line ends with a
+	// clear-to-end-of-line escape to prevent ghosting from longer previous
+	// content. The cursor is left at the bottom of the block so the next
+	// call can move up `lines` rows to reach the top. Must be called with
+	// mu held.
+	renderBlock := func() {
+		if !tty {
+			return
+		}
+		// Move cursor to the top of the block.
+		if lines > 0 {
+			fmt.Fprintf(os.Stderr, "\033[%dA", lines)
+		}
+		n := 0
+		for _, src := range order {
+			p, ok := active[src]
+			if !ok {
+				continue
+			}
+			name := strings.ToLower(src)
+			switch p.Phase {
+			case "discovering":
+				detail := ""
+				if p.Detail != "" {
+					detail = ": " + p.Detail
+				}
+				fmt.Fprintf(os.Stderr, "\r%-*ssync %s: discovering%s\033[K\n", output.StageWidth, "", name, detail)
+			case "fetching":
+				if p.Total > 0 && p.Current > 0 {
+					bar := output.RenderBar(p.Current, p.Total, output.BarWidth)
+					if p.Detail != "" {
+						fmt.Fprintf(os.Stderr, "\r%-*s%s %s %d/%d (%s)\033[K\n", output.StageWidth, "", bar, name, p.Current, p.Total, p.Detail)
+					} else {
+						fmt.Fprintf(os.Stderr, "\r%-*s%s %s %d/%d\033[K\n", output.StageWidth, "", bar, name, p.Current, p.Total)
+					}
+				} else {
+					fmt.Fprintf(os.Stderr, "\r%-*ssync %s: fetching...\033[K\n", output.StageWidth, "", name)
+				}
+			}
+			n++
+		}
+		// If the block shrank, clear leftover lines from the previous render.
+		for i := n; i < lines; i++ {
+			fmt.Fprintf(os.Stderr, "\r\033[K\n")
+		}
+		// Cursor is now at the bottom of max(n, lines) emitted newlines.
+		// If the block shrank, move up to sit at the bottom of the active
+		// content (row n), not the bottom of the old block.
+		if overshoot := max(n, lines) - n; overshoot > 0 {
+			fmt.Fprintf(os.Stderr, "\033[%dA", overshoot)
+		}
+		lines = n
+	}
+
+	// clearBlock erases the progress block so that a persistent log line can
+	// be printed above it. Must be called with mu held.
+	clearBlock := func() {
+		if !tty || lines == 0 {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "\033[%dA", lines)
+		for range lines {
+			fmt.Fprintf(os.Stderr, "\r\033[K\n")
+		}
+		fmt.Fprintf(os.Stderr, "\033[%dA", lines)
+		lines = 0
+	}
 
 	return func(source string, p conversation.SyncProgress) {
 		mu.Lock()
 		defer mu.Unlock()
 
-		name := strings.ToLower(source)
-
 		switch p.Phase {
-		case "discovering":
-			if tty {
-				fmt.Fprintf(os.Stderr, "\r%-*ssync %s: discovering...", output.StageWidth, "", name)
+		case "discovering", "fetching":
+			if _, exists := active[source]; !exists {
+				order = append(order, source)
 			}
-		case "fetching":
-			if p.Total > 0 && p.Current > 0 && tty {
-				bar := output.RenderBar(p.Current, p.Total, output.BarWidth)
-				fmt.Fprintf(os.Stderr, "\r%-*s%s %s %d/%d", output.StageWidth, "", bar, name, p.Current, p.Total)
-			}
+			active[source] = p
+			renderBlock()
 		case "log":
-			// Persistent one-line event (e.g. auth success). Clear any
-			// transient status, print on its own line.
-			if tty {
-				output.ClearLine()
-			}
+			clearBlock()
+			name := strings.ToLower(source)
 			output.LogStage("sync", "%s: %s", name, p.Detail).Print()
+			renderBlock()
 		case "done":
-			if !done[name] {
-				done[name] = true
-				// Just clear the transient bar; summary printed by printSyncSummary.
-				if tty {
-					output.ClearLine()
+			if !done[source] {
+				done[source] = true
+				delete(active, source)
+				if len(active) == 0 {
+					clearBlock()
+				} else {
+					renderBlock()
 				}
 			}
 		}

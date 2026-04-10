@@ -13,8 +13,6 @@ package throttle
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"sync"
 	"time"
 )
@@ -69,6 +67,10 @@ type Config struct {
 	RecoveryWindow time.Duration
 	// Label is an optional name for log messages (e.g. "bedrock", "slack-search").
 	Label string
+	// OnThrottle is called when the rate is halved due to throttling. If nil,
+	// the event is not reported. This replaces direct stderr output so callers
+	// can route throttle events through their own progress/logging mechanism.
+	OnThrottle func(label string, rate float64)
 }
 
 // DefaultConfig returns a Config with the defaults extracted from the
@@ -224,8 +226,8 @@ func (l *AIMDLimiter) onThrottle() {
 	}
 	l.lastBack = time.Now()
 	l.rate = max(l.rate/2, l.cfg.MinRate)
-	if l.cfg.Label != "" {
-		fmt.Fprintf(os.Stderr, "  %s rate → %.0f req/s\n", l.cfg.Label, l.rate)
+	if l.cfg.OnThrottle != nil {
+		l.cfg.OnThrottle(l.cfg.Label, l.rate)
 	}
 }
 

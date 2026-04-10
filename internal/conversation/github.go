@@ -49,21 +49,26 @@ type githubTransport struct {
 }
 
 func newGitHubTransport(ctx context.Context, cache *httpCache, logFn func(string)) *githubTransport {
+	onThrottle := func(label string, rate float64) {
+		logFn(fmt.Sprintf("%s rate → %.0f req/s", label, rate))
+	}
 	return &githubTransport{
 		base:  http.DefaultTransport,
 		cache: cache,
 		logFn: logFn,
 		core: throttle.NewAIMDLimiter(ctx, throttle.Config{
-			SeedRate: 1.3, // ~80/min
-			MaxRate:  1.4, // ~83/min (5000/hr)
-			MinRate:  0.1,
-			Label:    "github-core",
+			SeedRate:   1.3, // ~80/min
+			MaxRate:    1.4, // ~83/min (5000/hr)
+			MinRate:    0.1,
+			Label:      "github-core",
+			OnThrottle: onThrottle,
 		}),
 		search: throttle.NewAIMDLimiter(ctx, throttle.Config{
-			SeedRate: 0.45, // ~27/min
-			MaxRate:  0.5,  // ~30/min
-			MinRate:  0.05,
-			Label:    "github-search",
+			SeedRate:   0.45, // ~27/min
+			MaxRate:    0.5,  // ~30/min
+			MinRate:    0.05,
+			Label:      "github-search",
+			OnThrottle: onThrottle,
 		}),
 	}
 }
