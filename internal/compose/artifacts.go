@@ -9,12 +9,15 @@ import (
 	"github.com/ellistarn/muse/internal/storage"
 )
 
-// Artifact path conventions. Observations are shared across all strategies and
-// stored at the top level. Strategy-specific derived artifacts live under
-// "compose/". All paths use the Store's generic PutData/GetData/ListData methods.
+// Artifact path conventions. Observations are stored per observe-mode so
+// different strategies can coexist without clobbering each other. The default
+// mode ("") stores at the top level for backward compatibility. Named modes
+// store under observations/{mode}/. Strategy-specific derived artifacts live
+// under "compose/".
 //
-// Shared:
-//   observations/{source}/{conversationID}.json
+// Observations:
+//   observations/{source}/{conversationID}.json              (default mode)
+//   observations/{mode}/{source}/{conversationID}.json       (named modes)
 //
 // Clustering-specific:
 //   compose/labels/{source}/{conversationID}.json
@@ -31,21 +34,37 @@ func composePath(kind, source, conversationID string) string {
 	return fmt.Sprintf("compose/%s/%s/%s.json", kind, source, conversationID)
 }
 
-// observationPath returns the key for a shared observation artifact.
-func observationPath(source, conversationID string) string {
-	return fmt.Sprintf("observations/%s/%s.json", source, conversationID)
+// observationPath returns the key for an observation artifact. Named modes
+// get their own directory so different strategies don't clobber each other.
+func observationPath(source, conversationID string, mode ...ObserveMode) string {
+	m := ObserveDefault
+	if len(mode) > 0 {
+		m = mode[0]
+	}
+	if m == "" || m == ObserveDefault {
+		return fmt.Sprintf("observations/%s/%s.json", source, conversationID)
+	}
+	return fmt.Sprintf("observations/%s/%s/%s.json", string(m), source, conversationID)
+}
+
+// observationDirPrefix returns the storage prefix for listing/deleting observations.
+func observationDirPrefix(mode ObserveMode) string {
+	if mode == "" || mode == ObserveDefault {
+		return "observations/"
+	}
+	return fmt.Sprintf("observations/%s/", string(mode))
 }
 
 // PutObservations writes observations for a conversation.
-func PutObservations(ctx context.Context, store storage.Store, source, conversationID string, obs *Observations) error {
-	return putJSON(ctx, store, observationPath(source, conversationID), obs)
+func PutObservations(ctx context.Context, store storage.Store, source, conversationID string, obs *Observations, mode ...ObserveMode) error {
+	return putJSON(ctx, store, observationPath(source, conversationID, mode...), obs)
 }
 
 // GetObservations reads observations for a conversation.
 // Returns storage.NotFoundError when no artifact exists.
-func GetObservations(ctx context.Context, store storage.Store, source, conversationID string) (*Observations, error) {
+func GetObservations(ctx context.Context, store storage.Store, source, conversationID string, mode ...ObserveMode) (*Observations, error) {
 	var obs Observations
-	if err := getJSON(ctx, store, observationPath(source, conversationID), &obs); err != nil {
+	if err := getJSON(ctx, store, observationPath(source, conversationID, mode...), &obs); err != nil {
 		return nil, err
 	}
 	return &obs, nil
@@ -85,20 +104,24 @@ func DeleteThemes(ctx context.Context, store storage.Store) error {
 }
 
 // ListObservations returns all (source, conversationID) pairs that have observations.
-func ListObservations(ctx context.Context, store storage.Store) ([]SourceConversation, error) {
-	return listArtifacts(ctx, store, "observations/")
+func ListObservations(ctx context.Context, store storage.Store, mode ...ObserveMode) ([]SourceConversation, error) {
+	m := ObserveDefault
+	if len(mode) > 0 {
+		m = mode[0]
+	}
+	return listArtifacts(ctx, store, observationDirPrefix(m))
 }
 
 // CountObservationItems returns the total number of discrete observation items
 // per source by reading each observation file and summing its Items.
-func CountObservationItems(ctx context.Context, store storage.Store) (map[string]int, error) {
-	entries, err := ListObservations(ctx, store)
+func CountObservationItems(ctx context.Context, store storage.Store, mode ...ObserveMode) (map[string]int, error) {
+	entries, err := ListObservations(ctx, store, mode...)
 	if err != nil {
 		return nil, err
 	}
 	counts := make(map[string]int, len(entries))
 	for _, e := range entries {
-		obs, err := GetObservations(ctx, store, e.Source, e.ConversationID)
+		obs, err := GetObservations(ctx, store, e.Source, e.ConversationID, mode...)
 		if err != nil {
 			return nil, err
 		}
@@ -112,9 +135,13 @@ func ListLabels(ctx context.Context, store storage.Store) ([]SourceConversation,
 	return listArtifacts(ctx, store, "compose/labels/")
 }
 
-// DeleteObservations removes all observation artifacts.
-func DeleteObservations(ctx context.Context, store storage.Store) error {
-	return store.DeletePrefix(ctx, "observations/")
+// DeleteObservations removes all observation artifacts for the given mode.
+func DeleteObservations(ctx context.Context, store storage.Store, mode ...ObserveMode) error {
+	m := ObserveDefault
+	if len(mode) > 0 {
+		m = mode[0]
+	}
+	return store.DeletePrefix(ctx, observationDirPrefix(m))
 }
 
 // DeleteObservationsForSource removes observation artifacts for a specific source.

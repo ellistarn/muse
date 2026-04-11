@@ -72,7 +72,7 @@ func RunClustered(
 	})
 
 	// Load all observations
-	allObs, err := loadAllStructuredObservations(ctx, store)
+	allObs, err := loadAllStructuredObservations(ctx, store, opts.Observe)
 	if err != nil {
 		return nil, fmt.Errorf("load observations: %w", err)
 	}
@@ -341,7 +341,7 @@ func runObserve(
 
 	// Handle reobserve
 	if opts.Reobserve {
-		DeleteObservations(ctx, store)
+		DeleteObservations(ctx, store, opts.Observe)
 		fmt.Fprintln(os.Stderr, "  Cleared all observations")
 	}
 
@@ -370,7 +370,7 @@ func runObserve(
 		}
 		fp := Fingerprint(e.LastModified.Format(time.RFC3339Nano), promptHash)
 
-		existing, err := GetObservations(ctx, store, e.Source, e.ConversationID)
+		existing, err := GetObservations(ctx, store, e.Source, e.ConversationID, opts.Observe)
 		if err == nil && existing.Fingerprint == fp {
 			pruned++
 			continue
@@ -448,13 +448,13 @@ func runObserve(
 					Date:        entry.LastModified.Format("2006-01-02"),
 					Items:       items,
 				}
-				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, obs); err != nil {
+				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, obs, opts.Observe); err != nil {
 					return fmt.Errorf("save observations for %s: %w", entry.Key, err)
 				}
 
 				if opts.Verbose {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] Observed ~/.muse/%s (%d obs, %s, $%.4f)\n",
-						n, len(pending), observationPath(entry.Source, entry.ConversationID), len(items),
+						n, len(pending), observationPath(entry.Source, entry.ConversationID, opts.Observe), len(items),
 						time.Since(start).Round(time.Millisecond), u.Cost())
 				}
 				mu.Lock()
@@ -1190,8 +1190,8 @@ func (e observationEntry) FormatTokens() int {
 
 // loadAllStructuredObservations loads all observation artifacts and returns
 // a flat list of observation entries, loading conversations in parallel.
-func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]observationEntry, error) {
-	convList, err := ListObservations(ctx, store)
+func loadAllStructuredObservations(ctx context.Context, store storage.Store, mode ...ObserveMode) ([]observationEntry, error) {
+	convList, err := ListObservations(ctx, store, mode...)
 	if err != nil {
 		return nil, err
 	}
@@ -1206,7 +1206,7 @@ func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]
 	g.SetLimit(20)
 	for i, ss := range convList {
 		g.Go(func() error {
-			obs, err := GetObservations(ctx, store, ss.Source, ss.ConversationID)
+			obs, err := GetObservations(ctx, store, ss.Source, ss.ConversationID, mode...)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("get observations %s/%s: %w", ss.Source, ss.ConversationID, err)}
 				return results[i].err
