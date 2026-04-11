@@ -51,6 +51,19 @@ type HitMiss struct {
 	Miss int
 }
 
+// ObserveMode controls the observation strategy for conversations.
+type ObserveMode string
+
+const (
+	// ObserveDefault compresses the full conversation and observes in chunks.
+	ObserveDefault ObserveMode = ""
+	// ObserveWoo (windowed owner-only) slides an 8-turn window across the
+	// conversation, strips assistant text from each window, and observes each
+	// window independently. Produces more distinct insights at higher grounding
+	// rate than the default, at lower token cost per window.
+	ObserveWoo ObserveMode = "woo"
+)
+
 // BaseOptions contains fields shared across all compose strategies.
 type BaseOptions struct {
 	// Reobserve ignores persisted observations and re-observes all conversations.
@@ -59,6 +72,8 @@ type BaseOptions struct {
 	Limit int
 	// Verbose enables per-item progress logging.
 	Verbose bool
+	// Observe controls the observation strategy.
+	Observe ObserveMode
 }
 
 // Options configures a map-reduce compose run.

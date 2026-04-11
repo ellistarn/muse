@@ -358,7 +358,8 @@ func runObserve(
 	discovered := len(entries)
 
 	// Compute prompt chain hash for fingerprinting
-	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine)
+	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine,
+		fmt.Sprintf("mode:%s", opts.Observe))
 
 	// Determine which conversations need (re)observation
 	var pending []storage.ConversationEntry
@@ -435,7 +436,7 @@ func runObserve(
 				convBytes := conversationDataSize(conv)
 
 				start := time.Now()
-				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, humanOverrides)
+				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, humanOverrides, opts.Observe)
 				n := counter.Add(1)
 				if err != nil {
 					return fmt.Errorf("observe %s: %w", entry.Key, err)
@@ -503,7 +504,10 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool, mode ObserveMode) ([]Observation, inference.Usage, error) {
+	if mode == ObserveWoo {
+		return observeWoo(ctx, client, conv, verbose, humanOverrides)
+	}
 	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, humanOverrides)
 	if err != nil {
 		return nil, usage, err
@@ -536,6 +540,170 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 		}
 	}
 	return relevant, usage, nil
+}
+
+// Window parameters for windowed observation. Each window is small enough that
+// local signal survives without being washed out by distant mechanical turns.
+// Adjacent windows overlap so multi-turn reasoning arcs aren't split.
+const (
+	windowSize   = 8 // turns per window
+	windowStride = 4 // advance between windows
+)
+
+// observeWoo runs windowed owner-only observation. It slides an 8-turn window
+// across the conversation, strips assistant text from each window, and observes
+// each window independently. Deduplicates across overlapping windows, then refines.
+func observeWoo(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+	turns := extractTurns(conv, humanOverrides)
+	if len(turns) == 0 {
+		return nil, inference.Usage{}, nil
+	}
+
+	windows := buildWindows(turns, windowSize, windowStride)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    woo: %d turns → %d windows (size %d, stride %d)\n",
+			len(turns), len(windows), windowSize, windowStride)
+	}
+
+	observePrompt := prompts.Observe
+	if isHumanSource(conv.Source, humanOverrides) {
+		observePrompt = prompts.ObserveHuman
+	}
+
+	var totalUsage inference.Usage
+	var allCandidates []string
+
+	for i, w := range windows {
+		// Owner-only: strip assistant text
+		var b strings.Builder
+		for _, t := range w {
+			fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+		}
+		input := b.String()
+
+		start := time.Now()
+		obs, usage, err := inference.Converse(ctx, client, observePrompt, input, inference.WithMaxTokens(4096))
+		totalUsage = totalUsage.Add(usage)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
+				i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+		}
+		if err != nil && obs == "" {
+			return nil, totalUsage, err
+		}
+		if obs != "" && !isEmpty(obs) {
+			allCandidates = append(allCandidates, obs)
+		}
+	}
+
+	if len(allCandidates) == 0 {
+		return nil, totalUsage, nil
+	}
+
+	// Deduplicate across overlapping windows, then refine
+	candidates := deduplicateObservationText(strings.Join(allCandidates, "\n\n"))
+	start := time.Now()
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+	}
+	if err != nil && refined == "" {
+		return nil, totalUsage, err
+	}
+	if isEmpty(refined) {
+		return nil, totalUsage, nil
+	}
+
+	items := parseObservationItems(refined)
+	var relevant []Observation
+	for _, item := range items {
+		if isRelevant(item.Text) {
+			relevant = append(relevant, item)
+		}
+	}
+	return relevant, totalUsage, nil
+}
+
+// buildWindows splits turns into overlapping windows of the given size and stride.
+// The last window is extended to avoid a tiny tail.
+func buildWindows(turns []turn, size, stride int) [][]turn {
+	if len(turns) <= size {
+		return [][]turn{turns}
+	}
+	var windows [][]turn
+	for start := 0; start < len(turns); start += stride {
+		end := start + size
+		if end > len(turns) {
+			end = len(turns)
+		}
+		if len(turns)-end < stride {
+			end = len(turns)
+		}
+		windows = append(windows, turns[start:end])
+		if end == len(turns) {
+			break
+		}
+	}
+	return windows
+}
+
+// deduplicateObservationText removes duplicate observations from raw LLM output
+// across overlapping windows. Two observations are duplicates if their text
+// (after normalization) is identical or one contains the other.
+func deduplicateObservationText(text string) string {
+	items := parseObservationItems(text)
+	if len(items) == 0 {
+		return text
+	}
+
+	type normalizedObs struct {
+		original Observation
+		norm     string
+	}
+	var normalized []normalizedObs
+	for _, item := range items {
+		n := strings.ToLower(strings.TrimSpace(item.Text))
+		normalized = append(normalized, normalizedObs{original: item, norm: n})
+	}
+
+	keep := make([]bool, len(normalized))
+	for i := range keep {
+		keep[i] = true
+	}
+	for i := 0; i < len(normalized); i++ {
+		if !keep[i] {
+			continue
+		}
+		for j := i + 1; j < len(normalized); j++ {
+			if !keep[j] {
+				continue
+			}
+			if normalized[i].norm == normalized[j].norm {
+				keep[j] = false
+				continue
+			}
+			if strings.Contains(normalized[i].norm, normalized[j].norm) {
+				keep[j] = false
+			} else if strings.Contains(normalized[j].norm, normalized[i].norm) {
+				keep[i] = false
+				break
+			}
+		}
+	}
+
+	var b strings.Builder
+	for i, n := range normalized {
+		if !keep[i] {
+			continue
+		}
+		if n.original.Quote != "" {
+			fmt.Fprintf(&b, "Quote: %s\n", n.original.Quote)
+		}
+		fmt.Fprintf(&b, "Observation: %s\n\n", n.original.Text)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // observeAndRefine is the shared core of the observation pipeline. It extracts
