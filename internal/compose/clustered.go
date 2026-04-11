@@ -1832,12 +1832,28 @@ func runSampleWithObs(ctx context.Context, clusters []clusterResult, allObs []ob
 	for _, cl := range clusters {
 		indices := cl.ObservationIdxs
 
-		// Shuffle for random selection
+		// Prioritize observations with quotes (concrete exemplars), then
+		// shuffle within each group. Quotes carry voice and specificity that
+		// the summarize step can preserve; quoteless observations tend to
+		// produce more abstract summaries.
 		shuffled := make([]int, len(indices))
 		copy(shuffled, indices)
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		// Partition: quotes first, then non-quotes
+		var withQuote, withoutQuote []int
+		for _, idx := range shuffled {
+			if allObs[idx].Quote != "" {
+				withQuote = append(withQuote, idx)
+			} else {
+				withoutQuote = append(withoutQuote, idx)
+			}
+		}
+		rand.Shuffle(len(withQuote), func(i, j int) {
+			withQuote[i], withQuote[j] = withQuote[j], withQuote[i]
 		})
+		rand.Shuffle(len(withoutQuote), func(i, j int) {
+			withoutQuote[i], withoutQuote[j] = withoutQuote[j], withoutQuote[i]
+		})
+		shuffled = append(withQuote, withoutQuote...)
 
 		var selected []string
 		tokens := 0
