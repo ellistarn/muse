@@ -62,6 +62,10 @@ const (
 	// window independently. Produces more distinct insights at higher grounding
 	// rate than the default, at lower token cost per window.
 	ObserveWoo ObserveMode = "woo"
+	// ObserveAdaptive checks average owner message length per window and picks
+	// woo (owner-only) below the threshold or default (with assistant) above it.
+	// One observe call per window, same cost as either single strategy.
+	ObserveAdaptive ObserveMode = "adaptive"
 )
 
 // BaseOptions contains fields shared across all compose strategies.

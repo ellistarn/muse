@@ -505,8 +505,11 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
 func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool, mode ObserveMode) ([]Observation, inference.Usage, error) {
-	if mode == ObserveWoo {
+	switch mode {
+	case ObserveWoo:
 		return observeWoo(ctx, client, conv, verbose, humanOverrides)
+	case ObserveAdaptive:
+		return observeAdaptive(ctx, client, conv, verbose, humanOverrides)
 	}
 	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, humanOverrides)
 	if err != nil {
@@ -587,6 +590,105 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 		if verbose {
 			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
 				i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+		}
+		if err != nil && obs == "" {
+			return nil, totalUsage, err
+		}
+		if obs != "" && !isEmpty(obs) {
+			allCandidates = append(allCandidates, obs)
+		}
+	}
+
+	if len(allCandidates) == 0 {
+		return nil, totalUsage, nil
+	}
+
+	// Deduplicate across overlapping windows, then refine
+	candidates := deduplicateObservationText(strings.Join(allCandidates, "\n\n"))
+	start := time.Now()
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+	}
+	if err != nil && refined == "" {
+		return nil, totalUsage, err
+	}
+	if isEmpty(refined) {
+		return nil, totalUsage, nil
+	}
+
+	items := parseObservationItems(refined)
+	var relevant []Observation
+	for _, item := range items {
+		if isRelevant(item.Text) {
+			relevant = append(relevant, item)
+		}
+	}
+	return relevant, totalUsage, nil
+}
+
+// adaptiveThreshold is the average owner message length (in chars) below which
+// woo (owner-only) is used. At or above this, default (with assistant) is used.
+// Derived from featurize across 1054 windows: woo wins 1.5-1.9x below 300,
+// default wins ~2x above 600, wash in between.
+const adaptiveThreshold = 300
+
+// observeAdaptive runs windowed observation, choosing woo or default framing
+// per window based on average owner message length.
+func observeAdaptive(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+	turns := extractTurns(conv, humanOverrides)
+	if len(turns) == 0 {
+		return nil, inference.Usage{}, nil
+	}
+
+	windows := buildWindows(turns, windowSize, windowStride)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    adaptive: %d turns → %d windows (size %d, stride %d)\n",
+			len(turns), len(windows), windowSize, windowStride)
+	}
+
+	observePrompt := prompts.Observe
+	if isHumanSource(conv.Source, humanOverrides) {
+		observePrompt = prompts.ObserveHuman
+	}
+
+	var totalUsage inference.Usage
+	var allCandidates []string
+
+	for i, w := range windows {
+		// Compute average owner message length for this window
+		var totalOwner int
+		for _, t := range w {
+			totalOwner += len(t.humanContent)
+		}
+		avgOwner := totalOwner / len(w)
+
+		// Pick framing based on threshold
+		var input string
+		var method string
+		if avgOwner < adaptiveThreshold {
+			// Woo: owner-only
+			var b strings.Builder
+			for _, t := range w {
+				fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+			}
+			input = b.String()
+			method = "woo"
+		} else {
+			// Default: compressed with assistant context
+			chunks := compressConversation(w, conv.Source, humanOverrides)
+			input = strings.Join(chunks, "\n")
+			method = "default"
+		}
+
+		start := time.Now()
+		obs, usage, err := inference.Converse(ctx, client, observePrompt, input, inference.WithMaxTokens(4096))
+		totalUsage = totalUsage.Add(usage)
+		if verbose {
+			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, avg %d chars, %s → %d chars (%s, $%.4f)\n",
+				i+1, len(windows), len(w), avgOwner, method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 		}
 		if err != nil && obs == "" {
 			return nil, totalUsage, err
