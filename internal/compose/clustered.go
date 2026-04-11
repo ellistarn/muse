@@ -635,8 +635,9 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 // default wins ~2x above 600, wash in between.
 const adaptiveThreshold = 300
 
-// observeAdaptive runs windowed observation, choosing woo or default framing
-// per window based on average owner message length.
+// observeAdaptive runs windowed observation, picking the likely-better method
+// per window based on average owner message length. If the first method returns
+// NONE, falls back to the other. At most 2 calls per window.
 func observeAdaptive(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
 	turns := extractTurns(conv, humanOverrides)
 	if len(turns) == 0 {
@@ -665,36 +666,52 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 		}
 		avgOwner := totalOwner / len(w)
 
-		// Pick framing based on threshold
-		var input string
-		var method string
+		// Build both inputs
+		var wooB strings.Builder
+		for _, t := range w {
+			fmt.Fprintf(&wooB, "[owner]: %s\n\n", t.humanContent)
+		}
+		wooInput := wooB.String()
+
+		chunks := compressConversation(w, conv.Source, humanOverrides)
+		defaultInput := strings.Join(chunks, "\n")
+
+		// Pick order based on threshold
+		type attempt struct {
+			input  string
+			method string
+		}
+		var attempts []attempt
 		if avgOwner < adaptiveThreshold {
-			// Woo: owner-only
-			var b strings.Builder
-			for _, t := range w {
-				fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
-			}
-			input = b.String()
-			method = "woo"
+			attempts = []attempt{{wooInput, "woo"}, {defaultInput, "default"}}
 		} else {
-			// Default: compressed with assistant context
-			chunks := compressConversation(w, conv.Source, humanOverrides)
-			input = strings.Join(chunks, "\n")
-			method = "default"
+			attempts = []attempt{{defaultInput, "default"}, {wooInput, "woo"}}
 		}
 
 		start := time.Now()
-		obs, usage, err := inference.Converse(ctx, client, observePrompt, input, inference.WithMaxTokens(4096))
-		totalUsage = totalUsage.Add(usage)
-		if verbose {
-			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, avg %d chars, %s → %d chars (%s, $%.4f)\n",
-				i+1, len(windows), len(w), avgOwner, method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+		for _, a := range attempts {
+			obs, usage, err := inference.Converse(ctx, client, observePrompt, a.input, inference.WithMaxTokens(4096))
+			totalUsage = totalUsage.Add(usage)
+			if err != nil && obs == "" {
+				return nil, totalUsage, err
+			}
+			if obs != "" && !isEmpty(obs) {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, avg %d chars, %s → %d chars (%s, $%.4f)\n",
+						i+1, len(windows), len(w), avgOwner, a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+				}
+				allCandidates = append(allCandidates, obs)
+				break
+			}
+			// First method returned NONE, try fallback
+			if verbose && a.method == attempts[0].method {
+				fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, avg %d chars, %s → NONE, trying %s\n",
+					i+1, len(windows), len(w), avgOwner, a.method, attempts[1].method)
+			}
 		}
-		if err != nil && obs == "" {
-			return nil, totalUsage, err
-		}
-		if obs != "" && !isEmpty(obs) {
-			allCandidates = append(allCandidates, obs)
+		// Both returned NONE — log it
+		if verbose && len(allCandidates) == 0 || (len(allCandidates) > 0 && allCandidates[len(allCandidates)-1] == "") {
+			// already logged above
 		}
 	}
 
