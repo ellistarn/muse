@@ -629,15 +629,16 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 	return relevant, totalUsage, nil
 }
 
-// adaptiveThreshold is the average owner message length (in chars) below which
-// woo (owner-only) is used. At or above this, default (with assistant) is used.
-// Derived from featurize across 1054 windows: woo wins 1.5-1.9x below 300,
-// default wins ~2x above 600, wash in between.
-const adaptiveThreshold = 300
-
-// observeAdaptive runs windowed observation, picking the likely-better method
-// per window based on average owner message length. If the first method returns
-// NONE, falls back to the other. At most 2 calls per window.
+// observeAdaptive runs windowed observation, trying woo (owner-only) first
+// on each window and falling back to default (with assistant) on NONE. At most
+// 2 calls per window.
+//
+// Featurize data showed avg owner message length doesn't cleanly separate
+// which method wins — the distributions overlap. But woo-first with fallback
+// captures 557 total observations vs 492 for default-first, because woo
+// produces richer output when both methods find signal. The fallback is cheap
+// (NONE windows cost ~4 output tokens) and catches the 63 windows where only
+// default finds signal.
 func observeAdaptive(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
 	turns := extractTurns(conv, humanOverrides)
 	if len(turns) == 0 {
@@ -659,14 +660,7 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 	var allCandidates []string
 
 	for i, w := range windows {
-		// Compute average owner message length for this window
-		var totalOwner int
-		for _, t := range w {
-			totalOwner += len(t.humanContent)
-		}
-		avgOwner := totalOwner / len(w)
-
-		// Build both inputs
+		// Build both inputs upfront
 		var wooB strings.Builder
 		for _, t := range w {
 			fmt.Fprintf(&wooB, "[owner]: %s\n\n", t.humanContent)
@@ -676,20 +670,17 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 		chunks := compressConversation(w, conv.Source, humanOverrides)
 		defaultInput := strings.Join(chunks, "\n")
 
-		// Pick order based on threshold
-		type attempt struct {
+		// Try woo first, fall back to default
+		attempts := []struct {
 			input  string
 			method string
-		}
-		var attempts []attempt
-		if avgOwner < adaptiveThreshold {
-			attempts = []attempt{{wooInput, "woo"}, {defaultInput, "default"}}
-		} else {
-			attempts = []attempt{{defaultInput, "default"}, {wooInput, "woo"}}
+		}{
+			{wooInput, "woo"},
+			{defaultInput, "default"},
 		}
 
 		start := time.Now()
-		for _, a := range attempts {
+		for j, a := range attempts {
 			obs, usage, err := inference.Converse(ctx, client, observePrompt, a.input, inference.WithMaxTokens(4096))
 			totalUsage = totalUsage.Add(usage)
 			if err != nil && obs == "" {
@@ -697,21 +688,16 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 			}
 			if obs != "" && !isEmpty(obs) {
 				if verbose {
-					fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, avg %d chars, %s → %d chars (%s, $%.4f)\n",
-						i+1, len(windows), len(w), avgOwner, a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+					fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %s → %d chars (%s, $%.4f)\n",
+						i+1, len(windows), len(w), a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 				}
 				allCandidates = append(allCandidates, obs)
 				break
 			}
-			// First method returned NONE, try fallback
-			if verbose && a.method == attempts[0].method {
-				fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, avg %d chars, %s → NONE, trying %s\n",
-					i+1, len(windows), len(w), avgOwner, a.method, attempts[1].method)
+			if j == 0 && verbose {
+				fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, woo → NONE, trying default\n",
+					i+1, len(windows), len(w))
 			}
-		}
-		// Both returned NONE — log it
-		if verbose && len(allCandidates) == 0 || (len(allCandidates) > 0 && allCandidates[len(allCandidates)-1] == "") {
-			// already logged above
 		}
 	}
 
