@@ -282,6 +282,24 @@ func RunClustered(
 	})
 	logAfter("muse.md").Cost(time.Since(composeStart), composeUsage.Cost()).Print()
 
+	// Prepend provenance metadata
+	mode := string(opts.Observe)
+	if mode == "" {
+		mode = "default"
+	}
+	var corpusNote string
+	if obsResult.discovered > 0 {
+		corpusNote = fmt.Sprintf("\ncorpus: %d conversations", obsResult.discovered)
+	}
+	metadata := fmt.Sprintf("<!--\ncomposed: %s\nobserve: %s\nobservations: %d\nclusters: %d%s\n-->\n\n",
+		time.Now().UTC().Format("2006-01-02"),
+		mode,
+		len(allObs),
+		len(clusters),
+		corpusNote,
+	)
+	muse = metadata + muse
+
 	// ── DONE ────────────────────────────────────────────────────────────
 	logStage("done", "%d patterns → muse.md", len(clusters)).
 		Cost(time.Since(pipelineStart), totalUsage.Cost()).Print()
