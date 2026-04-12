@@ -56,44 +56,52 @@ func RunClustered(
 	var stages []StageStats
 
 	// ── OBSERVE ─────────────────────────────────────────────────────────
-	var observeCounter atomic.Int32
-	observeStart := time.Now()
-	observeResult, err := runObserve(ctx, store, observeLLM, opts, &observeCounter)
-	if err != nil {
-		return nil, fmt.Errorf("observe: %w", err)
-	}
-	totalUsage = totalUsage.Add(observeResult.usage)
-	stages = append(stages, StageStats{
-		Name:     "observe",
-		Model:    observeLLM.Model(),
-		Duration: time.Since(observeStart),
-		Usage:    observeResult.usage,
-		DataSize: observeResult.dataSize,
-	})
+	var allObs []observationEntry
+	var obsResult observeResult
+	if opts.SkipObserve {
+		// Load pre-existing observations without re-observing.
+		var err error
+		allObs, err = loadAllStructuredObservations(ctx, store, opts.Observe)
+		if err != nil {
+			return nil, fmt.Errorf("load observations: %w", err)
+		}
+		logStage("observe", "skipped, %d pre-existing observations", len(allObs)).Print()
+	} else {
+		var observeCounter atomic.Int32
+		observeStart := time.Now()
+		or, err := runObserve(ctx, store, observeLLM, opts, &observeCounter)
+		if err != nil {
+			return nil, fmt.Errorf("observe: %w", err)
+		}
+		obsResult = *or
+		totalUsage = totalUsage.Add(obsResult.usage)
+		stages = append(stages, StageStats{
+			Name:     "observe",
+			Model:    observeLLM.Model(),
+			Duration: time.Since(observeStart),
+			Usage:    obsResult.usage,
+			DataSize: obsResult.dataSize,
+		})
 
-	// Load all observations
-	allObs, err := loadAllStructuredObservations(ctx, store, opts.Observe)
-	if err != nil {
-		return nil, fmt.Errorf("load observations: %w", err)
-	}
+		allObs, err = loadAllStructuredObservations(ctx, store, opts.Observe)
+		if err != nil {
+			return nil, fmt.Errorf("load observations: %w", err)
+		}
 
-	// discover + observe log lines (printed after observe completes since
-	// discovery happens inside runObserve before the LLM work)
-
-	// observe result line
-	observeNote := ""
-	if observeResult.remaining > 0 {
-		observeNote = fmt.Sprintf(" [%d remaining]", observeResult.remaining)
+		observeNote := ""
+		if obsResult.remaining > 0 {
+			observeNote = fmt.Sprintf(" [%d remaining]", obsResult.remaining)
+		}
+		logAfter("%d observations%s",
+			len(allObs), observeNote,
+		).Cost(time.Since(observeStart), obsResult.usage.Cost()).Print()
 	}
-	logAfter("%d observations%s",
-		len(allObs), observeNote,
-	).Cost(time.Since(observeStart), observeResult.usage.Cost()).Print()
 
 	if len(allObs) == 0 {
 		return &Result{
-			Processed: observeResult.processed,
-			Pruned:    observeResult.pruned,
-			Remaining: observeResult.remaining,
+			Processed: obsResult.processed,
+			Pruned:    obsResult.pruned,
+			Remaining: obsResult.remaining,
 			Stages:    stages,
 		}, nil
 	}
@@ -278,16 +286,16 @@ func RunClustered(
 	logStage("done", "%d patterns → muse.md", len(clusters)).
 		Cost(time.Since(pipelineStart), totalUsage.Cost()).Print()
 
-	processed := observeResult.processed
+	processed := obsResult.processed
 	return &Result{
 		Processed:    processed,
-		Pruned:       observeResult.pruned,
-		Remaining:    observeResult.remaining,
+		Pruned:       obsResult.pruned,
+		Remaining:    obsResult.remaining,
 		Observations: len(allObs),
 		Clusters:     len(clusters),
 		Noise:        len(noiseObs),
 		Cache: CacheStats{
-			Observe: HitMiss{Hit: observeResult.pruned, Miss: observeResult.processed},
+			Observe: HitMiss{Hit: obsResult.pruned, Miss: obsResult.processed},
 			Label:   labelCache,
 		},
 		Stages: stages,

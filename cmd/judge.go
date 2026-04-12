@@ -32,18 +32,23 @@ For each numbered observation, respond with just the number and the rating. Exam
 func newJudgeCmd() *cobra.Command {
 	var mode string
 	var limit int
+	var filter bool
 	cmd := &cobra.Command{
 		Use:   "judge",
 		Short: "Rate observation quality against source conversations",
 		Long: `Runs an LLM-as-judge on observations from a given observe mode,
 rating each as GROUNDED, GENERIC, or MISLEADING against the source
-conversation. Outputs a JSON summary.`,
+conversation. Outputs a JSON summary.
+
+With --filter, writes grounded-only observations to a new mode called
+"{mode}-filtered" so compose can use them.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJudge(cmd.Context(), compose.ObserveMode(mode), limit)
+			return runJudge(cmd.Context(), compose.ObserveMode(mode), limit, filter)
 		},
 	}
 	cmd.Flags().StringVar(&mode, "observe-mode", "woo", "which observation set to judge")
 	cmd.Flags().IntVar(&limit, "limit", 0, "max conversations to judge (0 = all)")
+	cmd.Flags().BoolVar(&filter, "filter", false, "write grounded-only observations to {mode}-filtered")
 	return cmd
 }
 
@@ -58,7 +63,7 @@ type judgeResult struct {
 	Unparsed       int    `json:"unparsed"`
 }
 
-func runJudge(ctx context.Context, mode compose.ObserveMode, limit int) error {
+func runJudge(ctx context.Context, mode compose.ObserveMode, limit int, filter bool) error {
 	store, err := newStore(ctx)
 	if err != nil {
 		return err
@@ -133,25 +138,52 @@ func runJudge(ctx context.Context, mode compose.ObserveMode, limit int) error {
 				return nil
 			}
 
-			// Parse ratings
+			// Parse per-observation ratings
 			r := judgeResult{
 				Source:         entry.Source,
 				ConversationID: entry.ConversationID,
 				Method:         string(mode),
 				Total:          len(obs.Items),
 			}
+			ratings := make([]string, len(obs.Items))
 			for _, line := range strings.Split(resp, "\n") {
 				line = strings.TrimSpace(line)
 				upper := strings.ToUpper(line)
-				if strings.Contains(upper, "GROUNDED") {
-					r.Grounded++
-				} else if strings.Contains(upper, "GENERIC") {
-					r.Generic++
-				} else if strings.Contains(upper, "MISLEADING") {
-					r.Misleading++
+				// Parse "N. RATING" format
+				var idx int
+				if n, _ := fmt.Sscanf(line, "%d.", &idx); n == 1 && idx >= 1 && idx <= len(obs.Items) {
+					if strings.Contains(upper, "GROUNDED") {
+						ratings[idx-1] = "GROUNDED"
+						r.Grounded++
+					} else if strings.Contains(upper, "GENERIC") {
+						ratings[idx-1] = "GENERIC"
+						r.Generic++
+					} else if strings.Contains(upper, "MISLEADING") {
+						ratings[idx-1] = "MISLEADING"
+						r.Misleading++
+					}
 				}
 			}
 			r.Unparsed = r.Total - r.Grounded - r.Generic - r.Misleading
+
+			// Optionally write grounded-only observations to filtered mode
+			if filter {
+				filteredMode := compose.ObserveMode(string(mode) + "-filtered")
+				var filtered []compose.Observation
+				for i, item := range obs.Items {
+					if ratings[i] == "GROUNDED" {
+						filtered = append(filtered, item)
+					}
+				}
+				if len(filtered) > 0 {
+					filteredObs := &compose.Observations{
+						Fingerprint: obs.Fingerprint,
+						Date:        obs.Date,
+						Items:       filtered,
+					}
+					compose.PutObservations(ctx, store, entry.Source, entry.ConversationID, filteredObs, filteredMode)
+				}
+			}
 
 			fmt.Fprintf(os.Stderr, "  [%d/%d] %s/%s: %d grounded, %d generic, %d misleading\n",
 				n, len(entries), entry.Source, entry.ConversationID, r.Grounded, r.Generic, r.Misleading)

@@ -26,6 +26,7 @@ func newComposeCmd() *cobra.Command {
 	var limit int
 	var method string
 	var observeMode string
+	var skipObserve bool
 	cmd := &cobra.Command{
 		Use:   "compose",
 		Short: "Compose a muse from conversations",
@@ -88,7 +89,7 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 
 			switch method {
 			case "clustering":
-				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, reobserve, relabel, compose.ObserveMode(observeMode), limit, uploaded, uploadBytes)
+				return runClusteredCompose(ctx, cmd.OutOrStdout(), store, reobserve, relabel, compose.ObserveMode(observeMode), skipObserve, limit, uploaded, uploadBytes)
 			case "map-reduce":
 				return runMapReduceCompose(ctx, cmd.OutOrStdout(), store, reobserve, learn, limit)
 			default:
@@ -102,10 +103,11 @@ reprocessing conversations. Use --reobserve to reprocess conversations from scra
 	cmd.Flags().IntVar(&limit, "limit", 0, "max conversations to observe per run (0 = no limit)")
 	cmd.Flags().StringVar(&method, "method", "clustering", "composition method: clustering or map-reduce")
 	cmd.Flags().StringVar(&observeMode, "observe-mode", "", "observation strategy: '' (default), 'woo' (windowed owner-only), 'adaptive' (picks per window)")
+	cmd.Flags().BoolVar(&skipObserve, "skip-observe", false, "skip observe, compose from pre-existing observations (for filtered/derived sets)")
 	return cmd
 }
 
-func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, reobserve, relabel bool, mode compose.ObserveMode, limit, uploaded, uploadBytes int) error {
+func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.Store, reobserve, relabel bool, mode compose.ObserveMode, skipObserve bool, limit, uploaded, uploadBytes int) error {
 	observeLLM, err := newLLMClient(ctx, TierFast)
 	if err != nil {
 		return err
@@ -122,10 +124,11 @@ func runClusteredCompose(ctx context.Context, stdout io.Writer, store storage.St
 		composeLLM, // compose
 		compose.ClusteredOptions{
 			BaseOptions: compose.BaseOptions{
-				Reobserve: reobserve,
-				Limit:     limit,
-				Verbose:   verbose,
-				Observe:   mode,
+				Reobserve:   reobserve,
+				Limit:       limit,
+				Verbose:     verbose,
+				Observe:     mode,
+				SkipObserve: skipObserve,
 			},
 			Relabel:     relabel,
 			Uploaded:    uploaded,
