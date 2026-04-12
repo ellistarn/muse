@@ -300,6 +300,12 @@ func RunClustered(
 	)
 	muse = metadata + muse
 
+	// Re-save with metadata prepended
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	if err := store.PutMuse(ctx, timestamp, muse); err != nil {
+		return nil, fmt.Errorf("failed to write muse with metadata: %w", err)
+	}
+
 	// ── DONE ────────────────────────────────────────────────────────────
 	logStage("done", "%d patterns → muse.md", len(clusters)).
 		Cost(time.Since(pipelineStart), totalUsage.Cost()).Print()
