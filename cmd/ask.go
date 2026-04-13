@@ -42,11 +42,27 @@ to start a fresh session.`,
 			m := muse.New(llm, document, muse.WithSessionsDir(dir))
 
 			question := strings.Join(args, " ")
+			var inThinking bool
 			result, err := m.Ask(ctx, muse.AskInput{
 				Question: question,
 				New:      newSession,
 				StreamFunc: inference.StreamFunc(func(delta inference.StreamDelta) {
-					fmt.Fprint(os.Stdout, delta.Text)
+					if delta.Thinking && !verbose {
+						return
+					}
+					if delta.Thinking {
+						if !inThinking {
+							inThinking = true
+							fmt.Fprint(os.Stderr, "\033[2m") // dim
+						}
+						fmt.Fprint(os.Stderr, delta.Text)
+					} else {
+						if inThinking {
+							inThinking = false
+							fmt.Fprint(os.Stderr, "\033[0m\n") // reset + newline before response
+						}
+						fmt.Fprint(os.Stdout, delta.Text)
+					}
 				}),
 			})
 			if result != nil && result.Response != "" {

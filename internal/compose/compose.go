@@ -318,7 +318,7 @@ func learn(ctx context.Context, client inference.Client, store storage.Store, ob
 		return "", "", inference.Usage{}, nil
 	}
 	input := strings.Join(observations, "\n\n---\n\n")
-	muse, usage, err := inference.Converse(ctx, client, prompts.Compose, input, inference.WithThinking(16000))
+	muse, usage, err := inference.Converse(ctx, client, prompts.Compose, input, inference.WithThinking(inference.DefaultThinkingBudget))
 	if err != nil {
 		return "", "", usage, err
 	}

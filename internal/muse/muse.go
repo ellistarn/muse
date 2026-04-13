@@ -120,9 +120,9 @@ func (m *Muse) Ask(ctx context.Context, input AskInput) (*AskResult, error) {
 	var result *inference.Response
 	var err error
 	if input.StreamFunc != nil {
-		result, err = m.llm.ConverseMessagesStream(ctx, session.System, session.Messages, input.StreamFunc)
+		result, err = m.llm.ConverseMessagesStream(ctx, session.System, session.Messages, input.StreamFunc, inference.WithThinking(inference.DefaultThinkingBudget))
 	} else {
-		result, err = m.llm.ConverseMessages(ctx, session.System, session.Messages)
+		result, err = m.llm.ConverseMessages(ctx, session.System, session.Messages, inference.WithThinking(inference.DefaultThinkingBudget))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("converse failed: %w", err)

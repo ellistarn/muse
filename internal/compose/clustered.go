@@ -1717,8 +1717,8 @@ func runCompose(
 		}
 	}
 
-	stream := newStageStream(16000, 4096)
-	muse, usage, err := inference.ConverseStream(ctx, llm, prompts.ComposeClustered, input.String(), stream.callback(), inference.WithThinking(16000))
+	stream := newStageStream(inference.DefaultThinkingBudget, inference.DefaultMaxTokens)
+	muse, usage, err := inference.ConverseStream(ctx, llm, prompts.ComposeClustered, input.String(), stream.callback(), inference.WithThinking(inference.DefaultThinkingBudget))
 	stream.finish()
 	if err != nil {
 		return "", "", usage, err

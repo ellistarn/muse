@@ -12,6 +12,11 @@ type ConverseOptions struct {
 // DefaultMaxTokens is the default output token limit when not overridden.
 const DefaultMaxTokens = 4096
 
+// DefaultThinkingBudget is the standard extended thinking budget used across
+// compose and ask. Providers map this to their native mechanism (Anthropic
+// extended thinking, Bedrock thinking config, OpenAI reasoning effort).
+const DefaultThinkingBudget = 16000
+
 // Apply returns the merged options.
 func Apply(opts []ConverseOption) ConverseOptions {
 	var o ConverseOptions
