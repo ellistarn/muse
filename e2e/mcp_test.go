@@ -3,18 +3,18 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/ellistarn/muse/internal/bedrock"
+	"github.com/ellistarn/muse/internal/inference"
 	musemcp "github.com/ellistarn/muse/internal/mcp"
 	museinternal "github.com/ellistarn/muse/internal/muse"
 )
@@ -31,9 +31,16 @@ func newMCPClientWithOpts(t *testing.T, document string, opts []museinternal.Opt
 	runtime := &mockRuntime{responses: responses}
 	ctx := context.Background()
 	bedrockClient := bedrock.NewClientWithRuntime(ctx, runtime)
-	m := museinternal.New(bedrockClient, document, opts...)
+	return newMCPClientWithLLM(t, bedrockClient, document, opts...)
+}
+
+// newMCPClientWithLLM creates an in-process MCP client backed by an arbitrary inference.Client.
+func newMCPClientWithLLM(t *testing.T, llm inference.Client, document string, opts ...museinternal.Option) *client.Client {
+	t.Helper()
+	m := museinternal.New(llm, document, opts...)
 	srv := musemcp.NewServer(m)
 
+	ctx := context.Background()
 	c, err := client.NewInProcessClient(srv)
 	if err != nil {
 		t.Fatalf("failed to create in-process client: %v", err)
@@ -321,5 +328,68 @@ func TestMCP_DoesNotResumeAskSession(t *testing.T) {
 	}
 	if string(latestData) != "ask-session-id" {
 		t.Errorf("latest = %q, want %q; MCP session overwrote the CLI latest pointer", string(latestData), "ask-session-id")
+	}
+}
+
+// thinkingLLM is an inference.Client that emits thinking tokens before the response.
+type thinkingLLM struct {
+	thinking string
+	response string
+}
+
+func (t *thinkingLLM) Model() string { return "test-model" }
+
+func (t *thinkingLLM) ConverseMessages(_ context.Context, _ string, _ []inference.Message, _ ...inference.ConverseOption) (*inference.Response, error) {
+	return &inference.Response{Text: t.response}, nil
+}
+
+func (t *thinkingLLM) ConverseMessagesStream(_ context.Context, _ string, _ []inference.Message, fn inference.StreamFunc, _ ...inference.ConverseOption) (*inference.Response, error) {
+	if fn != nil {
+		fn(inference.StreamDelta{Text: t.thinking, Thinking: true})
+		fn(inference.StreamDelta{Text: t.response, Thinking: false})
+	}
+	return &inference.Response{Text: t.response}, nil
+}
+
+func TestMCP_ThinkingIncludedInResponse(t *testing.T) {
+	llm := &thinkingLLM{
+		thinking: "Let me consider how files should be named...",
+		response: "Use kebab-case.",
+	}
+	c := newMCPClientWithLLM(t, llm, "test document")
+
+	result := callAsk(t, c, "how should I name files?")
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+	text := result.Content[0].(mcp.TextContent).Text
+	if !strings.Contains(text, "<thinking>") {
+		t.Error("response should contain <thinking> tag")
+	}
+	if !strings.Contains(text, "Let me consider how files should be named...") {
+		t.Error("response should contain thinking content")
+	}
+	if !strings.Contains(text, "Use kebab-case.") {
+		t.Error("response should contain the actual response")
+	}
+}
+
+func TestMCP_NoThinkingOmitsTag(t *testing.T) {
+	// When the model doesn't produce thinking tokens (e.g. non-streaming
+	// fallback), the response should not contain thinking tags.
+	c := newMCPClient(t, "test document",
+		textResponse("Plain answer."),
+	)
+
+	result := callAsk(t, c, "hello")
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+	text := result.Content[0].(mcp.TextContent).Text
+	if strings.Contains(text, "<thinking>") {
+		t.Error("response should not contain <thinking> tag when no thinking tokens were produced")
+	}
+	if text != "Plain answer." {
+		t.Errorf("response = %q, want %q", text, "Plain answer.")
 	}
 }
