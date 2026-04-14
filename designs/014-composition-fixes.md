@@ -34,12 +34,12 @@ This is a stable partition and shuffle.
 
 Two sentences added to the summarize prompt:
 
-> If the cluster contains observations with quotes, include at least one verbatim quote in
-> the summary. The quote should anchor a concrete behavioral example.
+> Summarize the pattern first, then include one or two verbatim quotes that illustrate the
+> pattern in action. The summary tells the reader what the person does. The quotes show them
+> doing it.
 
-This pulls specific owner language through the summarize step into the final muse. Without it,
-the summarize step produces accurate abstractions. With it, the abstractions are anchored by
-concrete examples.
+Without this, the summarize step produces accurate abstractions. With it, the abstractions
+are followed by the owner's actual words demonstrating the pattern.
 
 ### Quality gate
 
