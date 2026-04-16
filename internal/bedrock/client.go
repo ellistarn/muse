@@ -54,6 +54,19 @@ func lookupPricing(model string) modelPricing {
 	return bestPricing
 }
 
+// effortForBudget maps a thinking token budget to an Anthropic effort level.
+// This parallels the OpenAI provider's reasoningEffortForBudget mapping.
+func effortForBudget(budget int32) string {
+	switch {
+	case budget >= 12000:
+		return "high"
+	case budget >= 4000:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
 // Runtime is the subset of the Bedrock SDK used by Client.
 // This is the mock boundary for tests.
 type Runtime interface {
@@ -188,8 +201,10 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 	if o.ThinkingBudget > 0 {
 		input.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
 			"thinking": map[string]any{
-				"type":          "enabled",
-				"budget_tokens": o.ThinkingBudget,
+				"type": "adaptive",
+			},
+			"output_config": map[string]any{
+				"effort": effortForBudget(o.ThinkingBudget),
 			},
 		})
 	}
@@ -256,8 +271,10 @@ func (c *Client) converseRawOnce(ctx context.Context, system string, messages []
 	if opts.ThinkingBudget > 0 {
 		input.AdditionalModelRequestFields = document.NewLazyDocument(map[string]any{
 			"thinking": map[string]any{
-				"type":          "enabled",
-				"budget_tokens": opts.ThinkingBudget,
+				"type": "adaptive",
+			},
+			"output_config": map[string]any{
+				"effort": effortForBudget(opts.ThinkingBudget),
 			},
 		})
 	}

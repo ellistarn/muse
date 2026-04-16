@@ -66,6 +66,25 @@ func TestConverseMessagesPreservesPartialResponseOnTruncation(t *testing.T) {
 	}
 }
 
+func TestEffortForBudget(t *testing.T) {
+	tests := []struct {
+		budget int32
+		want   string
+	}{
+		{16000, "high"},
+		{12000, "high"},
+		{8000, "medium"},
+		{4000, "medium"},
+		{2000, "low"},
+		{0, "low"},
+	}
+	for _, tt := range tests {
+		if got := effortForBudget(tt.budget); got != tt.want {
+			t.Errorf("effortForBudget(%d) = %q, want %q", tt.budget, got, tt.want)
+		}
+	}
+}
+
 func TestIsThrottling(t *testing.T) {
 	tests := []struct {
 		name string
