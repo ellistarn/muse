@@ -182,7 +182,13 @@ func (c *Client) buildParams(system string, messages []inference.Message, opts i
 	}
 
 	if opts.ThinkingBudget > 0 {
-		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(opts.ThinkingBudget))
+		if supportsAdaptiveThinking(c.model) {
+			params.Thinking = anthropic.ThinkingConfigParamUnion{
+				OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
+			}
+		} else {
+			params.Thinking = anthropic.ThinkingConfigParamOfEnabled(int64(opts.ThinkingBudget))
+		}
 	}
 
 	return params
@@ -214,4 +220,20 @@ func (c *Client) extractUsage(msg *anthropic.Message) inference.Usage {
 	in := int(msg.Usage.InputTokens)
 	out := int(msg.Usage.OutputTokens)
 	return inference.NewUsage(in, out, c.pricing.ComputeCost(in, out))
+}
+
+// supportsAdaptiveThinking returns true for Claude models that support
+// thinking.type "adaptive" (Opus 4.6+, Sonnet 4.6+). Older models require
+// the legacy "enabled" type with budget_tokens. Models 4.7+ reject "enabled"
+// entirely.
+func supportsAdaptiveThinking(model string) bool {
+	for _, family := range []string{
+		"opus-4-6", "opus-4-7",
+		"sonnet-4-6", "sonnet-4-7",
+	} {
+		if strings.Contains(model, family) {
+			return true
+		}
+	}
+	return false
 }
