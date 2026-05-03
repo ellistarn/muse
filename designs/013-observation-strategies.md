@@ -38,6 +38,15 @@ Adaptive finds more grounded observations than woo alone because some windows co
 owner messages that only make sense with assistant context. The fallback catches those. Exact
 counts vary across runs as the conversation corpus grows; representative numbers are in [1].
 
+## Per-window truncation
+
+Per-window observe calls use a token budget of 4096. Thinking models can spend
+the whole budget reasoning before emitting content; the call returns truncated.
+Aborting the whole conversation in that case is too aggressive. observeWindow
+retries once at 16384 tokens. Windows that truncate again are skipped. Adjacent
+overlapping windows usually cover the same material, so the skip rarely costs
+information.
+
 ## Per-mode observation storage
 
 Each observation strategy stores results in a separate directory so switching strategies does
