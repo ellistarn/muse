@@ -649,11 +649,16 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
 				i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 		}
-		if inference.IsTruncated(err) {
-			// Pathological window: still truncated after retry. Skip rather
-			// than aborting the whole conversation.
+		if inference.IsTruncated(err) || inference.IsContextSize(err) {
+			// Pathological window: output truncated after retry, or input
+			// exceeded the model's context window. Skip rather than aborting
+			// the whole conversation.
 			if verbose {
-				fmt.Fprintf(os.Stderr, "      window[%d/%d] truncated after retry, skipping\n", i+1, len(windows))
+				reason := "truncated after retry"
+				if inference.IsContextSize(err) {
+					reason = "exceeded context size"
+				}
+				fmt.Fprintf(os.Stderr, "      window[%d/%d] %s, skipping\n", i+1, len(windows), reason)
 			}
 			continue
 		}
@@ -746,12 +751,16 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 		}
 
 		start := time.Now()
-		truncated := false
+		skipReason := ""
 		for j, a := range attempts {
 			obs, usage, err := observeWindow(ctx, client, observePrompt, a.input)
 			totalUsage = totalUsage.Add(usage)
 			if inference.IsTruncated(err) {
-				truncated = true
+				skipReason = "truncated after retry"
+				break
+			}
+			if inference.IsContextSize(err) {
+				skipReason = "exceeded context size"
 				break
 			}
 			if err != nil && obs == "" {
@@ -770,9 +779,9 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 					i+1, len(windows), len(w))
 			}
 		}
-		if truncated {
+		if skipReason != "" {
 			if verbose {
-				fmt.Fprintf(os.Stderr, "      window[%d/%d] truncated after retry, skipping\n", i+1, len(windows))
+				fmt.Fprintf(os.Stderr, "      window[%d/%d] %s, skipping\n", i+1, len(windows), skipReason)
 			}
 			continue
 		}

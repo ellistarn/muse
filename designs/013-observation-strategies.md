@@ -38,14 +38,25 @@ Adaptive finds more grounded observations than woo alone because some windows co
 owner messages that only make sense with assistant context. The fallback catches those. Exact
 counts vary across runs as the conversation corpus grows; representative numbers are in [1].
 
-## Per-window truncation
+## Per-window failures
 
-Per-window observe calls use a token budget of 4096. Thinking models can spend
-the whole budget reasoning before emitting content; the call returns truncated.
-Aborting the whole conversation in that case is too aggressive. observeWindow
-retries once at 16384 tokens. Windows that truncate again are skipped. Adjacent
-overlapping windows usually cover the same material, so the skip rarely costs
-information.
+Two failure modes are handled per-window rather than aborting the whole
+conversation. Adjacent overlapping windows usually cover the same material, so
+skipping one rarely costs information.
+
+**Output truncation.** Per-window observe calls use a token budget of 4096.
+Thinking models can spend the whole budget reasoning before emitting content;
+the call returns truncated. observeWindow retries once at 16384 tokens.
+Windows that truncate again are skipped.
+
+**Input exceeds context size.** Owner messages occasionally contain large
+pastes (logs, diffs, code dumps) that push a single window past the model's
+context window. observeWindow does not retry (a higher output budget doesn't
+help when the input itself doesn't fit). The window is skipped on the first
+attempt. The openai client classifies these errors via a string-match against
+known patterns (llama.cpp's `exceed_context_size_error`, OpenAI's
+`context_length_exceeded`, "maximum context length") and emits a typed
+`inference.ContextSizeError` so callers can distinguish from other failures.
 
 ## Per-mode observation storage
 

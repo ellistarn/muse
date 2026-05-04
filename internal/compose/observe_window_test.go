@@ -109,6 +109,50 @@ func TestObserveWindowDoesNotRetryOnNonTruncationError(t *testing.T) {
 	}
 }
 
+func TestObserveWooSkipsWindowOnContextSizeError(t *testing.T) {
+	// Pathological window with input too big for the model's context window.
+	// observeWindow doesn't retry (retry only helps for output truncation).
+	// observeWoo should skip rather than abort.
+	mock := &scriptedLLM{
+		responses: []scriptedResponse{
+			{text: "", err: &inference.ContextSizeError{PromptTokens: 23956, ContextSize: 16384}},
+		},
+	}
+
+	obs, _, err := observeWoo(context.Background(), mock, twoTurnConversation(), false, nil)
+	if err != nil {
+		t.Fatalf("observeWoo returned error on context-size skip: %v", err)
+	}
+	if got, want := mock.calls.Load(), int32(1); got != want {
+		t.Errorf("call count = %d, want %d (no retry on context-size; no refine because no candidates)", got, want)
+	}
+	if len(obs) != 0 {
+		t.Errorf("expected no observations when sole window skipped, got %d", len(obs))
+	}
+}
+
+func TestObserveAdaptiveSkipsWindowOnContextSizeError(t *testing.T) {
+	// Adaptive's per-window two-attempt loop should also skip on context-size
+	// errors so a single pathological owner-paste doesn't abort the whole
+	// conversation.
+	mock := &scriptedLLM{
+		responses: []scriptedResponse{
+			{text: "", err: &inference.ContextSizeError{PromptTokens: 23956, ContextSize: 16384}},
+		},
+	}
+
+	obs, _, err := observeAdaptive(context.Background(), mock, twoTurnConversation(), false, nil)
+	if err != nil {
+		t.Fatalf("observeAdaptive returned error on context-size skip: %v", err)
+	}
+	if got, want := mock.calls.Load(), int32(1); got != want {
+		t.Errorf("call count = %d, want %d (skip on first attempt's context-size; no fallback)", got, want)
+	}
+	if len(obs) != 0 {
+		t.Errorf("expected no observations when sole window skipped, got %d", len(obs))
+	}
+}
+
 func TestObserveWooSkipsWindowOnPersistentTruncation(t *testing.T) {
 	// Verifies the integration: observeWoo treats a persistently-truncated
 	// window as a skip rather than aborting the conversation. Mock script:
