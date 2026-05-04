@@ -232,6 +232,9 @@ func RunClustered(
 	logAfter("%d summaries", len(summaries)).Cost(time.Since(synthStart), synthUsage.Cost()).Print()
 
 	// ── THESIS ─────────────────────────────────────────────────────────
+	if len(summaries) == 0 {
+		return nil, fmt.Errorf("no clusters formed — need more observations to compose a muse (try increasing --limit or removing it)")
+	}
 	thesisStart := time.Now()
 	logBefore("thesis", "%d summaries", len(summaries))
 	thesis, thesisUsage, err := runThesis(ctx, composeLLM, summaries)
