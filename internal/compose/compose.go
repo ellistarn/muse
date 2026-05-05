@@ -78,6 +78,9 @@ type BaseOptions struct {
 	Verbose bool
 	// Observe controls the observation strategy.
 	Observe ObserveMode
+	// SkipObserve skips the observe step and composes from existing observations.
+	// Used for derived/filtered observation sets that were written externally.
+	SkipObserve bool
 }
 
 // Options configures a map-reduce compose run.
