@@ -100,21 +100,17 @@ The implementation uses nested errgroups:
 - After the inner errgroup completes, dedup + refine runs synchronously within the
   conversation's goroutine.
 
-This eliminates head-of-line blocking: a 30-window conversation no longer serializes 30
-API calls behind one goroutine slot. All windows acquire rate-limiter tokens in parallel
-with windows from other conversations.
+This eliminates head-of-line blocking: a 30-window conversation no longer serializes
+30 API calls behind one goroutine slot.
 
 The outer errgroup sorts pending conversations largest-first so the most expensive
-conversations (most windows) start processing immediately rather than arriving as a
-long tail. The conversation remains the unit of retry and storage — if any window
-returns a fatal error, the conversation fails and will be re-observed next run.
+start immediately rather than arriving as a long tail. The conversation remains the
+unit of retry and storage — if any window returns a fatal error, the conversation
+fails and will be re-observed next run.
 
-## Edge cases
-
-**Zero clusters.** When all observations land as outliers (0 clusters, 0 summaries), the
-thesis step has no input. The pipeline returns early with an error: "no clusters formed —
-need more observations to compose a muse." This happens with very small `--limit` values
-where the observation count is below the clustering threshold.
+When all observations land as outliers (0 clusters, 0 summaries), the thesis step has
+no input. The pipeline returns early with an error rather than sending an empty request
+to Bedrock. This happens with very small `--limit` values.
 
 ## Deferred
 

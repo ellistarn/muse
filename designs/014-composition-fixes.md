@@ -54,9 +54,8 @@ $0.02 per conversation, cacheable across runs.
 
 Filtered observations are stored separately so the unfiltered set is preserved. The current
 implementation encodes filtering as a storage-level convention (`observations/{mode}-filtered/`
-accessed via `--observe-mode=adaptive-filtered --skip-observe`). This is a workaround.
-Filtering is a pipeline stage between observe and compose, and the deferred work below
-addresses making it one.
+accessed via `--observe-mode=adaptive-filtered --skip-observe`). Filtering should be a
+pipeline stage between observe and compose; the deferred work below addresses that.
 
 ## Provenance metadata
 
@@ -71,8 +70,6 @@ clusters: {count}
 corpus: {count} conversations
 -->
 ```
-
-This tells a future reader or pipeline version what produced the muse.
 
 ## Evidence
 
