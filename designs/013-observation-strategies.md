@@ -91,24 +91,23 @@ Observation has two phases with different parallelism characteristics:
 2. **Dedup + refine** — per-conversation. Needs all window results for that conversation
    before it can run. One API call per conversation.
 
-The implementation flattens phase 1 into a shared work queue. On entry to `runObserve`:
+The implementation uses nested errgroups:
 
-1. Load all pending conversations and build their window lists (cheap, no API calls).
-2. Emit one work unit per window: `(conversationID, windowIndex, input, method)`.
-   For adaptive mode, each window emits up to two units (woo attempt, then default
-   fallback if woo returns NONE). The fallback is conditional — it becomes a work unit
-   only after the woo attempt completes empty.
-3. Process the queue through an errgroup capped at the rate limiter's max concurrency.
-   The AIMD token bucket already gates actual Bedrock calls; the errgroup cap prevents
-   unbounded goroutine accumulation.
-4. When all windows for a conversation complete, fire the dedup + refine step for that
-   conversation. These are also independent across conversations and enter the same queue.
+- **Outer errgroup** (capped at 50): one goroutine per conversation. Handles loading,
+  storing results, and progress tracking.
+- **Inner errgroup** (uncapped): one goroutine per window within that conversation.
+  All windows fire concurrently; the AIMD rate limiter gates actual Bedrock calls.
+- After the inner errgroup completes, dedup + refine runs synchronously within the
+  conversation's goroutine.
 
 This eliminates head-of-line blocking: a 30-window conversation no longer serializes 30
-API calls behind one goroutine slot while short conversations finish and free theirs.
+API calls behind one goroutine slot. All windows acquire rate-limiter tokens in parallel
+with windows from other conversations.
 
-Sort order for the queue: largest conversations first (most windows), so their windows
-begin processing immediately rather than arriving as a long tail.
+The outer errgroup sorts pending conversations largest-first so the most expensive
+conversations (most windows) start processing immediately rather than arriving as a
+long tail. The conversation remains the unit of retry and storage — if any window
+returns a fatal error, the conversation fails and will be re-observed next run.
 
 ## Edge cases
 

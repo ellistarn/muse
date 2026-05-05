@@ -68,6 +68,7 @@ composed: {date}
 observe: {mode}
 observations: {count}
 clusters: {count}
+corpus: {count} conversations
 -->
 ```
 
