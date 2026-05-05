@@ -634,43 +634,60 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 		observePrompt = prompts.ObserveHuman
 	}
 
+	// Process windows concurrently. Each window observation is independent;
+	// the rate limiter gates actual API calls.
+	type windowResult struct {
+		obs   string
+		usage inference.Usage
+	}
+	results := make([]windowResult, len(windows))
+	var windowErr error
+
+	wg, wctx := errgroup.WithContext(ctx)
+	for i, w := range windows {
+		wg.Go(func() error {
+			// Owner-only: strip assistant text
+			var b strings.Builder
+			for _, t := range w {
+				fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+			}
+			input := b.String()
+
+			start := time.Now()
+			obs, usage, err := observeWindow(wctx, client, observePrompt, input)
+			results[i] = windowResult{obs: obs, usage: usage}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
+					i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+			}
+			if inference.IsTruncated(err) || inference.IsContextSize(err) {
+				if verbose {
+					reason := "truncated after retry"
+					if inference.IsContextSize(err) {
+						reason = "exceeded context size"
+					}
+					fmt.Fprintf(os.Stderr, "      window[%d/%d] %s, skipping\n", i+1, len(windows), reason)
+				}
+				return nil // skip this window
+			}
+			if err != nil && obs == "" {
+				return err
+			}
+			return nil
+		})
+	}
+	windowErr = wg.Wait()
+
 	var totalUsage inference.Usage
 	var allCandidates []string
-
-	for i, w := range windows {
-		// Owner-only: strip assistant text
-		var b strings.Builder
-		for _, t := range w {
-			fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+	for _, r := range results {
+		totalUsage = totalUsage.Add(r.usage)
+		if r.obs != "" && !isEmpty(r.obs) {
+			allCandidates = append(allCandidates, r.obs)
 		}
-		input := b.String()
-
-		start := time.Now()
-		obs, usage, err := observeWindow(ctx, client, observePrompt, input)
-		totalUsage = totalUsage.Add(usage)
-		if verbose {
-			fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
-				i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
-		}
-		if inference.IsTruncated(err) || inference.IsContextSize(err) {
-			// Pathological window: output truncated after retry, or input
-			// exceeded the model's context window. Skip rather than aborting
-			// the whole conversation.
-			if verbose {
-				reason := "truncated after retry"
-				if inference.IsContextSize(err) {
-					reason = "exceeded context size"
-				}
-				fmt.Fprintf(os.Stderr, "      window[%d/%d] %s, skipping\n", i+1, len(windows), reason)
-			}
-			continue
-		}
-		if err != nil && obs == "" {
-			return nil, totalUsage, err
-		}
-		if obs != "" && !isEmpty(obs) {
-			allCandidates = append(allCandidates, obs)
-		}
+	}
+	if windowErr != nil {
+		return nil, totalUsage, windowErr
 	}
 
 	if len(allCandidates) == 0 {
@@ -730,64 +747,88 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 		observePrompt = prompts.ObserveHuman
 	}
 
+	// Process windows concurrently. Each window's woo→default fallback is
+	// sequential (at most 2 calls), but windows are independent.
+	type windowResult struct {
+		obs   string
+		usage inference.Usage
+	}
+	results := make([]windowResult, len(windows))
+	var windowErr error
+
+	wg, wctx := errgroup.WithContext(ctx)
+	for i, w := range windows {
+		wg.Go(func() error {
+			// Build both inputs upfront
+			var wooB strings.Builder
+			for _, t := range w {
+				fmt.Fprintf(&wooB, "[owner]: %s\n\n", t.humanContent)
+			}
+			wooInput := wooB.String()
+
+			chunks := compressConversation(w, conv.Source, humanOverrides)
+			defaultInput := strings.Join(chunks, "\n")
+
+			attempts := []struct {
+				input  string
+				method string
+			}{
+				{wooInput, "woo"},
+				{defaultInput, "default"},
+			}
+
+			start := time.Now()
+			var winUsage inference.Usage
+			for j, a := range attempts {
+				obs, usage, err := observeWindow(wctx, client, observePrompt, a.input)
+				winUsage = winUsage.Add(usage)
+				if inference.IsTruncated(err) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "      window[%d/%d] truncated after retry, skipping\n", i+1, len(windows))
+					}
+					results[i] = windowResult{usage: winUsage}
+					return nil
+				}
+				if inference.IsContextSize(err) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "      window[%d/%d] exceeded context size, skipping\n", i+1, len(windows))
+					}
+					results[i] = windowResult{usage: winUsage}
+					return nil
+				}
+				if err != nil && obs == "" {
+					results[i] = windowResult{usage: winUsage}
+					return err
+				}
+				if obs != "" && !isEmpty(obs) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %s → %d chars (%s, $%.4f)\n",
+							i+1, len(windows), len(w), a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+					}
+					results[i] = windowResult{obs: obs, usage: winUsage}
+					return nil
+				}
+				if j == 0 && verbose {
+					fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, woo → NONE, trying default\n",
+						i+1, len(windows), len(w))
+				}
+			}
+			results[i] = windowResult{usage: winUsage}
+			return nil
+		})
+	}
+	windowErr = wg.Wait()
+
 	var totalUsage inference.Usage
 	var allCandidates []string
-
-	for i, w := range windows {
-		// Build both inputs upfront
-		var wooB strings.Builder
-		for _, t := range w {
-			fmt.Fprintf(&wooB, "[owner]: %s\n\n", t.humanContent)
+	for _, r := range results {
+		totalUsage = totalUsage.Add(r.usage)
+		if r.obs != "" && !isEmpty(r.obs) {
+			allCandidates = append(allCandidates, r.obs)
 		}
-		wooInput := wooB.String()
-
-		chunks := compressConversation(w, conv.Source, humanOverrides)
-		defaultInput := strings.Join(chunks, "\n")
-
-		// Try woo first, fall back to default
-		attempts := []struct {
-			input  string
-			method string
-		}{
-			{wooInput, "woo"},
-			{defaultInput, "default"},
-		}
-
-		start := time.Now()
-		skipReason := ""
-		for j, a := range attempts {
-			obs, usage, err := observeWindow(ctx, client, observePrompt, a.input)
-			totalUsage = totalUsage.Add(usage)
-			if inference.IsTruncated(err) {
-				skipReason = "truncated after retry"
-				break
-			}
-			if inference.IsContextSize(err) {
-				skipReason = "exceeded context size"
-				break
-			}
-			if err != nil && obs == "" {
-				return nil, totalUsage, err
-			}
-			if obs != "" && !isEmpty(obs) {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %s → %d chars (%s, $%.4f)\n",
-						i+1, len(windows), len(w), a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
-				}
-				allCandidates = append(allCandidates, obs)
-				break
-			}
-			if j == 0 && verbose {
-				fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, woo → NONE, trying default\n",
-					i+1, len(windows), len(w))
-			}
-		}
-		if skipReason != "" {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "      window[%d/%d] %s, skipping\n", i+1, len(windows), skipReason)
-			}
-			continue
-		}
+	}
+	if windowErr != nil {
+		return nil, totalUsage, windowErr
 	}
 
 	if len(allCandidates) == 0 {

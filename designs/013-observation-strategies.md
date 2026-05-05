@@ -82,6 +82,41 @@ for that mode without affecting others.
 - `"woo"`: windowed owner-only
 - `"adaptive"`: woo-first with default fallback
 
+## Concurrency
+
+Observation has two phases with different parallelism characteristics:
+
+1. **Window observation** — independent API calls. Each window produces raw text; no
+   dependencies between windows, even within the same conversation.
+2. **Dedup + refine** — per-conversation. Needs all window results for that conversation
+   before it can run. One API call per conversation.
+
+The implementation flattens phase 1 into a shared work queue. On entry to `runObserve`:
+
+1. Load all pending conversations and build their window lists (cheap, no API calls).
+2. Emit one work unit per window: `(conversationID, windowIndex, input, method)`.
+   For adaptive mode, each window emits up to two units (woo attempt, then default
+   fallback if woo returns NONE). The fallback is conditional — it becomes a work unit
+   only after the woo attempt completes empty.
+3. Process the queue through an errgroup capped at the rate limiter's max concurrency.
+   The AIMD token bucket already gates actual Bedrock calls; the errgroup cap prevents
+   unbounded goroutine accumulation.
+4. When all windows for a conversation complete, fire the dedup + refine step for that
+   conversation. These are also independent across conversations and enter the same queue.
+
+This eliminates head-of-line blocking: a 30-window conversation no longer serializes 30
+API calls behind one goroutine slot while short conversations finish and free theirs.
+
+Sort order for the queue: largest conversations first (most windows), so their windows
+begin processing immediately rather than arriving as a long tail.
+
+## Edge cases
+
+**Zero clusters.** When all observations land as outliers (0 clusters, 0 summaries), the
+thesis step has no input. The pipeline returns early with an error: "no clusters formed —
+need more observations to compose a muse." This happens with very small `--limit` values
+where the observation count is below the clustering threshold.
+
 ## Deferred
 
 **Window size.** The 8-turn window with stride 4 is untested against alternatives. Larger
