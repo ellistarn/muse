@@ -56,41 +56,52 @@ func RunClustered(
 	var stages []StageStats
 
 	// ── OBSERVE ─────────────────────────────────────────────────────────
-	var observeCounter atomic.Int32
-	observeStart := time.Now()
-	observeResult, err := runObserve(ctx, store, observeLLM, opts, &observeCounter)
-	if err != nil {
-		return nil, fmt.Errorf("observe: %w", err)
-	}
-	totalUsage = totalUsage.Add(observeResult.usage)
-	stages = append(stages, StageStats{
-		Name:     "observe",
-		Model:    observeLLM.Model(),
-		Duration: time.Since(observeStart),
-		Usage:    observeResult.usage,
-		DataSize: observeResult.dataSize,
-	})
+	var allObs []observationEntry
+	var obsResult observeResult
+	if opts.SkipObserve {
+		// Load pre-existing observations without re-observing.
+		var err error
+		allObs, err = loadAllStructuredObservations(ctx, store, opts.Observe)
+		if err != nil {
+			return nil, fmt.Errorf("load observations: %w", err)
+		}
+		logStage("observe", "skipped, %d pre-existing observations", len(allObs)).Print()
+	} else {
+		var observeCounter atomic.Int32
+		observeStart := time.Now()
+		or, err := runObserve(ctx, store, observeLLM, opts, &observeCounter)
+		if err != nil {
+			return nil, fmt.Errorf("observe: %w", err)
+		}
+		obsResult = *or
+		totalUsage = totalUsage.Add(obsResult.usage)
+		stages = append(stages, StageStats{
+			Name:     "observe",
+			Model:    observeLLM.Model(),
+			Duration: time.Since(observeStart),
+			Usage:    obsResult.usage,
+			DataSize: obsResult.dataSize,
+		})
 
-	// Load all observations
-	allObs, err := loadAllStructuredObservations(ctx, store, opts.Observe)
-	if err != nil {
-		return nil, fmt.Errorf("load observations: %w", err)
-	}
+		allObs, err = loadAllStructuredObservations(ctx, store, opts.Observe)
+		if err != nil {
+			return nil, fmt.Errorf("load observations: %w", err)
+		}
 
-	// observe result line
-	observeNote := ""
-	if observeResult.remaining > 0 {
-		observeNote = fmt.Sprintf(" [%d remaining]", observeResult.remaining)
+		observeNote := ""
+		if obsResult.remaining > 0 {
+			observeNote = fmt.Sprintf(" [%d remaining]", obsResult.remaining)
+		}
+		logAfter("%d observations%s",
+			len(allObs), observeNote,
+		).Cost(time.Since(observeStart), obsResult.usage.Cost()).Print()
 	}
-	logAfter("%d observations%s",
-		len(allObs), observeNote,
-	).Cost(time.Since(observeStart), observeResult.usage.Cost()).Print()
 
 	if len(allObs) == 0 {
 		return &Result{
-			Processed: observeResult.processed,
-			Pruned:    observeResult.pruned,
-			Remaining: observeResult.remaining,
+			Processed: obsResult.processed,
+			Pruned:    obsResult.pruned,
+			Remaining: obsResult.remaining,
 			Stages:    stages,
 		}, nil
 	}
@@ -221,6 +232,9 @@ func RunClustered(
 	logAfter("%d summaries", len(summaries)).Cost(time.Since(synthStart), synthUsage.Cost()).Print()
 
 	// ── THESIS ─────────────────────────────────────────────────────────
+	if len(summaries) == 0 {
+		return nil, fmt.Errorf("no clusters formed — need more observations to compose a muse (try increasing --limit or removing it)")
+	}
 	thesisStart := time.Now()
 	logBefore("thesis", "%d summaries", len(summaries))
 	thesis, thesisUsage, err := runThesis(ctx, composeLLM, summaries)
@@ -271,20 +285,44 @@ func RunClustered(
 	})
 	logAfter("muse.md").Cost(time.Since(composeStart), composeUsage.Cost()).Print()
 
+	// Prepend provenance metadata
+	mode := string(opts.Observe)
+	if mode == "" {
+		mode = "default"
+	}
+	var corpusNote string
+	if obsResult.discovered > 0 {
+		corpusNote = fmt.Sprintf("\ncorpus: %d conversations", obsResult.discovered)
+	}
+	metadata := fmt.Sprintf("<!--\ncomposed: %s\nobserve: %s\nobservations: %d\nclusters: %d%s\n-->\n\n",
+		time.Now().UTC().Format("2006-01-02"),
+		mode,
+		len(allObs),
+		len(clusters),
+		corpusNote,
+	)
+	muse = metadata + muse
+
+	// Re-save with metadata prepended
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	if err := store.PutMuse(ctx, timestamp, muse); err != nil {
+		return nil, fmt.Errorf("failed to write muse with metadata: %w", err)
+	}
+
 	// ── DONE ────────────────────────────────────────────────────────────
 	logStage("done", "%d patterns → muse.md", len(clusters)).
 		Cost(time.Since(pipelineStart), totalUsage.Cost()).Print()
 
-	processed := observeResult.processed
+	processed := obsResult.processed
 	return &Result{
 		Processed:    processed,
-		Pruned:       observeResult.pruned,
-		Remaining:    observeResult.remaining,
+		Pruned:       obsResult.pruned,
+		Remaining:    obsResult.remaining,
 		Observations: len(allObs),
 		Clusters:     len(clusters),
 		Noise:        len(noiseObs),
 		Cache: CacheStats{
-			Observe: HitMiss{Hit: observeResult.pruned, Miss: observeResult.processed},
+			Observe: HitMiss{Hit: obsResult.pruned, Miss: obsResult.processed},
 			Label:   labelCache,
 		},
 		Stages: stages,
@@ -1924,12 +1962,28 @@ func runSampleWithObs(ctx context.Context, clusters []clusterResult, allObs []ob
 	for _, cl := range clusters {
 		indices := cl.ObservationIdxs
 
-		// Shuffle for random selection
+		// Prioritize observations with quotes (concrete exemplars), then
+		// shuffle within each group. Quotes carry voice and specificity that
+		// the summarize step can preserve; quoteless observations tend to
+		// produce more abstract summaries.
 		shuffled := make([]int, len(indices))
 		copy(shuffled, indices)
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		// Partition: quotes first, then non-quotes
+		var withQuote, withoutQuote []int
+		for _, idx := range shuffled {
+			if allObs[idx].Quote != "" {
+				withQuote = append(withQuote, idx)
+			} else {
+				withoutQuote = append(withoutQuote, idx)
+			}
+		}
+		rand.Shuffle(len(withQuote), func(i, j int) {
+			withQuote[i], withQuote[j] = withQuote[j], withQuote[i]
 		})
+		rand.Shuffle(len(withoutQuote), func(i, j int) {
+			withoutQuote[i], withoutQuote[j] = withoutQuote[j], withoutQuote[i]
+		})
+		shuffled = append(withQuote, withoutQuote...)
 
 		var selected []string
 		tokens := 0
