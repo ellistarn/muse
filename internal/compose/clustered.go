@@ -72,13 +72,10 @@ func RunClustered(
 	})
 
 	// Load all observations
-	allObs, err := loadAllStructuredObservations(ctx, store)
+	allObs, err := loadAllStructuredObservations(ctx, store, opts.Observe)
 	if err != nil {
 		return nil, fmt.Errorf("load observations: %w", err)
 	}
-
-	// discover + observe log lines (printed after observe completes since
-	// discovery happens inside runObserve before the LLM work)
 
 	// observe result line
 	observeNote := ""
@@ -341,7 +338,7 @@ func runObserve(
 
 	// Handle reobserve
 	if opts.Reobserve {
-		DeleteObservations(ctx, store)
+		DeleteObservations(ctx, store, opts.Observe)
 		fmt.Fprintln(os.Stderr, "  Cleared all observations")
 	}
 
@@ -358,7 +355,8 @@ func runObserve(
 	discovered := len(entries)
 
 	// Compute prompt chain hash for fingerprinting
-	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine)
+	promptHash := Fingerprint(prompts.Observe, prompts.ObserveHuman, prompts.Refine,
+		fmt.Sprintf("mode:%s", opts.Observe))
 
 	// Determine which conversations need (re)observation
 	var pending []storage.ConversationEntry
@@ -369,7 +367,7 @@ func runObserve(
 		}
 		fp := Fingerprint(e.LastModified.Format(time.RFC3339Nano), promptHash)
 
-		existing, err := GetObservations(ctx, store, e.Source, e.ConversationID)
+		existing, err := GetObservations(ctx, store, e.Source, e.ConversationID, opts.Observe)
 		if err == nil && existing.Fingerprint == fp {
 			pruned++
 			continue
@@ -435,7 +433,7 @@ func runObserve(
 				convBytes := conversationDataSize(conv)
 
 				start := time.Now()
-				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, humanOverrides)
+				items, u, err := observeAndParse(ctx, llm, conv, opts.Verbose, humanOverrides, opts.Observe)
 				n := counter.Add(1)
 				if err != nil {
 					return fmt.Errorf("observe %s: %w", entry.Key, err)
@@ -447,13 +445,13 @@ func runObserve(
 					Date:        entry.LastModified.Format("2006-01-02"),
 					Items:       items,
 				}
-				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, obs); err != nil {
+				if err := PutObservations(ctx, store, entry.Source, entry.ConversationID, obs, opts.Observe); err != nil {
 					return fmt.Errorf("save observations for %s: %w", entry.Key, err)
 				}
 
 				if opts.Verbose {
 					fmt.Fprintf(os.Stderr, "  [%d/%d] Observed ~/.muse/%s (%d obs, %s, $%.4f)\n",
-						n, len(pending), observationPath(entry.Source, entry.ConversationID), len(items),
+						n, len(pending), observationPath(entry.Source, entry.ConversationID, opts.Observe), len(items),
 						time.Since(start).Round(time.Millisecond), u.Cost())
 				}
 				mu.Lock()
@@ -503,7 +501,13 @@ func conversationDataSize(conv *conversation.Conversation) int {
 // exceeds the context window, mechanical compression is applied as a fallback:
 // code blocks are stripped, tool output is collapsed to [tool: name] markers,
 // and long assistant messages are truncated.
-func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+func observeAndParse(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool, mode ObserveMode) ([]Observation, inference.Usage, error) {
+	switch mode {
+	case ObserveWoo:
+		return observeWoo(ctx, client, conv, verbose, humanOverrides)
+	case ObserveAdaptive:
+		return observeAdaptive(ctx, client, conv, verbose, humanOverrides)
+	}
 	refined, usage, err := observeAndRefine(ctx, client, conv, verbose, humanOverrides)
 	if err != nil {
 		return nil, usage, err
@@ -536,6 +540,367 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 		}
 	}
 	return relevant, usage, nil
+}
+
+// Window parameters for windowed observation. Each window is small enough that
+// local signal survives without being washed out by distant mechanical turns.
+// Adjacent windows overlap so multi-turn reasoning arcs aren't split.
+const (
+	windowSize   = 8 // turns per window
+	windowStride = 4 // advance between windows
+
+	// windowObserveBudget is the initial max-tokens budget for a per-window
+	// observe call. Sized for non-thinking models; thinking models that exceed
+	// it are caught by retry-on-truncation in observeWindow.
+	windowObserveBudget = 4096
+
+	// windowObserveRetryBudget is the budget used after truncation. Sized to
+	// absorb thinking from typical thinking-by-default models (Qwen3 Thinking
+	// emits ~3-5k of reasoning per window). Windows that still truncate at
+	// this budget are skipped — no observation from that window.
+	windowObserveRetryBudget = 16384
+)
+
+// observeWindow runs the configured observe prompt against a single window's
+// input. If the call truncates (TruncatedError, typically because a
+// thinking-by-default model spent the whole budget reasoning), it retries
+// once at windowObserveRetryBudget. If the retry also truncates, the
+// TruncatedError is returned for the caller to skip this window.
+func observeWindow(ctx context.Context, client inference.Client, prompt, input string) (string, inference.Usage, error) {
+	obs, usage, err := inference.Converse(ctx, client, prompt, input, inference.WithMaxTokens(windowObserveBudget))
+	if !inference.IsTruncated(err) {
+		return obs, usage, err
+	}
+	retryObs, retryUsage, retryErr := inference.Converse(ctx, client, prompt, input, inference.WithMaxTokens(windowObserveRetryBudget))
+	usage = usage.Add(retryUsage)
+	return retryObs, usage, retryErr
+}
+
+// observeWoo runs windowed owner-only observation. It slides an 8-turn window
+// across the conversation, strips assistant text from each window, and observes
+// each window independently. Deduplicates across overlapping windows, then refines.
+func observeWoo(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+	turns := extractTurns(conv, humanOverrides)
+	if len(turns) == 0 {
+		return nil, inference.Usage{}, nil
+	}
+
+	windows := buildWindows(turns, windowSize, windowStride)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    woo: %d turns → %d windows (size %d, stride %d)\n",
+			len(turns), len(windows), windowSize, windowStride)
+	}
+
+	observePrompt := prompts.Observe
+	if isHumanSource(conv.Source, humanOverrides) {
+		observePrompt = prompts.ObserveHuman
+	}
+
+	// Process windows concurrently. Each window observation is independent;
+	// the rate limiter gates actual API calls.
+	type windowResult struct {
+		obs   string
+		usage inference.Usage
+	}
+	results := make([]windowResult, len(windows))
+	var windowErr error
+
+	wg, wctx := errgroup.WithContext(ctx)
+	for i, w := range windows {
+		wg.Go(func() error {
+			// Owner-only: strip assistant text
+			var b strings.Builder
+			for _, t := range w {
+				fmt.Fprintf(&b, "[owner]: %s\n\n", t.humanContent)
+			}
+			input := b.String()
+
+			start := time.Now()
+			obs, usage, err := observeWindow(wctx, client, observePrompt, input)
+			results[i] = windowResult{obs: obs, usage: usage}
+			if verbose {
+				fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %d chars → %d chars (%s, $%.4f)\n",
+					i+1, len(windows), len(w), len(input), len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+			}
+			if inference.IsTruncated(err) || inference.IsContextSize(err) {
+				if verbose {
+					reason := "truncated after retry"
+					if inference.IsContextSize(err) {
+						reason = "exceeded context size"
+					}
+					fmt.Fprintf(os.Stderr, "      window[%d/%d] %s, skipping\n", i+1, len(windows), reason)
+				}
+				return nil // skip this window
+			}
+			if err != nil && obs == "" {
+				return err
+			}
+			return nil
+		})
+	}
+	windowErr = wg.Wait()
+
+	var totalUsage inference.Usage
+	var allCandidates []string
+	for _, r := range results {
+		totalUsage = totalUsage.Add(r.usage)
+		if r.obs != "" && !isEmpty(r.obs) {
+			allCandidates = append(allCandidates, r.obs)
+		}
+	}
+	if windowErr != nil {
+		return nil, totalUsage, windowErr
+	}
+
+	if len(allCandidates) == 0 {
+		return nil, totalUsage, nil
+	}
+
+	// Deduplicate across overlapping windows, then refine
+	candidates := deduplicateObservationText(strings.Join(allCandidates, "\n\n"))
+	start := time.Now()
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+	}
+	if err != nil && refined == "" {
+		return nil, totalUsage, err
+	}
+	if isEmpty(refined) {
+		return nil, totalUsage, nil
+	}
+
+	items := parseObservationItems(refined)
+	var relevant []Observation
+	for _, item := range items {
+		if isRelevant(item.Text) {
+			relevant = append(relevant, item)
+		}
+	}
+	return relevant, totalUsage, nil
+}
+
+// observeAdaptive runs windowed observation, trying woo (owner-only) first
+// on each window and falling back to default (with assistant) on NONE. At most
+// 2 calls per window.
+//
+// Featurize data showed avg owner message length doesn't cleanly separate
+// which method wins — the distributions overlap. But woo-first with fallback
+// captures 557 total observations vs 492 for default-first, because woo
+// produces richer output when both methods find signal. The fallback is cheap
+// (NONE windows cost ~4 output tokens) and catches the 63 windows where only
+// default finds signal.
+func observeAdaptive(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
+	turns := extractTurns(conv, humanOverrides)
+	if len(turns) == 0 {
+		return nil, inference.Usage{}, nil
+	}
+
+	windows := buildWindows(turns, windowSize, windowStride)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "    adaptive: %d turns → %d windows (size %d, stride %d)\n",
+			len(turns), len(windows), windowSize, windowStride)
+	}
+
+	observePrompt := prompts.Observe
+	if isHumanSource(conv.Source, humanOverrides) {
+		observePrompt = prompts.ObserveHuman
+	}
+
+	// Process windows concurrently. Each window's woo→default fallback is
+	// sequential (at most 2 calls), but windows are independent.
+	type windowResult struct {
+		obs   string
+		usage inference.Usage
+	}
+	results := make([]windowResult, len(windows))
+	var windowErr error
+
+	wg, wctx := errgroup.WithContext(ctx)
+	for i, w := range windows {
+		wg.Go(func() error {
+			// Build both inputs upfront
+			var wooB strings.Builder
+			for _, t := range w {
+				fmt.Fprintf(&wooB, "[owner]: %s\n\n", t.humanContent)
+			}
+			wooInput := wooB.String()
+
+			chunks := compressConversation(w, conv.Source, humanOverrides)
+			defaultInput := strings.Join(chunks, "\n")
+
+			attempts := []struct {
+				input  string
+				method string
+			}{
+				{wooInput, "woo"},
+				{defaultInput, "default"},
+			}
+
+			start := time.Now()
+			var winUsage inference.Usage
+			for j, a := range attempts {
+				obs, usage, err := observeWindow(wctx, client, observePrompt, a.input)
+				winUsage = winUsage.Add(usage)
+				if inference.IsTruncated(err) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "      window[%d/%d] truncated after retry, skipping\n", i+1, len(windows))
+					}
+					results[i] = windowResult{usage: winUsage}
+					return nil
+				}
+				if inference.IsContextSize(err) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "      window[%d/%d] exceeded context size, skipping\n", i+1, len(windows))
+					}
+					results[i] = windowResult{usage: winUsage}
+					return nil
+				}
+				if err != nil && obs == "" {
+					results[i] = windowResult{usage: winUsage}
+					return err
+				}
+				if obs != "" && !isEmpty(obs) {
+					if verbose {
+						fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %s → %d chars (%s, $%.4f)\n",
+							i+1, len(windows), len(w), a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+					}
+					results[i] = windowResult{obs: obs, usage: winUsage}
+					return nil
+				}
+				if j == 0 && verbose {
+					fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, woo → NONE, trying default\n",
+						i+1, len(windows), len(w))
+				}
+			}
+			results[i] = windowResult{usage: winUsage}
+			return nil
+		})
+	}
+	windowErr = wg.Wait()
+
+	var totalUsage inference.Usage
+	var allCandidates []string
+	for _, r := range results {
+		totalUsage = totalUsage.Add(r.usage)
+		if r.obs != "" && !isEmpty(r.obs) {
+			allCandidates = append(allCandidates, r.obs)
+		}
+	}
+	if windowErr != nil {
+		return nil, totalUsage, windowErr
+	}
+
+	if len(allCandidates) == 0 {
+		return nil, totalUsage, nil
+	}
+
+	// Deduplicate across overlapping windows, then refine
+	candidates := deduplicateObservationText(strings.Join(allCandidates, "\n\n"))
+	start := time.Now()
+	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
+	totalUsage = totalUsage.Add(usage)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "      refine %d chars → %d chars (%s, $%.4f)\n",
+			len(candidates), len(refined), time.Since(start).Round(time.Millisecond), usage.Cost())
+	}
+	if err != nil && refined == "" {
+		return nil, totalUsage, err
+	}
+	if isEmpty(refined) {
+		return nil, totalUsage, nil
+	}
+
+	items := parseObservationItems(refined)
+	var relevant []Observation
+	for _, item := range items {
+		if isRelevant(item.Text) {
+			relevant = append(relevant, item)
+		}
+	}
+	return relevant, totalUsage, nil
+}
+
+// buildWindows splits turns into overlapping windows of the given size and stride.
+// The last window is extended to avoid a tiny tail.
+func buildWindows(turns []turn, size, stride int) [][]turn {
+	if len(turns) <= size {
+		return [][]turn{turns}
+	}
+	var windows [][]turn
+	for start := 0; start < len(turns); start += stride {
+		end := start + size
+		if end > len(turns) {
+			end = len(turns)
+		}
+		if len(turns)-end < stride {
+			end = len(turns)
+		}
+		windows = append(windows, turns[start:end])
+		if end == len(turns) {
+			break
+		}
+	}
+	return windows
+}
+
+// deduplicateObservationText removes duplicate observations from raw LLM output
+// across overlapping windows. Two observations are duplicates if their text
+// (after normalization) is identical or one contains the other.
+func deduplicateObservationText(text string) string {
+	items := parseObservationItems(text)
+	if len(items) == 0 {
+		return text
+	}
+
+	type normalizedObs struct {
+		original Observation
+		norm     string
+	}
+	var normalized []normalizedObs
+	for _, item := range items {
+		n := strings.ToLower(strings.TrimSpace(item.Text))
+		normalized = append(normalized, normalizedObs{original: item, norm: n})
+	}
+
+	keep := make([]bool, len(normalized))
+	for i := range keep {
+		keep[i] = true
+	}
+	for i := 0; i < len(normalized); i++ {
+		if !keep[i] {
+			continue
+		}
+		for j := i + 1; j < len(normalized); j++ {
+			if !keep[j] {
+				continue
+			}
+			if normalized[i].norm == normalized[j].norm {
+				keep[j] = false
+				continue
+			}
+			if strings.Contains(normalized[i].norm, normalized[j].norm) {
+				keep[j] = false
+			} else if strings.Contains(normalized[j].norm, normalized[i].norm) {
+				keep[i] = false
+				break
+			}
+		}
+	}
+
+	var b strings.Builder
+	for i, n := range normalized {
+		if !keep[i] {
+			continue
+		}
+		if n.original.Quote != "" {
+			fmt.Fprintf(&b, "Quote: %s\n", n.original.Quote)
+		}
+		fmt.Fprintf(&b, "Observation: %s\n\n", n.original.Text)
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // observeAndRefine is the shared core of the observation pipeline. It extracts
@@ -917,8 +1282,8 @@ func (e observationEntry) FormatTokens() int {
 
 // loadAllStructuredObservations loads all observation artifacts and returns
 // a flat list of observation entries, loading conversations in parallel.
-func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]observationEntry, error) {
-	convList, err := ListObservations(ctx, store)
+func loadAllStructuredObservations(ctx context.Context, store storage.Store, mode ...ObserveMode) ([]observationEntry, error) {
+	convList, err := ListObservations(ctx, store, mode...)
 	if err != nil {
 		return nil, err
 	}
@@ -933,7 +1298,7 @@ func loadAllStructuredObservations(ctx context.Context, store storage.Store) ([]
 	g.SetLimit(20)
 	for i, ss := range convList {
 		g.Go(func() error {
-			obs, err := GetObservations(ctx, store, ss.Source, ss.ConversationID)
+			obs, err := GetObservations(ctx, store, ss.Source, ss.ConversationID, mode...)
 			if err != nil {
 				results[i] = result{err: fmt.Errorf("get observations %s/%s: %w", ss.Source, ss.ConversationID, err)}
 				return results[i].err
