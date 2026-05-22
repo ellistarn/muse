@@ -221,6 +221,9 @@ func RunClustered(
 	logAfter("%d summaries", len(summaries)).Cost(time.Since(synthStart), synthUsage.Cost()).Print()
 
 	// ── THESIS ─────────────────────────────────────────────────────────
+	if len(summaries) == 0 {
+		return nil, fmt.Errorf("no clusters formed: need more observations to compose a muse (try increasing --limit or removing it)")
+	}
 	thesisStart := time.Now()
 	logBefore("thesis", "%d summaries", len(summaries))
 	thesis, thesisUsage, err := runThesis(ctx, composeLLM, summaries)
@@ -253,7 +256,7 @@ func RunClustered(
 		composeInput += fmt.Sprintf(" + %d outliers", len(noiseObs))
 	}
 	logBefore("compose", "%s", composeInput)
-	muse, _, composeUsage, err := runCompose(ctx, composeLLM, store, thesis, summaries, noiseObs)
+	muse, composeTimestamp, composeUsage, err := runCompose(ctx, composeLLM, store, thesis, summaries, noiseObs)
 	if err != nil {
 		return nil, fmt.Errorf("compose: %w", err)
 	}
@@ -270,6 +273,29 @@ func RunClustered(
 		DataSize: composeDataSize,
 	})
 	logAfter("muse.md").Cost(time.Since(composeStart), composeUsage.Cost()).Print()
+
+	// Prepend provenance metadata
+	mode := string(opts.Observe)
+	if mode == "" {
+		mode = "default"
+	}
+	var corpusNote string
+	if observeResult.discovered > 0 {
+		corpusNote = fmt.Sprintf("\ncorpus: %d conversations", observeResult.discovered)
+	}
+	metadata := fmt.Sprintf("<!--\ncomposed: %s\nobserve: %s\nobservations: %d\nclusters: %d%s\n-->\n\n",
+		time.Now().UTC().Format("2006-01-02"),
+		mode,
+		len(allObs),
+		len(clusters),
+		corpusNote,
+	)
+	muse = metadata + muse
+
+	// Overwrite with metadata prepended (same timestamp as initial save)
+	if err := store.PutMuse(ctx, composeTimestamp, muse); err != nil {
+		return nil, fmt.Errorf("failed to write muse with metadata: %w", err)
+	}
 
 	// ── DONE ────────────────────────────────────────────────────────────
 	logStage("done", "%d patterns → muse.md", len(clusters)).
@@ -1960,12 +1986,22 @@ func runSampleWithObs(ctx context.Context, clusters []clusterResult, allObs []ob
 	for _, cl := range clusters {
 		indices := cl.ObservationIdxs
 
-		// Shuffle for random selection
-		shuffled := make([]int, len(indices))
-		copy(shuffled, indices)
-		rand.Shuffle(len(shuffled), func(i, j int) {
-			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		// Quoted observations first, then shuffle within each group.
+		var withQuote, withoutQuote []int
+		for _, idx := range indices {
+			if allObs[idx].Quote != "" {
+				withQuote = append(withQuote, idx)
+			} else {
+				withoutQuote = append(withoutQuote, idx)
+			}
+		}
+		rand.Shuffle(len(withQuote), func(i, j int) {
+			withQuote[i], withQuote[j] = withQuote[j], withQuote[i]
 		})
+		rand.Shuffle(len(withoutQuote), func(i, j int) {
+			withoutQuote[i], withoutQuote[j] = withoutQuote[j], withoutQuote[i]
+		})
+		shuffled := append(withQuote, withoutQuote...)
 
 		var selected []string
 		tokens := 0
