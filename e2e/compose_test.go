@@ -460,6 +460,9 @@ func (m *clusterMockLLM) ConverseMessages(_ context.Context, system string, mess
 	if strings.Contains(system, "Summarize these") {
 		return &inference.Response{Text: "I prefer explicit, clear patterns in code.", Usage: usage}, nil
 	}
+	if strings.Contains(system, "structural skeleton") {
+		return &inference.Response{Text: "## Identity\n\nA developer focused on explicitness.\n\n## Thesis\n\nExplicitness over cleverness.\n\n## Tensions\n\nNone identified.\n\n## Structure\n\n- Cluster 1: **core** — explicit patterns", Usage: usage}, nil
+	}
 	if strings.Contains(system, "producing muse.md") {
 		return &inference.Response{Text: "# How I Think\n\nI value explicitness over cleverness.", Usage: usage}, nil
 	}
