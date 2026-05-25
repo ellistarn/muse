@@ -281,7 +281,7 @@ func RunClustered(
 	}
 	metadata := fmt.Sprintf("<!--\ncomposed: %s\nobserve: %s\nobservations: %d\nclusters: %d%s\n-->\n\n",
 		composeTime.Format("2006-01-02"),
-		opts.Observe,
+		opts.Observe.String(),
 		len(allObs),
 		len(clusters),
 		corpusNote,
