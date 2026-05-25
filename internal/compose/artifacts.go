@@ -34,8 +34,8 @@ func composePath(kind, source, conversationID string) string {
 	return fmt.Sprintf("compose/%s/%s/%s.json", kind, source, conversationID)
 }
 
-// observationPath returns the key for an observation artifact. Named modes
-// get their own directory so different strategies don't clobber each other.
+// observationPath returns the storage key for an observation artifact.
+// Named modes are namespaced under observations/{mode}/.
 func observationPath(source, conversationID string, mode ...ObserveMode) string {
 	m := ObserveDefault
 	if len(mode) > 0 {
@@ -135,18 +135,56 @@ func ListLabels(ctx context.Context, store storage.Store) ([]SourceConversation,
 	return listArtifacts(ctx, store, "compose/labels/")
 }
 
-// DeleteObservations removes all observation artifacts for the given mode.
+// DeleteObservations removes observation artifacts for the given mode only.
+// Default mode uses depth filtering to avoid deleting named-mode observations
+// that share the "observations/" prefix.
 func DeleteObservations(ctx context.Context, store storage.Store, mode ...ObserveMode) error {
 	m := ObserveDefault
 	if len(mode) > 0 {
 		m = mode[0]
 	}
-	return store.DeletePrefix(ctx, observationDirPrefix(m))
+	if m != "" && m != ObserveDefault {
+		// Named modes have a unique prefix; safe to delete by prefix.
+		return store.DeletePrefix(ctx, observationDirPrefix(m))
+	}
+	// Default mode: observations/{source}/{id}.json lives at depth 2 under
+	// "observations/". Named modes add a third level. List and delete only
+	// depth-2 keys to avoid clobbering named-mode data.
+	keys, err := store.ListData(ctx, "observations/")
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		rel := strings.TrimPrefix(key, "observations/")
+		// Default-mode keys have exactly one slash: {source}/{id}.json
+		if strings.Count(rel, "/") == 1 {
+			if err := store.DeletePrefix(ctx, key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-// DeleteObservationsForSource removes observation artifacts for a specific source.
+// DeleteObservationsForSource removes default-mode observation artifacts for a
+// specific source. Only deletes keys at the expected depth to avoid colliding
+// with named-mode prefixes (e.g., a source named "woo" vs the woo mode).
 func DeleteObservationsForSource(ctx context.Context, store storage.Store, source string) error {
-	return store.DeletePrefix(ctx, fmt.Sprintf("observations/%s/", source))
+	prefix := fmt.Sprintf("observations/%s/", source)
+	keys, err := store.ListData(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		rel := strings.TrimPrefix(key, prefix)
+		// Default-mode source keys have no further slashes: just {id}.json
+		if !strings.Contains(rel, "/") {
+			if err := store.DeletePrefix(ctx, key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DeleteLabels removes all label artifacts.

@@ -256,7 +256,7 @@ func RunClustered(
 		composeInput += fmt.Sprintf(" + %d outliers", len(noiseObs))
 	}
 	logBefore("compose", "%s", composeInput)
-	muse, composeTimestamp, composeUsage, err := runCompose(ctx, composeLLM, store, thesis, summaries, noiseObs)
+	muse, composeTime, composeUsage, err := runCompose(ctx, composeLLM, store, thesis, summaries, noiseObs)
 	if err != nil {
 		return nil, fmt.Errorf("compose: %w", err)
 	}
@@ -275,17 +275,13 @@ func RunClustered(
 	logAfter("muse.md").Cost(time.Since(composeStart), composeUsage.Cost()).Print()
 
 	// Prepend provenance metadata
-	mode := string(opts.Observe)
-	if mode == "" {
-		mode = "default"
-	}
 	var corpusNote string
 	if observeResult.discovered > 0 {
 		corpusNote = fmt.Sprintf("\ncorpus: %d conversations", observeResult.discovered)
 	}
 	metadata := fmt.Sprintf("<!--\ncomposed: %s\nobserve: %s\nobservations: %d\nclusters: %d%s\n-->\n\n",
-		time.Now().UTC().Format("2006-01-02"),
-		mode,
+		composeTime.Format("2006-01-02"),
+		opts.Observe,
 		len(allObs),
 		len(clusters),
 		corpusNote,
@@ -293,7 +289,7 @@ func RunClustered(
 	muse = metadata + muse
 
 	// Overwrite with metadata prepended (same timestamp as initial save)
-	if err := store.PutMuse(ctx, composeTimestamp, muse); err != nil {
+	if err := store.PutMuse(ctx, composeTime.Format(time.RFC3339), muse); err != nil {
 		return nil, fmt.Errorf("failed to write muse with metadata: %w", err)
 	}
 
@@ -570,7 +566,7 @@ func observeAndParse(ctx context.Context, client inference.Client, conv *convers
 
 // Window parameters for windowed observation. Each window is small enough that
 // local signal survives without being washed out by distant mechanical turns.
-// Adjacent windows overlap so multi-turn reasoning arcs aren't split.
+// Adjacent windows overlap so multi-turn reasoning arcs stay intact.
 const (
 	windowSize   = 8 // turns per window
 	windowStride = 4 // advance between windows
@@ -711,7 +707,11 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 			fmt.Fprintf(os.Stderr, "      refine input %d chars exceeds %d, truncating\n",
 				len(candidates), maxRefineCandidateChars)
 		}
-		candidates = candidates[:maxRefineCandidateChars]
+		if cut := strings.LastIndex(candidates[:maxRefineCandidateChars], "\n"); cut > 0 {
+			candidates = candidates[:cut]
+		} else {
+			candidates = candidates[:maxRefineCandidateChars]
+		}
 	}
 	start := time.Now()
 	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
@@ -739,10 +739,10 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 
 // observeAdaptive runs windowed observation, trying woo (owner-only) first
 // on each window and falling back to default (with assistant) if woo finds
-// nothing. At most 2 calls per window. Woo-first captures more observations
-// (557 vs 492) because woo produces more per window when both methods find
-// signal. The fallback is cheap (NONE windows cost ~4 output tokens) and
-// catches windows where terse owner messages only make sense with assistant
+// nothing. At most 2 calls per window. Woo-first because woo produces more
+// observations per window when the window has signal; the fallback only fires
+// on empty windows. The fallback is cheap (NONE windows cost ~4 output tokens)
+// and catches windows where terse owner messages only make sense with assistant
 // context.
 func observeAdaptive(ctx context.Context, client inference.Client, conv *conversation.Conversation, verbose bool, humanOverrides map[string]bool) ([]Observation, inference.Usage, error) {
 	turns := extractTurns(conv, humanOverrides)
@@ -787,11 +787,11 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 			defaultInput := strings.Join(chunks, "\n")
 
 			attempts := []struct {
-				input  string
-				method string
+				input string
+				mode  ObserveMode
 			}{
-				{wooInput, "woo"},
-				{defaultInput, "default"},
+				{wooInput, ObserveWoo},
+				{defaultInput, ObserveDefault},
 			}
 
 			start := time.Now()
@@ -820,7 +820,7 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 				if obs != "" && !isEmpty(obs) {
 					if verbose {
 						fmt.Fprintf(os.Stderr, "      window[%d/%d] %d turns, %s → %d chars (%s, $%.4f)\n",
-							i+1, len(windows), len(w), a.method, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
+							i+1, len(windows), len(w), a.mode, len(obs), time.Since(start).Round(time.Millisecond), usage.Cost())
 					}
 					results[i] = windowResult{obs: obs, usage: winUsage}
 					return nil
@@ -859,7 +859,11 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 			fmt.Fprintf(os.Stderr, "      refine input %d chars exceeds %d, truncating\n",
 				len(candidates), maxRefineCandidateChars)
 		}
-		candidates = candidates[:maxRefineCandidateChars]
+		if cut := strings.LastIndex(candidates[:maxRefineCandidateChars], "\n"); cut > 0 {
+			candidates = candidates[:cut]
+		} else {
+			candidates = candidates[:maxRefineCandidateChars]
+		}
 	}
 	start := time.Now()
 	refined, usage, err := inference.Converse(ctx, client, prompts.Refine, candidates, inference.WithMaxTokens(4096))
@@ -2130,7 +2134,7 @@ func runCompose(
 	thesis string,
 	summaries []string,
 	noiseObs []string,
-) (string, string, inference.Usage, error) {
+) (string, time.Time, inference.Usage, error) {
 	var input strings.Builder
 	input.WriteString("## Thesis\n\n")
 	input.WriteString(thesis)
@@ -2158,14 +2162,14 @@ func runCompose(
 	muse, usage, err := inference.ConverseStream(ctx, llm, prompts.ComposeClustered, input.String(), stream.callback(), inference.WithThinking(inference.DefaultThinkingBudget))
 	stream.finish()
 	if err != nil {
-		return "", "", usage, err
+		return "", time.Time{}, usage, err
 	}
 	muse = stripCodeFences(muse)
 
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	if err := store.PutMuse(ctx, timestamp, muse); err != nil {
-		return "", "", usage, fmt.Errorf("failed to write muse: %w", err)
+	ts := time.Now().UTC()
+	if err := store.PutMuse(ctx, ts.Format(time.RFC3339), muse); err != nil {
+		return "", time.Time{}, usage, fmt.Errorf("failed to write muse: %w", err)
 	}
 
-	return muse, timestamp, usage, nil
+	return muse, ts, usage, nil
 }

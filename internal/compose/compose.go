@@ -59,14 +59,21 @@ const (
 	ObserveDefault ObserveMode = ""
 	// ObserveWoo (windowed owner-only) slides an 8-turn window across the
 	// conversation, strips assistant text from each window, and observes each
-	// window independently. Produces more distinct insights at higher grounding
-	// rate than the default, at lower token cost per window.
+	// window independently. Finds observations the default misses on long
+	// conversations, with higher grounding rate and lower per-window cost.
 	ObserveWoo ObserveMode = "woo"
 	// ObserveAdaptive tries woo first on each window. If woo returns NONE
 	// (no observations), falls back to default (with assistant) on the same
 	// window. At most two observe calls per window.
 	ObserveAdaptive ObserveMode = "adaptive"
 )
+
+func (m ObserveMode) String() string {
+	if m == "" {
+		return "default"
+	}
+	return string(m)
+}
 
 // BaseOptions contains fields shared across all compose strategies.
 type BaseOptions struct {
