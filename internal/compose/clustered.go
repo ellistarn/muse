@@ -288,9 +288,8 @@ func RunClustered(
 	)
 	muse = metadata + muse
 
-	// Overwrite with metadata prepended (same timestamp as initial save)
 	if err := store.PutMuse(ctx, composeTime.Format(time.RFC3339), muse); err != nil {
-		return nil, fmt.Errorf("failed to write muse with metadata: %w", err)
+		return nil, fmt.Errorf("failed to write muse: %w", err)
 	}
 
 	// ── DONE ────────────────────────────────────────────────────────────
@@ -2167,9 +2166,5 @@ func runCompose(
 	muse = stripCodeFences(muse)
 
 	ts := time.Now().UTC()
-	if err := store.PutMuse(ctx, ts.Format(time.RFC3339), muse); err != nil {
-		return "", time.Time{}, usage, fmt.Errorf("failed to write muse: %w", err)
-	}
-
 	return muse, ts, usage, nil
 }

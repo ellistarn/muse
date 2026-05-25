@@ -98,6 +98,9 @@ type Options struct {
 // from all observations. Observations are the source of truth for what has been
 // processed; there is no separate state file.
 func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inference.Client, opts Options) (*Result, error) {
+	if opts.Observe != "" && opts.Observe != ObserveDefault {
+		return nil, fmt.Errorf("--observe-mode %q requires --method clustering (map-reduce only supports default observation)", opts.Observe)
+	}
 	// Preload source metadata for import sources so isHumanSource can resolve them
 	humanOverrides := loadHumanSources(ctx, store)
 

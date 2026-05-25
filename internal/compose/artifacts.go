@@ -184,6 +184,7 @@ func DeleteObservations(ctx context.Context, store storage.Store, mode ...Observ
 // DeleteObservationsForSource removes default-mode observation artifacts for a
 // specific source. Only deletes keys at the expected depth to avoid colliding
 // with named-mode prefixes (e.g., a source named "woo" vs the woo mode).
+// TODO: accept ObserveMode when import gains --observe-mode support.
 func DeleteObservationsForSource(ctx context.Context, store storage.Store, source string) error {
 	prefix := fmt.Sprintf("observations/%s/", source)
 	keys, err := store.ListData(ctx, prefix)
