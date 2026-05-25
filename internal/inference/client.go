@@ -36,9 +36,8 @@ func IsTruncated(err error) bool {
 }
 
 // ContextSizeError indicates the request prompt did not fit in the model's
-// context window. Distinct from TruncatedError, which is about output budget.
-// Pathological windows in compose/observe pipelines should usually skip on
-// this rather than abort the whole conversation.
+// context window. Distinct from TruncatedError (output budget exceeded),
+// ContextSizeError means the input itself was too large to submit.
 type ContextSizeError struct {
 	PromptTokens int // tokens in the rejected prompt, if known (0 otherwise)
 	ContextSize  int // server's configured context window, if known (0 otherwise)

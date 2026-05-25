@@ -707,7 +707,7 @@ func observeWoo(ctx context.Context, client inference.Client, conv *conversation
 			fmt.Fprintf(os.Stderr, "      refine input %d chars exceeds %d, truncating\n",
 				len(candidates), maxRefineCandidateChars)
 		}
-		if cut := strings.LastIndex(candidates[:maxRefineCandidateChars], "\n"); cut > 0 {
+		if cut := strings.LastIndex(candidates[:maxRefineCandidateChars], "\n\n"); cut > 0 {
 			candidates = candidates[:cut]
 		} else {
 			candidates = candidates[:maxRefineCandidateChars]
@@ -859,7 +859,7 @@ func observeAdaptive(ctx context.Context, client inference.Client, conv *convers
 			fmt.Fprintf(os.Stderr, "      refine input %d chars exceeds %d, truncating\n",
 				len(candidates), maxRefineCandidateChars)
 		}
-		if cut := strings.LastIndex(candidates[:maxRefineCandidateChars], "\n"); cut > 0 {
+		if cut := strings.LastIndex(candidates[:maxRefineCandidateChars], "\n\n"); cut > 0 {
 			candidates = candidates[:cut]
 		} else {
 			candidates = candidates[:maxRefineCandidateChars]

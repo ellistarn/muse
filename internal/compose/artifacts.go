@@ -109,7 +109,22 @@ func ListObservations(ctx context.Context, store storage.Store, mode ...ObserveM
 	if len(mode) > 0 {
 		m = mode[0]
 	}
-	return listArtifacts(ctx, store, observationDirPrefix(m))
+	results, err := listArtifacts(ctx, store, observationDirPrefix(m))
+	if err != nil {
+		return nil, err
+	}
+	// Default mode shares the "observations/" prefix with named modes.
+	// Filter out named-mode keys that have an extra path segment.
+	if m == "" || m == ObserveDefault {
+		filtered := results[:0]
+		for _, r := range results {
+			if !strings.Contains(r.ConversationID, "/") {
+				filtered = append(filtered, r)
+			}
+		}
+		results = filtered
+	}
+	return results, nil
 }
 
 // CountObservationItems returns the total number of discrete observation items
