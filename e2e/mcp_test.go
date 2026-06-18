@@ -393,3 +393,82 @@ func TestMCP_NoThinkingOmitsTag(t *testing.T) {
 		t.Errorf("response = %q, want %q", text, "Plain answer.")
 	}
 }
+
+// captureSession is a minimal ClientSession whose NotificationChannel is a
+// buffered channel the test owns. Registering it on the server and injecting
+// it into the request context lets the test observe what the server actually
+// pushes through its real notification routing — one layer below the client,
+// which the in-process client transport cannot observe (it never drains the
+// session channel).
+type captureSession struct {
+	id   string
+	ch   chan mcp.JSONRPCNotification
+	init bool
+}
+
+func (s *captureSession) SessionID() string                                   { return s.id }
+func (s *captureSession) NotificationChannel() chan<- mcp.JSONRPCNotification { return s.ch }
+func (s *captureSession) Initialize()                                         { s.init = true }
+func (s *captureSession) Initialized() bool                                   { return s.init }
+
+// TestMCP_KeepaliveDelivered_Regression verifies the timeout fix end to end at
+// the server boundary: invoking the ask tool with a progress token causes the
+// server to actually deliver a notifications/progress (NOT a log notification)
+// carrying that token. This guards the regression where the keepalive was sent
+// as notifications/message, which opencode ignores for timeout resets, so long
+// inference calls were aborted. It exercises the server's real notification
+// routing, which the in-process client transport cannot (it drops server→client
+// notifications by never draining the session channel).
+func TestMCP_KeepaliveDelivered_Regression(t *testing.T) {
+	llm := &thinkingLLM{thinking: "Let me think...", response: "Answer."}
+	m := museinternal.New(llm, "test document")
+	srv := musemcp.NewServer(m)
+
+	sess := &captureSession{id: "test-session", ch: make(chan mcp.JSONRPCNotification, 16)}
+	sess.Initialize()
+	if err := srv.RegisterSession(context.Background(), sess); err != nil {
+		t.Fatalf("RegisterSession: %v", err)
+	}
+	ctx := srv.WithContext(context.Background(), sess)
+
+	req, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "ask",
+			"arguments": map[string]any{"question": "think please"},
+			"_meta":     map[string]any{"progressToken": "tok-xyz"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	srv.HandleMessage(ctx, req)
+
+	// Drain everything the server pushed and find the progress notifications.
+	var progress []mcp.JSONRPCNotification
+	for {
+		select {
+		case n := <-sess.ch:
+			if n.Method == "notifications/message" {
+				t.Errorf("server sent a log notification as keepalive; clients do not reset timeouts on these")
+			}
+			if n.Method == "notifications/progress" {
+				progress = append(progress, n)
+			}
+		default:
+			goto done
+		}
+	}
+done:
+	if len(progress) == 0 {
+		t.Fatal("expected the server to deliver at least one notifications/progress, got none")
+	}
+	for _, n := range progress {
+		if n.Params.AdditionalFields["progressToken"] != "tok-xyz" {
+			t.Errorf("progressToken = %v, want tok-xyz", n.Params.AdditionalFields["progressToken"])
+		}
+	}
+}
