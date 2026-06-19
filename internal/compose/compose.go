@@ -51,6 +51,30 @@ type HitMiss struct {
 	Miss int
 }
 
+// ObserveMode controls the observation strategy for conversations.
+type ObserveMode string
+
+const (
+	// ObserveDefault compresses the full conversation and observes in chunks.
+	ObserveDefault ObserveMode = ""
+	// ObserveWoo (windowed owner-only) slides an 8-turn window across the
+	// conversation, strips assistant text from each window, and observes each
+	// window independently. Finds observations the default misses on long
+	// conversations, with higher grounding rate and lower per-window cost.
+	ObserveWoo ObserveMode = "woo"
+	// ObserveAdaptive tries woo first on each window. If woo returns NONE
+	// (no observations), falls back to default (with assistant) on the same
+	// window. At most two observe calls per window.
+	ObserveAdaptive ObserveMode = "adaptive"
+)
+
+func (m ObserveMode) String() string {
+	if m == "" {
+		return "default"
+	}
+	return string(m)
+}
+
 // BaseOptions contains fields shared across all compose strategies.
 type BaseOptions struct {
 	// Reobserve ignores persisted observations and re-observes all conversations.
@@ -59,6 +83,8 @@ type BaseOptions struct {
 	Limit int
 	// Verbose enables per-item progress logging.
 	Verbose bool
+	// Observe controls the observation strategy.
+	Observe ObserveMode
 }
 
 // Options configures a map-reduce compose run.
@@ -72,6 +98,9 @@ type Options struct {
 // from all observations. Observations are the source of truth for what has been
 // processed; there is no separate state file.
 func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inference.Client, opts Options) (*Result, error) {
+	if opts.Observe != "" && opts.Observe != ObserveDefault {
+		return nil, fmt.Errorf("--observe-mode %q requires --method clustering (map-reduce only supports default observation)", opts.Observe)
+	}
 	// Preload source metadata for import sources so isHumanSource can resolve them
 	humanOverrides := loadHumanSources(ctx, store)
 
@@ -81,7 +110,7 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 		return nil, fmt.Errorf("failed to list conversations: %w", err)
 	}
 
-	existingObs, err := ListObservations(ctx, store)
+	existingObs, err := ListObservations(ctx, store, opts.Observe)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list observations: %w", err)
 	}
@@ -92,12 +121,12 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 
 	// If reprocessing, clear all existing observations
 	if opts.Reobserve {
-		if err := DeleteObservations(ctx, store); err != nil {
+		if err := DeleteObservations(ctx, store, opts.Observe); err != nil {
 			return nil, fmt.Errorf("failed to clear observations: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "Cleared observations/")
 		// Rebuild observations set after deletion
-		existingObs, err = ListObservations(ctx, store)
+		existingObs, err = ListObservations(ctx, store, opts.Observe)
 		if err != nil {
 			return nil, fmt.Errorf("failed to re-list observations: %w", err)
 		}
@@ -205,8 +234,8 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 
 	remaining := totalPending - len(pending)
 
-	// Learn from ALL observations (not just new ones)
-	allObservations, err := loadAllObservations(ctx, store)
+	// Learn from all observations in this mode (not just new ones)
+	allObservations, err := loadAllObservations(ctx, store, opts.Observe)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load observations: %w", err)
 	}
@@ -233,8 +262,8 @@ func Run(ctx context.Context, store storage.Store, observeLLM, learnLLM inferenc
 
 // LearnOnly re-runs only the learn phase using persisted observations.
 // Use this to recompose the muse with improved techniques without re-observing.
-func LearnOnly(ctx context.Context, store storage.Store, learnLLM inference.Client) (*Result, error) {
-	allObservations, err := loadAllObservations(ctx, store)
+func LearnOnly(ctx context.Context, store storage.Store, learnLLM inference.Client, mode ...ObserveMode) (*Result, error) {
+	allObservations, err := loadAllObservations(ctx, store, mode...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load observations: %w", err)
 	}
@@ -257,14 +286,14 @@ func LearnOnly(ctx context.Context, store storage.Store, learnLLM inference.Clie
 
 // loadAllObservations fetches every persisted observation from storage and
 // returns them as text strings (for the map-reduce learn step).
-func loadAllObservations(ctx context.Context, store storage.Store) ([]string, error) {
-	convList, err := ListObservations(ctx, store)
+func loadAllObservations(ctx context.Context, store storage.Store, mode ...ObserveMode) ([]string, error) {
+	convList, err := ListObservations(ctx, store, mode...)
 	if err != nil {
 		return nil, err
 	}
 	var observations []string
 	for _, sc := range convList {
-		obs, err := GetObservations(ctx, store, sc.Source, sc.ConversationID)
+		obs, err := GetObservations(ctx, store, sc.Source, sc.ConversationID, mode...)
 		if err != nil {
 			return nil, fmt.Errorf("get observation %s/%s: %w", sc.Source, sc.ConversationID, err)
 		}
