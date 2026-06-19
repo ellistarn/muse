@@ -35,6 +35,29 @@ func IsTruncated(err error) bool {
 	return errors.As(err, &te)
 }
 
+// ContextSizeError indicates the request prompt did not fit in the model's
+// context window. Distinct from TruncatedError, which is about output budget.
+// Pathological windows in compose/observe pipelines should usually skip on
+// this rather than abort the whole conversation.
+type ContextSizeError struct {
+	PromptTokens int // tokens in the rejected prompt, if known (0 otherwise)
+	ContextSize  int // server's configured context window, if known (0 otherwise)
+}
+
+func (e *ContextSizeError) Error() string {
+	if e.PromptTokens > 0 && e.ContextSize > 0 {
+		return fmt.Sprintf("prompt (%d tokens) exceeds context size (%d tokens)", e.PromptTokens, e.ContextSize)
+	}
+	return "prompt exceeds context size"
+}
+
+// IsContextSize reports whether err indicates the prompt did not fit in the
+// model's context window.
+func IsContextSize(err error) bool {
+	var ce *ContextSizeError
+	return errors.As(err, &ce)
+}
+
 // Client is the inference interface. Providers implement multi-turn
 // conversation with optional streaming. Single-turn callers use the
 // Converse/ConverseStream free functions.

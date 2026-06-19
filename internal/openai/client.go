@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/openai/openai-go"
@@ -107,6 +109,9 @@ func (c *Client) ConverseMessages(ctx context.Context, system string, messages [
 	err := throttle.Retry(ctx, c.limiter, throttle.DefaultRetryConfig(), isThrottled, func() error {
 		completion, err := c.client.Chat.Completions.New(ctx, params)
 		if err != nil {
+			if cse, ok := classifyContextSizeError(err); ok {
+				return cse
+			}
 			return fmt.Errorf("openai chat.completions.new: %w", err)
 		}
 
@@ -167,6 +172,9 @@ func (c *Client) ConverseMessagesStream(ctx context.Context, system string, mess
 		}
 
 		if err := stream.Err(); err != nil {
+			if cse, ok := classifyContextSizeError(err); ok {
+				return cse
+			}
 			return fmt.Errorf("openai stream: %w", err)
 		}
 
@@ -186,6 +194,41 @@ func isThrottled(err error) bool {
 	return strings.Contains(err.Error(), fmt.Sprintf("%d", http.StatusTooManyRequests)) ||
 		strings.Contains(err.Error(), "rate_limit")
 }
+
+// classifyContextSizeError detects errors indicating the prompt did not fit
+// the model's context window and returns a typed inference.ContextSizeError.
+// Recognized patterns:
+//   - llama.cpp: "exceeds the available context size" with type "exceed_context_size_error"
+//     and JSON fields n_prompt_tokens / n_ctx
+//   - OpenAI cloud: "context_length_exceeded" or "maximum context length"
+//
+// Returns (nil, false) if the error doesn't match any known context-size pattern.
+func classifyContextSizeError(err error) (*inference.ContextSizeError, bool) {
+	msg := err.Error()
+	if !strings.Contains(msg, "exceed_context_size") &&
+		!strings.Contains(msg, "exceeds the available context size") &&
+		!strings.Contains(msg, "context_length_exceeded") &&
+		!strings.Contains(msg, "maximum context length") {
+		return nil, false
+	}
+	cse := &inference.ContextSizeError{}
+	if m := contextSizePromptRe.FindStringSubmatch(msg); len(m) == 2 {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			cse.PromptTokens = n
+		}
+	}
+	if m := contextSizeCtxRe.FindStringSubmatch(msg); len(m) == 2 {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			cse.ContextSize = n
+		}
+	}
+	return cse, true
+}
+
+var (
+	contextSizePromptRe = regexp.MustCompile(`"n_prompt_tokens"\s*:\s*(\d+)`)
+	contextSizeCtxRe    = regexp.MustCompile(`"n_ctx"\s*:\s*(\d+)`)
+)
 
 func (c *Client) buildParams(system string, messages []inference.Message, opts inference.ConverseOptions) openai.ChatCompletionNewParams {
 	maxTokens := int64(inference.DefaultMaxTokens)
